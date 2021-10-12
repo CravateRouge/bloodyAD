@@ -10,7 +10,7 @@ def main():
     #Main parameters
     authentication_group = parser.add_argument_group('AD authentication options')
     authentication_group.add_argument('-k', '--kerberos', action='store_true', default=False)
-    authentication_group.add_argument('url', help='LDAP URL: ldap://my.dc.local or ldaps://172.16.1.3')
+    authentication_group.add_argument('url', help='LDAP URL: ldap://my.dc.local or ldaps://172.16.1.3\ntest')
     authentication_group.add_argument('domain')
     authentication_group.add_argument('username', help='Username used with NTLM')
     authentication_group.add_argument('password', help='Cleartext password or LMHASH:NTHASH')
@@ -28,14 +28,20 @@ def main():
     database_group.add_argument('-dp', '--database-password', help='Neo4j password to use')
 
     #LDAP parameters
-    ldap_parser = subparsers.add_parser('manual', help='')
-    ldap_parser.add_argument('function', help='Function to call with args following it:\naddUserToGroup <member> <group>\naddDomainSync <sAMAccountName>')
+    ldap_parser = subparsers.add_parser('manual', help='',formatter_class=argparse.RawTextHelpFormatter)
+    ldap_parser.add_argument('function', help="Function to call with args following it:\n"
+    "\t addUserToGroup <member> <group>\n"
+    "\t addDomainSync <sAMAccountName>\n"
+    "\t setShadowCredentials <sAMAccountName>\n"
+    "\t changePassword <sAMAccountName> <new_password>")
     ldap_parser.add_argument('params', help='Function parameters', nargs='+')
 
     args = parser.parse_args()
 
     conn = ldap.ldapConnect(args.url, args.domain, args.username, args.password, args.kerberos)
-    getattr(ldap,args.function)(conn, args.params)
+
+    if hasattr(args, 'function'):
+        getattr(ldap,args.function)(conn, args.params)
         
 
 if __name__ == '__main__':

