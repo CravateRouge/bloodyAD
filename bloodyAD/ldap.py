@@ -59,6 +59,21 @@ def addUserToGroup(conn, member, group):
     group_dn = getDn(conn, group)
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
 
+
+#def addForeignUserToGroup(conn, user_sid, group_dn):
+def addForeignUserToGroup(conn, params):
+    """
+    Add a foreign principals (coming from a trusted domain) to a group
+    Args: 
+        foreign user sid
+        group dn in which to add the foreign user
+    """
+    user_sid = params[0]
+    group_dn = params[1]
+    magic_user_dn = f"<SID={user_sid}>"
+    addMembersToGroups.ad_add_members_to_groups(conn, magic_user_dn, group_dn, raise_error=True)
+
+
 def addDomainSync(conn, params):
     # Query for the sid of our target user
     sAMAccountName = params[0]
