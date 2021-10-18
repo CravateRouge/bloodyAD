@@ -61,23 +61,20 @@ def addUserToGroup(conn, member, group):
 
 
 #def addForeignUserToGroup(conn, user_sid, group_dn):
-def addForeignUserToGroup(conn, params):
+def addForeignUserToGroup(conn, user_sid, group_dn):
     """
     Add a foreign principals (coming from a trusted domain) to a group
     Args: 
         foreign user sid
         group dn in which to add the foreign user
     """
-    user_sid = params[0]
-    group_dn = params[1]
     magic_user_dn = f"<SID={user_sid}>"
     addMembersToGroups.ad_add_members_to_groups(conn, magic_user_dn, group_dn, raise_error=True)
 
 
-def addDomainSync(conn, params):
-    # Query for the sid of our target user
-    sAMAccountName = params[0]
+def addDomainSync(conn, sAMAccountName):
 
+    # Query for the sid of our target user
     conn.search(conn.server.info.other['rootDomainNamingContext'], '(sAMAccountName=%s)' % sAMAccountName, attributes=['objectSid'])
     sid_object = ldaptypes.LDAP_SID(conn.entries[0]['objectSid'].raw_values[0])
     user_sid = sid_object.formatCanonical()
