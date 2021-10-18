@@ -30,19 +30,22 @@ def main():
     #LDAP parameters
     ldap_parser = subparsers.add_parser('manual', help='',formatter_class=argparse.RawTextHelpFormatter)
     ldap_parser.add_argument('function', help="Function to call with args following it:\n"
+    # TODO Give DN if sAMAccountName doesn't work
     "\t addUserToGroup <member> <group>\n"
     "\t addDomainSync <sAMAccountName>\n"
     "\t setShadowCredentials <sAMAccountName>\n"
-    "\t changePassword <sAMAccountName> <new_password>")
+    "\t changePassword <sAMAccountName> <new_password>\n"
+    "\t rpcChangePassword <sAMAccountName> <new_password> <dc_ip>")
     ldap_parser.add_argument('params', help='Function parameters', nargs='+')
 
     args = parser.parse_args()
 
-    conn = ldap.ldapConnect(args.url, args.domain, args.username, args.password, args.kerberos)
-
-    if hasattr(args, 'function'):
-        getattr(ldap,args.function)(conn, args.params)
+    if args.function == 'rpcChangePassword':
+        ldap.rpcChangePassword(args.domain, args.username, args.password, args.params[2], args.params)
+    else:
+        conn = ldap.ldapConnect(args.url, args.domain, args.username, args.password, args.kerberos)
+        if hasattr(args, 'function'):
+            getattr(ldap,args.function)(conn, args.params)
         
-
 if __name__ == '__main__':
     main()

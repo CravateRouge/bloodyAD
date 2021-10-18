@@ -30,20 +30,27 @@ def getDn(conn, sAMAccountName):
     try:
         return conn.response[0]['dn']
     except IndexError:
-        raise Exception('User not found in LDAP: %s' % samname)
+        raise Exception('User not found in LDAP: %s' % sAMAccountName)
     return
 
 def ldapConnect(url, domain, username, password, doKerberos):
     # Connect to LDAP
     s = ldap3.Server(url, get_info=ldap3.DSA)
-    c= ldap3.Connection(s, user='%s\\%s' % (domain,username), password=password, authentication=ldap3.NTLM)
+
+    if doKerberos:
+        c = ldap3.Connection(s, authentication=ldap3.SASL, sasl_mechanism=ldap3.KERBEROS, sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,))
+    else:
+        c = ldap3.Connection(s, user='%s\\%s' % (domain,username), password=password, authentication=ldap3.NTLM)
+    
     c.bind()
     return c
 
 def writeGpoDacl():
 	return
+
 def addComputer():
 	return
+
 def addUser():
 	return
 
@@ -99,6 +106,61 @@ def changePassword(conn, params):
         else:
             raise Exception('The server returned an error: ' + conn.result['message'])
 
+from impacket.dcerpc.v5 import samr, transport
+
+def cryptPassword(session_key, password):
+
+    try:
+        from Cryptodome.Cipher import ARC4
+    except Exception:
+        print("Warning: You don't have any crypto installed. You need pycryptodomex")
+        print("See https://pypi.org/project/pycryptodomex/")
+
+    from impacket import crypto
+    
+    sam_user_pass = samr.SAMPR_USER_PASSWORD()
+    encoded_pass = password.encode('utf-16le')
+    plen = len(encoded_pass)
+    sam_user_pass['Buffer'] = b'A'*(512-plen) + encoded_pass
+    sam_user_pass['Length'] = plen
+    pwdBuff = sam_user_pass.getData()
+
+    rc4 = ARC4.new(session_key)
+    encBuf = rc4.encrypt(pwdBuff)
+    
+    sam_user_pass_enc = samr.SAMPR_ENCRYPTED_USER_PASSWORD()
+    sam_user_pass_enc['Buffer'] = encBuf
+    return sam_user_pass_enc
+
+def rpcChangePassword(domain, username, password, hostname, params):
+    target = params[0]
+    new_pass = params[1]
+
+    rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
+    rpctransport.set_credentials(username, password, domain)
+    dce = rpctransport.get_dce_rpc()
+    from impacket.dcerpc.v5 import rpcrt
+    dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+    dce.connect()
+    dce.bind(samr.MSRPC_UUID_SAMR)
+
+    server_handle = samr.hSamrConnect(dce, hostname + '\x00')['ServerHandle']
+    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, domain)['DomainId']
+    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']   
+    userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))['RelativeIds']['Element'][0]
+    opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
+
+    req = samr.SamrSetInformationUser2()
+    req['UserHandle'] = opened_user['UserHandle']
+    req['UserInformationClass'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
+    req['Buffer'] = samr.SAMPR_USER_INFO_BUFFER()
+    req['Buffer']['tag'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
+    req['Buffer']['Internal5']['UserPassword'] = cryptPassword(b'SystemLibraryDTC', new_pass)
+    req['Buffer']['Internal5']['PasswordExpired'] = 0
+
+    resp = dce.request(req)
+    resp.dump()
+
 def setDontreqpreauth():
 	return
 def setRbcd():
@@ -129,6 +191,7 @@ def setShadowCredentials(conn, params):
         return
     try:
         new_values = results['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
+        print(new_values)
         print("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
         conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
         if conn.result['result'] == 0:
