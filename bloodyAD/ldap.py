@@ -54,9 +54,9 @@ def addComputer():
 def addUser():
 	return
 
-def addUserToGroup(conn, params):
-    member_dn = getDn(conn, params[0])
-    group_dn = getDn(conn, params[1])
+def addUserToGroup(conn, member, group):
+    member_dn = getDn(conn, member)
+    group_dn = getDn(conn, group)
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
 
 def addDomainSync(conn, params):
@@ -90,9 +90,8 @@ def addDomainSync(conn, params):
     data = secDesc.getData()
     conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
-def changePassword(conn, params):
-    target = params[0]
-    new_pass = params[1]
+def changePassword(conn, target, new_pass):
+
     target_dn = getDn(conn, target)
 
     modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
@@ -132,9 +131,7 @@ def cryptPassword(session_key, password):
     sam_user_pass_enc['Buffer'] = encBuf
     return sam_user_pass_enc
 
-def rpcChangePassword(domain, username, password, hostname, params):
-    target = params[0]
-    new_pass = params[1]
+def rpcChangePassword(domain, username, password, hostname, target, new_pass):
 
     rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
     rpctransport.set_credentials(username, password, domain)
@@ -165,13 +162,12 @@ def setDontreqpreauth():
 	return
 def setRbcd():
 	return
-def setShadowCredentials(conn, params):
+def setShadowCredentials(conn, sAMAccountName):
 
     ShadowCredentialsOutfilePath = None
     ShadowCredentialsExportType = 'PEM'
     ShadowCredentialsPFXPassword = None
 
-    sAMAccountName = params[0]
     target_dn = getDn(conn, sAMAccountName)
     print("Generating certificate")
     certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
