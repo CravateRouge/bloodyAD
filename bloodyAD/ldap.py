@@ -1,3 +1,4 @@
+import logging
 import ldap3, binascii, impacket, random, string
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword
 from impacket.examples.ntlmrelayx.attacks import ldapattack
@@ -25,13 +26,47 @@ def create_object_ace(privguid, sid, accesstype):
     nace['Ace'] = acedata
     return nace
 
-def getDn(conn, sAMAccountName):
-    conn.search(conn.server.info.other['rootDomainNamingContext'], '(sAMAccountName=%s)' % sAMAccountName)
-    try:
-        return conn.response[0]['dn']
-    except IndexError:
-        raise Exception('User not found in LDAP: %s' % sAMAccountName)
-    return
+
+def resolvDN(conn, identity):
+    """
+    Return the DN for the object based on the parameters identity
+    The parameter identity can be:
+      - a DN, in which case it it not validated and returned as is
+      - a sAMAccountName
+      - a GUID
+      - a SID
+    """
+
+    if "dc=" in identity.lower():
+        # identity is a DN, return as is
+        # We do not try to validate it because it could be from another trusted domain
+        return identity
+    
+    naming_context = conn.server.info.other['defaultNamingContext']
+    #print(naming_context)
+    #print(conn.server.info)
+    #naming_context = 'DC=AXA-BE,DC=INTRAXA'
+    ldap_filter = f'(sAMAccountName={identity})'
+    conn.search(naming_context, ldap_filter)
+
+    if len(conn.response) < 1:
+        # TODO: Create a specific exception type
+        raise Exception(f'User not found in LDAP: {identity}')
+
+    if len(conn.response) > 1:
+        # TODO: put the error message in a custom exception
+        if len(conn.response) <= 20:
+            print("Entries found:")
+            for entry in conn.response:
+                print(entry['dn'])
+        else:
+            print("More than 20 entries in LDAP match {identity}")
+        raise Exception(f'Too many results found in LDAP for {identity}')
+
+    res = conn.response[0]['dn']
+    print(res)
+    return res
+
 
 def ldapConnect(url, domain, username, password, doKerberos):
     # Connect to LDAP
@@ -55,19 +90,19 @@ def addUser():
 	return
 
 def addUserToGroup(conn, member, group):
-    member_dn = getDn(conn, member)
-    group_dn = getDn(conn, group)
+    member_dn = resolvDN(conn, member)
+    group_dn = resolvDN(conn, group)
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
 
 
-#def addForeignUserToGroup(conn, user_sid, group_dn):
-def addForeignUserToGroup(conn, user_sid, group_dn):
+def addForeignObjectToGroup(conn, user_sid, group_dn):
     """
-    Add a foreign principals (coming from a trusted domain) to a group
+    Add foreign principals (users or groups), coming from a trusted domain, to a group
     Args: 
-        foreign user sid
-        group dn in which to add the foreign user
+        foreign object sid
+        group dn in which to add the foreign object
     """
+    # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
     magic_user_dn = f"<SID={user_sid}>"
     addMembersToGroups.ad_add_members_to_groups(conn, magic_user_dn, group_dn, raise_error=True)
 
@@ -104,7 +139,7 @@ def addDomainSync(conn, sAMAccountName):
 
 def changePassword(conn, target, new_pass):
 
-    target_dn = getDn(conn, target)
+    target_dn = resolvDN(conn, target)
 
     modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
     if conn.result['result'] == 0:
@@ -180,7 +215,7 @@ def setShadowCredentials(conn, sAMAccountName):
     ShadowCredentialsExportType = 'PEM'
     ShadowCredentialsPFXPassword = None
 
-    target_dn = getDn(conn, sAMAccountName)
+    target_dn = resolvDN(conn, sAMAccountName)
     print("Generating certificate")
     certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
     print("Certificate generated")
