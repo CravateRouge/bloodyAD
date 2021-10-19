@@ -9,6 +9,44 @@ from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
+
+class BloodyError(Exception):
+    pass
+
+
+class LDAPError(BloodyError):
+    pass
+
+
+class NoResultError(LDAPError):
+    
+    def __init__(self, search_base, ldap_filter):
+        self.filter = ldap_filter
+        self.base = search_base
+        self.message = f'No object found in {self.base} with filter: {ldap_filter}'
+        super().__init__(self.message)
+
+
+class TooManyResultsError(LDAPError):
+
+    def __init__(self, search_base, ldap_filter, entries):
+        self.filter = ldap_filter
+        self.base = search_base
+        self.limit = 10
+        self.entries = entries
+        
+        if len(self.entries) <= self.limit:
+            self.results = "\n".join(entry['dn'] for entry in entries)
+            self.message = f'{len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
+            self.message += f'Please put the full target DN'
+            self.message += f'Result of query: \n{self.results}'
+        else:
+            self.message = f"More than {self.limit} entries in {self.base} match {self.filter}"
+            self.message += f'Please put the full target DN'
+
+        super().__init__(self.message)
+
+
 # Create an object ACE with the specified privguid and our sid
 # accesstype should be specified as either a write property flag or access control (for extended attributes)
 def create_object_ace(privguid, sid, accesstype):
@@ -42,26 +80,15 @@ def resolvDN(conn, identity):
         # We do not try to validate it because it could be from another trusted domain
         return identity
     
-    naming_context = conn.server.info.other['defaultNamingContext']
-    #print(naming_context)
-    #print(conn.server.info)
-    #naming_context = 'DC=AXA-BE,DC=INTRAXA'
+    naming_context = conn.server.info.other['defaultNamingContext'][0]
     ldap_filter = f'(sAMAccountName={identity})'
     conn.search(naming_context, ldap_filter)
 
     if len(conn.response) < 1:
-        # TODO: Create a specific exception type
-        raise Exception(f'User not found in LDAP: {identity}')
+        raise NoResultError(naming_context, ldap_filter)
 
     if len(conn.response) > 1:
-        # TODO: put the error message in a custom exception
-        if len(conn.response) <= 20:
-            print("Entries found:")
-            for entry in conn.response:
-                print(entry['dn'])
-        else:
-            print("More than 20 entries in LDAP match {identity}")
-        raise Exception(f'Too many results found in LDAP for {identity}')
+        raise TooManyResultsError(naming_context, ldap_filter, conn.response)
 
     res = conn.response[0]['dn']
     print(res)
