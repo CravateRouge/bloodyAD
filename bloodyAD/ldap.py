@@ -36,6 +36,7 @@ class TooManyResultsError(LDAPError):
         self.entries = entries
         
         if len(self.entries) <= self.limit:
+            print(self.entries)
             self.results = "\n".join(entry['dn'] for entry in entries)
             self.message = f'{len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
             self.message += f'Please put the full target DN\n'
@@ -90,17 +91,30 @@ def resolvDN(conn, identity):
         # By default, we assume identity is a sam account name
         ldap_filter = f'(sAMAccountName={identity})'
 
-    naming_context = conn.server.info.other['defaultNamingContext'][0]
+    naming_context = getDefaultNamingContext(conn)
     conn.search(naming_context, ldap_filter)
 
-    if len(conn.response) < 1:
+    entries = [e for e in conn.response if e.get('type', '') == 'searchResEntry']
+
+    if len(entries) < 1:
         raise NoResultError(naming_context, ldap_filter)
 
-    if len(conn.response) > 1:
-        raise TooManyResultsError(naming_context, ldap_filter, conn.response)
+    if len(entries) > 1:
+        raise TooManyResultsError(naming_context, ldap_filter, entries)
 
-    res = conn.response[0]['dn']
+    res = entries[0]['dn']
     return res
+
+
+def getDefaultNamingContext(conn):
+    naming_context = conn.server.info.other['defaultNamingContext'][0]
+    return naming_context
+
+
+def getGroupMembers(conn, identity):
+    group_dn = resolvDN(conn, identity)
+    conn.search(group_dn, '(objectClass=group)', attributes='member')
+    print(conn.response[0]['attributes']['member'])
 
 
 def ldapConnect(url, domain, username, password, doKerberos):
