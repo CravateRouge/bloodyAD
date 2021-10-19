@@ -80,8 +80,14 @@ def resolvDN(conn, identity):
         # We do not try to validate it because it could be from another trusted domain
         return identity
     
+    if "s-1-" in identity.lower():
+        # We assume identity is an SID
+        ldap_filter = f'(objectSid={identity})'
+    else:
+        # We assume identity is a sam account name
+        ldap_filter = f'(sAMAccountName={identity})'
+
     naming_context = conn.server.info.other['defaultNamingContext'][0]
-    ldap_filter = f'(sAMAccountName={identity})'
     conn.search(naming_context, ldap_filter)
 
     if len(conn.response) < 1:
