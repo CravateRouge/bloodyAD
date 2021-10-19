@@ -1,6 +1,6 @@
 import logging
 import ldap3, binascii, impacket, random, string
-from ldap3.extend.microsoft import addMembersToGroups, modifyPassword
+from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
 from impacket.examples.ntlmrelayx.attacks import ldapattack
 from impacket.examples.ntlmrelayx.utils import config
 from impacket.ldap import ldaptypes
@@ -38,7 +38,7 @@ class TooManyResultsError(LDAPError):
         if len(self.entries) <= self.limit:
             self.results = "\n".join(entry['dn'] for entry in entries)
             self.message = f'{len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
-            self.message += f'Please put the full target DN'
+            self.message += f'Please put the full target DN\n'
             self.message += f'Result of query: \n{self.results}'
         else:
             self.message = f"More than {self.limit} entries in {self.base} match {self.filter}"
@@ -124,10 +124,17 @@ def addComputer():
 def addUser():
 	return
 
+
 def addUserToGroup(conn, member, group):
     member_dn = resolvDN(conn, member)
     group_dn = resolvDN(conn, group)
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
+
+
+def delUserFromGroup(conn, member, group):
+    member_dn = resolvDN(conn, member)
+    group_dn = resolvDN(conn, group)
+    removeMembersFromGroups.ad_remove_members_from_groups(conn, member_dn, group_dn, True, raise_error=True)
 
 
 def addForeignObjectToGroup(conn, user_sid, group_dn):
