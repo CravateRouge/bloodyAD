@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
 
     if args.function == 'rpcChangePassword':
-        ldap.rpcChangePassword(args.domain, args.username, args.password, args.host, args.params)
+        ldap.rpcChangePassword(args.domain, args.username, args.password, args.host, *args.params)
     else:
         url = args.scheme + '://' + args.host
         conn = ldap.ldapConnect(url, args.domain, args.username, args.password, args.kerberos)

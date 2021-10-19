@@ -10,6 +10,10 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 
+logger = logging.getLogger()
+logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+
+
 class BloodyError(Exception):
     pass
 
@@ -112,9 +116,74 @@ def getDefaultNamingContext(conn):
 
 
 def getGroupMembers(conn, identity):
+    """
+    Return the list of member for a group whose identity is given as parameter
+    """
     group_dn = resolvDN(conn, identity)
     conn.search(group_dn, '(objectClass=group)', attributes='member')
     print(conn.response[0]['attributes']['member'])
+
+
+def getObjectAttributes(conn, identity):
+    """
+    Fetch LDAP attributes for the identity provided
+    """
+    dn = resolvDN(conn, identity)
+    conn.search(dn, '(objectClass=*)', attributes='*')
+    print(conn.response[0]['attributes'])
+
+
+def addUser(conn, sAMAccountName, ou=None):
+    """
+    Add a new user in the LDAP database
+    By default the user object is put in the OU Users
+    This can be changed with the ou parameter
+    """
+
+    # TODO: Check that the user is not already present in AD
+    #user_dn = resolvDN(conn, sAMAccountName)
+    #print(user_dn)
+
+    if ou:
+        user_dn = f"cn={sAMAccountName},{ou}"
+    else:
+        naming_context = getDefaultNamingContext(conn)
+        user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
+
+    print(user_dn)
+    user_cls = ['top', 'person', 'organizationalPerson', 'user']
+    attr = {'objectClass':  user_cls}
+    #attr["cn"] = sAMAccountName
+    attr["distinguishedName"] = user_dn
+    attr["sAMAccountName"] = sAMAccountName
+    attr["userAccountControl"] = 544
+    #attr["sn"] = sAMAccountName
+    #attr["name"] = sAMAccountName
+    #attr["displayName"] = sAMAccountName
+    #attr["givenName"] = sAMAccountName
+    #attr["userPrincipalName"] = sAMAccountName
+
+    # If ldaps -> directly set the password
+    #password = "cravatterouge!"
+    #encoded_password = base64.b64encode(password.encode("utf16-le"))
+    #attr["unicodePwd"] = encoded_password
+    print(attr)
+    conn.add(user_dn, attributes=attr)
+    print(conn.result)
+
+    # TODO: Add a password
+
+    #new_pass = "prout"
+    #rpcChangePassword("corp.local", username, password, hostname, sAMAccountName, new_pass):
+
+    # TODO: Enable the user
+
+
+def delObject(conn, identity):
+    dn = resolvDN(conn, identity)
+    logger.debug(f"Trying to remove {dn}")
+    conn.delete(dn)
+    logger.info(f"[+] {dn} has been removed")
 
 
 def ldapConnect(url, domain, username, password, doKerberos):
@@ -135,14 +204,22 @@ def writeGpoDacl():
 def addComputer():
 	return
 
-def addUser():
-	return
-
 
 def addUserToGroup(conn, member, group):
     member_dn = resolvDN(conn, member)
+    logger.debug(f"[+] {member} found at {member_dn}")
     group_dn = resolvDN(conn, group)
+    logger.debug(f"[+] {group} found at {group_dn}")
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
+    logger.info(f"[+] Adding {member_dn} to {group_dn}")
+
+
+def getUsersInOu(conn, base_ou):
+    #conn.search(ou, '(objectClass=user)', attributes='*')
+    conn.search(base_ou, '(objectClass=user)')
+    #conn.search(base_ou, '(objectClass=*)')
+    for entry in conn.response:
+        print(entry['dn'])
 
 
 def delUserFromGroup(conn, member, group):
@@ -237,7 +314,18 @@ def cryptPassword(session_key, password):
 def rpcChangePassword(domain, username, password, hostname, target, new_pass):
 
     rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
-    rpctransport.set_credentials(username, password, domain)
+
+    # TODO: change this ugly shit
+    lmhash, nthash = None, None
+    try:
+        lmhash_maybe, nthash_maybe = password.split(':')
+        if 32 == len(lmhash_maybe) == len(nthash_maybe):
+            lmhash, nthash = lmhash_maybe, nthash_maybe
+            password = None
+    except:
+        pass
+
+    rpctransport.set_credentials(username, password, domain, lmhash=lmhash, nthash=nthash)
     dce = rpctransport.get_dce_rpc()
     from impacket.dcerpc.v5 import rpcrt
     dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
