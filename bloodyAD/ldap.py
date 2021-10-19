@@ -83,8 +83,11 @@ def resolvDN(conn, identity):
     if "s-1-" in identity.lower():
         # We assume identity is an SID
         ldap_filter = f'(objectSid={identity})'
+    elif "{" in identity:
+        # We assume identity is a GUID
+        ldap_filter = f'(objectGUID={identity})'
     else:
-        # We assume identity is a sam account name
+        # By default, we assume identity is a sam account name
         ldap_filter = f'(sAMAccountName={identity})'
 
     naming_context = conn.server.info.other['defaultNamingContext'][0]
@@ -97,7 +100,6 @@ def resolvDN(conn, identity):
         raise TooManyResultsError(naming_context, ldap_filter, conn.response)
 
     res = conn.response[0]['dn']
-    print(res)
     return res
 
 
