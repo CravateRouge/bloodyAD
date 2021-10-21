@@ -21,6 +21,7 @@ class BloodyError(Exception):
 class LDAPError(BloodyError):
     pass
 
+
 class ResultError(LDAPError):
 
     def __init__(self, result):
@@ -34,6 +35,7 @@ class ResultError(LDAPError):
             self.message = 'The server returned an error: ' + conn.result['message']
 
         super()._init__(self.message)
+
 
 class NoResultError(LDAPError):
     
@@ -64,6 +66,7 @@ class TooManyResultsError(LDAPError):
 
         super().__init__(self.message)
      
+
 # 983551 Full control
 def createACE(sid, privguid=None, accesstype=983551):
     nace = ldaptypes.ACE()
@@ -87,6 +90,7 @@ def createACE(sid, privguid=None, accesstype=983551):
     nace['Ace'] = acedata
     return nace
 
+
 def createEmptySD():
     sd = ldaptypes.SR_SECURITY_DESCRIPTOR()
     sd['Revision'] = b'\x01'
@@ -104,6 +108,7 @@ def createEmptySD():
     acl.aces = []
     sd['Dacl'] = acl
     return sd
+
 
 def resolvDN(conn, identity):
     """
@@ -222,8 +227,10 @@ def ldapConnect(url, domain, username, password, doKerberos):
     c.bind()
     return c
 
+
 def writeGpoDacl():
 	return
+
 
 def addComputer():
 	return
@@ -306,6 +313,7 @@ def addDomainSync(conn, sAMAccountName):
     data = secDesc.getData()
     conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
+
 def changePassword(conn, target, new_pass):
     """
     Change the target password without knowing the old one using LDAPS
@@ -321,7 +329,9 @@ def changePassword(conn, target, new_pass):
     else:
         raise ResultError(conn.result)
 
+
 from impacket.dcerpc.v5 import samr, transport
+
 
 def cryptPassword(session_key, password):
     try:
@@ -345,6 +355,7 @@ def cryptPassword(session_key, password):
     sam_user_pass_enc = samr.SAMPR_ENCRYPTED_USER_PASSWORD()
     sam_user_pass_enc['Buffer'] = encBuf
     return sam_user_pass_enc
+
 
 def rpcChangePassword(domain, username, password, hostname, target, new_pass):
     """
@@ -393,8 +404,10 @@ def rpcChangePassword(domain, username, password, hostname, target, new_pass):
     resp = dce.request(req)
     resp.dump()
 
+
 def setDontreqpreauth():
 	return
+
 
 def setRbcd(conn, spn_sid, target):
     """
@@ -435,6 +448,7 @@ def setRbcd(conn, spn_sid, target):
         LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target)
     else:
         raise ResultError(conn.result)
+
 
 def setShadowCredentials(conn, sAMAccountName):
     """
