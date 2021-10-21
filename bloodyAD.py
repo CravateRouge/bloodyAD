@@ -1,5 +1,6 @@
 # Credits to aclpwn
 import argparse
+from inspect import getmembers, isfunction
 from bloodyAD import ldap
 
 def main():
@@ -14,24 +15,31 @@ def main():
     parser.add_argument('-s', '--scheme', help='Use LDAP over TLS (default is LDAP)')
     parser.add_argument('--host', help='Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)')
 
-    parser.add_argument('function', help="Function to call with args following it:\n"
-    # TODO Give DN if sAMAccountName doesn't work
-    "\t addUserToGroup <member> <group>\n"
-    "\t addDomainSync <sAMAccountName>\n"
-    "\t setShadowCredentials <sAMAccountName>\n"
-    "\t changePassword <sAMAccountName> <new_password>\n"
-    "\t rpcChangePassword <sAMAccountName> <new_password>")
-    parser.add_argument('params', help='Function parameters', nargs='+')
+    # Find list of functions and their arguments in ldap.py
+    # And add them all as subparsers
+    subparsers = parser.add_subparsers(title="subcommands", help='Function to call')
+    funcs = getmembers(ldap, isfunction)
+    for name, f in funcs:
+        subparser = subparsers.add_parser(name, help=f.__doc__)
+        func_args = f.__code__.co_varnames[1:f.__code__.co_argcount]
+        for func_arg in func_args:
+            subparser.add_argument(func_arg)
+            subparser.set_defaults(func=f)
 
     args = parser.parse_args()
 
-    if args.function == 'rpcChangePassword':
+    # Get the list of parameters to provide to the command
+    param_names = args.func.__code__.co_varnames[1:args.func.__code__.co_argcount]
+    params = [getattr(args, p) for p in param_names]
+
+    # Launch the command
+    if args.func.__name__ == 'rpcChangePassword':
         ldap.rpcChangePassword(args.domain, args.username, args.password, args.host, *args.params)
     else:
         url = args.scheme + '://' + args.host
         conn = ldap.ldapConnect(url, args.domain, args.username, args.password, args.kerberos)
-        if hasattr(args, 'function'):
-            getattr(ldap,args.function)(conn, *args.params)
+        args.func(conn, *params)
+
         
 if __name__ == '__main__':
     main()
