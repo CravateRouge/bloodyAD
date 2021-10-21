@@ -17,10 +17,10 @@ def main():
 
     # Find list of functions and their arguments in ldap.py
     # And add them all as subparsers
-    subparsers = parser.add_subparsers(title="subcommands", help='Function to call')
+    subparsers = parser.add_subparsers(title="Commands", help='Function to call')
     funcs = getmembers(ldap, isfunction)
     for name, f in funcs:
-        subparser = subparsers.add_parser(name, help=f.__doc__)
+        subparser = subparsers.add_parser(name, prog=f.__doc__)
         func_args = f.__code__.co_varnames[1:f.__code__.co_argcount]
         for func_arg in func_args:
             subparser.add_argument(func_arg)
