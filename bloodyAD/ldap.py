@@ -28,11 +28,11 @@ class ResultError(LDAPError):
         self.result = result
 
         if self.result['result'] == 50:
-            self.message = 'Could not modify object, the server reports insufficient rights: ' + self.result['message']
+            self.message = '[-] Could not modify object, the server reports insufficient rights: ' + self.result['message']
         elif self.result['result'] == 19:
-            self.message = 'Could not modify object, the server reports a constrained violation: ' + self.result['message']
+            self.message = '[-] Could not modify object, the server reports a constrained violation: ' + self.result['message']
         else:
-            self.message = 'The server returned an error: ' + conn.result['message']
+            self.message = '[-] The server returned an error: ' + conn.result['message']
 
         super()._init__(self.message)
 
@@ -42,7 +42,7 @@ class NoResultError(LDAPError):
     def __init__(self, search_base, ldap_filter):
         self.filter = ldap_filter
         self.base = search_base
-        self.message = f'No object found in {self.base} with filter: {self.filter}'
+        self.message = f'[-] No object found in {self.base} with filter: {self.filter}'
         super().__init__(self.message)
 
 
@@ -57,12 +57,12 @@ class TooManyResultsError(LDAPError):
         if len(self.entries) <= self.limit:
             LOG.error(self.entries)
             self.results = "\n".join(entry['dn'] for entry in entries)
-            self.message = f'{len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
-            self.message += f'Please put the full target DN\n'
-            self.message += f'Result of query: \n{self.results}'
+            self.message = f'[-] {len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
+            self.message += f'\tPlease put the full target DN\n'
+            self.message += f'\tResult of query: \n{self.results}'
         else:
-            self.message = f"More than {self.limit} entries in {self.base} match {self.filter}"
-            self.message += f'Please put the full target DN'
+            self.message = f"\tMore than {self.limit} entries in {self.base} match {self.filter}"
+            self.message += f'\tPlease put the full target DN'
 
         super().__init__(self.message)
      
@@ -325,7 +325,7 @@ def changePassword(conn, target, new_pass):
 
     modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
     if conn.result['result'] == 0:
-        LOG.info('Password changed successfully!')
+        LOG.info('[+] Password changed successfully!')
     else:
         raise ResultError(conn.result)
 
