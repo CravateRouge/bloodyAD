@@ -1,7 +1,8 @@
 # Credits to aclpwn
 import argparse
 from inspect import getmembers, isfunction
-from bloodyAD import ldap
+from bloodyAD import ldapConnect, modules
+
 
 def main():
     parser = argparse.ArgumentParser(description='Active Directory Privilege Escalation Framework', formatter_class=argparse.RawTextHelpFormatter)
@@ -18,7 +19,7 @@ def main():
     # Find list of functions and their arguments in ldap.py
     # And add them all as subparsers
     subparsers = parser.add_subparsers(title="Commands", help='Function to call')
-    funcs = getmembers(ldap, isfunction)
+    funcs = getmembers(modules, isfunction)
     for name, f in funcs:
         subparser = subparsers.add_parser(name, prog=f.__doc__)
         func_args = f.__code__.co_varnames[1:f.__code__.co_argcount]
@@ -34,10 +35,10 @@ def main():
 
     # Launch the command
     if args.func.__name__ == 'rpcChangePassword':
-        ldap.rpcChangePassword(args.domain, args.username, args.password, args.host, *args.params)
+        modules.rpcChangePassword(args.domain, args.username, args.password, args.host, *args.params)
     else:
         url = args.scheme + '://' + args.host
-        conn = ldap.ldapConnect(url, args.domain, args.username, args.password, args.kerberos)
+        conn = ldapConnect(url, args.domain, args.username, args.password, args.kerberos)
         args.func(conn, *params)
 
         
