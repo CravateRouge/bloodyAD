@@ -126,7 +126,7 @@ def getGroupMembers(conn, identity):
 
 def getObjectAttributes(conn, identity):
     """
-    Fetch LDAP attributes for the identity provided
+    Fetch LDAP attributes for the identity (group or user) provided
     """
     dn = resolvDN(conn, identity)
     conn.search(dn, '(objectClass=*)', attributes='*')
@@ -140,7 +140,7 @@ def addUser(conn, sAMAccountName, ou=None):
     This can be changed with the ou parameter
     """
 
-    # TODO: Check that the user is not already present in AD
+    # TODO: Check that the user is not already present in AD?
     #user_dn = resolvDN(conn, sAMAccountName)
     #print(user_dn)
 
@@ -157,29 +157,18 @@ def addUser(conn, sAMAccountName, ou=None):
     attr["distinguishedName"] = user_dn
     attr["sAMAccountName"] = sAMAccountName
     attr["userAccountControl"] = 544
-    #attr["sn"] = sAMAccountName
-    #attr["name"] = sAMAccountName
-    #attr["displayName"] = sAMAccountName
-    #attr["givenName"] = sAMAccountName
-    #attr["userPrincipalName"] = sAMAccountName
-
-    # If ldaps -> directly set the password
+    # TODO: If ldaps -> directly set the password?
     #password = "cravatterouge!"
     #encoded_password = base64.b64encode(password.encode("utf16-le"))
     #attr["unicodePwd"] = encoded_password
-    print(attr)
     conn.add(user_dn, attributes=attr)
     print(conn.result)
 
-    # TODO: Add a password
-
-    #new_pass = "prout"
-    #rpcChangePassword("corp.local", username, password, hostname, sAMAccountName, new_pass):
-
-    # TODO: Enable the user
-
 
 def delObject(conn, identity):
+    """
+    Delete an object (user or group) from the Directory based on the identity provided
+    """
     dn = resolvDN(conn, identity)
     logger.debug(f"Trying to remove {dn}")
     conn.delete(dn)
@@ -206,6 +195,11 @@ def addComputer():
 
 
 def addUserToGroup(conn, member, group):
+    """
+    Add an object to a group
+        member: the user or group to add into the group
+        group: the group to add to
+    """
     member_dn = resolvDN(conn, member)
     logger.debug(f"[+] {member} found at {member_dn}")
     group_dn = resolvDN(conn, group)
@@ -215,14 +209,18 @@ def addUserToGroup(conn, member, group):
 
 
 def getUsersInOu(conn, base_ou):
-    #conn.search(ou, '(objectClass=user)', attributes='*')
+    """
+    List the user present in an organisational unit
+    """
     conn.search(base_ou, '(objectClass=user)')
-    #conn.search(base_ou, '(objectClass=*)')
     for entry in conn.response:
         print(entry['dn'])
 
 
 def delUserFromGroup(conn, member, group):
+    """
+    Remove member from group
+    """
     member_dn = resolvDN(conn, member)
     group_dn = resolvDN(conn, group)
     removeMembersFromGroups.ad_remove_members_from_groups(conn, member_dn, group_dn, True, raise_error=True)
