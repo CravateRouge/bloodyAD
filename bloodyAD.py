@@ -2,6 +2,7 @@
 import argparse
 from inspect import getmembers, isfunction
 from bloodyAD import ldapConnect, modules
+from bloodyAD import config
 
 
 def main():
@@ -13,7 +14,7 @@ def main():
     parser.add_argument('-u', '--username', help='Username used for NTLM authentication')
     parser.add_argument('-p', '--password', help='Cleartext password or LMHASH:NTHASH for NTLM authentication')
     parser.add_argument('-k', '--kerberos', action='store_true', default=False)
-    parser.add_argument('-s', '--scheme', help='Use LDAP over TLS (default is LDAP)')
+    parser.add_argument('-s', '--scheme', help='Use LDAP over TLS (default is LDAP)', choices=['ldap', 'ldaps', 'rpc'], default="ldap")
     parser.add_argument('--host', help='Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)')
 
     # Find list of functions and their arguments in ldap.py
@@ -28,6 +29,10 @@ def main():
             subparser.set_defaults(func=f)
 
     args = parser.parse_args()
+
+    # Set config object
+    config.cnf = config.Config(domain=args.domain, username=args.username, password=args.password,
+            scheme=args.scheme, host=args.host, kerberos=args.kerberos)
 
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1:args.func.__code__.co_argcount]
