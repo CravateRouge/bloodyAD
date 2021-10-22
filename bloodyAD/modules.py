@@ -374,7 +374,7 @@ def toggleAccountdisable(conn, identity, enable=False):
     conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
 
     entry = conn.entries[0]
-    userAccountControl = entry["userAccountControl"].value
+    userAccountControl = int(entry["userAccountControl"].value)
 
     LOG.debug("Original userAccountControl: %s" % userAccountControl) 
 
