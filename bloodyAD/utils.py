@@ -13,13 +13,17 @@ def createACE(sid, privguid=None, accesstype=983551):
     nace = ldaptypes.ACE()
     nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
     nace['AceFlags'] = 0x00
-    acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
-    acedata['Mask'] = ldaptypes.ACCESS_MASK()
-    acedata['Mask']['Mask'] = accesstype
 
-    if privguid is not None:
+    if privguid is None:
+        acedata = ldaptypes.ACCESS_ALLOWED_ACE()
+    else:
+        acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
         acedata['ObjectType'] = impacket.uuid.string_to_bin(privguid)
         acedata['InheritedObjectType'] = b''
+        acedata['Flags'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
+
+    acedata['Mask'] = ldaptypes.ACCESS_MASK()
+    acedata['Mask']['Mask'] = accesstype
 
     if type(sid) is str:
         acedata['Sid'] = ldaptypes.LDAP_SID()
@@ -27,7 +31,6 @@ def createACE(sid, privguid=None, accesstype=983551):
     else:
         acedata['Sid'] = sid
 
-    acedata['Flags'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
     nace['Ace'] = acedata
     return nace
 

