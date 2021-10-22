@@ -330,3 +330,30 @@ def setShadowCredentials(conn, sAMAccountName):
         LOG.error('Attribute msDS-KeyCredentialLink does not exist')
     return
 
+def ToggleDontReqPreauth(conn, identity, enable=True):
+    """
+    Enable or disable the DON_REQ_PREAUTH attribute for the given user
+    You must have a write permission on the UserAccountControl attribute of the target user
+    Args:
+        sAMAccountName, DN, GUID or SID of the target
+    """
+        UF_DONT_REQUIRE_PREAUTH = 4194304
+
+        user_dn = resolvDN(identity)
+        conn.search(getDefaultNamingContext(conn), '(sAMAccountName=%s)' % user_dn, attributes=['objectSid', 'userAccountControl'])
+        entry = conn.entries[0]
+        userAccountControl = entry["userAccountControl"].value
+        LOG.debug("Original userAccountControl: %d" % userAccountControl) 
+
+        if enable:
+            userAccountControl = userAccountControl | UF_DONT_REQUIRE_PREAUTH
+        else:
+            userAccountControl = userAccountControl & ~UF_DONT_REQUIRE_PREAUTH
+
+        LOG.debug("Updated userAccountControl: %d" % userAccountControl) 
+        conn.modify(user_dn, {'userAccountControl':(ldap3.MODIFY_REPLACE, [userAccountControl])})
+
+        if conn.result['result'] == 0:
+            LOG.info("Updated userAccountControl attribute successfully")
+        else:
+            raise ResultError(conn.result)
