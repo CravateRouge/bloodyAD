@@ -1,9 +1,12 @@
 
 import ldap3
 import impacket
+import logging
 from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, transport
 
+LOG = logging.getLogger()
+logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 # 983551 Full control
 def createACE(sid, privguid=None, accesstype=983551):
@@ -128,3 +131,25 @@ def cryptPassword(session_key, password):
     sam_user_pass_enc = samr.SAMPR_ENCRYPTED_USER_PASSWORD()
     sam_user_pass_enc['Buffer'] = encBuf
     return sam_user_pass_enc
+
+def userAccountControl(conn, identity, enable, flag):
+    enable = enable == True
+
+    user_dn = resolvDN(conn,identity)
+    conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
+    entry = conn.entries[0]
+    userAccountControl = int(entry["userAccountControl"].value)
+    LOG.debug("Original userAccountControl: %s" % userAccountControl) 
+
+    if enable:
+        userAccountControl = userAccountControl | flag
+    else:
+        userAccountControl = userAccountControl & ~flag
+
+    LOG.debug("Updated userAccountControl: %s" % userAccountControl) 
+    conn.modify(user_dn, {'userAccountControl':(ldap3.MODIFY_REPLACE, [userAccountControl])})
+
+    if conn.result['result'] == 0:
+        LOG.info("Updated userAccountControl attribute successfully")
+    else:
+            raise ResultError(conn.result)

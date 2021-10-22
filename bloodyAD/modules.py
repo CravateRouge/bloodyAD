@@ -5,19 +5,18 @@ from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
-import logging
 from impacket.dcerpc.v5 import samr, transport
 
+import logging
 
 from .exceptions import ResultError, NoResultError, TooManyResultsError
 from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import cryptPassword
-
+from .utils import userAccountControl
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
-
 
 def getGroupMembers(conn, identity):
     """
@@ -330,7 +329,7 @@ def setShadowCredentials(conn, sAMAccountName):
         LOG.error('Attribute msDS-KeyCredentialLink does not exist')
     return
 
-def toggleDontReqPreauth(conn, identity, enable=True):
+def dontReqPreauth(conn, identity, enable):
     """
     Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
     You must have a write permission on the UserAccountControl attribute of the target user
@@ -339,53 +338,17 @@ def toggleDontReqPreauth(conn, identity, enable=True):
         set the flag on the UserAccountControl attribute (default is True)
     """
     UF_DONT_REQUIRE_PREAUTH = 4194304
+    userAccountControl(conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
 
-    user_dn = resolvDN(conn,identity)
-    conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
-    entry = conn.entries[0]
-    userAccountControl = int(entry["userAccountControl"].value)
-    LOG.debug("Original userAccountControl: %s" % userAccountControl) 
 
-    if enable:
-        userAccountControl = userAccountControl | UF_DONT_REQUIRE_PREAUTH
-    else:
-        userAccountControl = userAccountControl & ~UF_DONT_REQUIRE_PREAUTH
 
-    LOG.debug("Updated userAccountControl: %s" % userAccountControl) 
-    conn.modify(user_dn, {'userAccountControl':(ldap3.MODIFY_REPLACE, [userAccountControl])})
-
-    if conn.result['result'] == 0:
-        LOG.info("Updated userAccountControl attribute successfully")
-    else:
-            raise ResultError(conn.result)
-
-def toggleAccountdisable(conn, identity, enable=False):
+def accountdisable(conn, identity, enable):
     """
     Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
     You must have write permission on the UserAccountControl attribute of the target
     Args:
     sAMAccountName, DN, GUID or SID of the target
-    set the flag on the UserAccountControl attribute (default is False)
+    set the flag on the UserAccountControl attribute 
     """
-
     UF_ACCOUNTDISABLE = 2
-
-    user_dn = resolvDN(conn,identity)
-    conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
-
-    entry = conn.entries[0]
-    userAccountControl = int(entry["userAccountControl"].value)
-
-    LOG.debug("Original userAccountControl: %s" % userAccountControl) 
-
-    if enable:
-        userAccountControl = userAccountControl & ~UF_ACCOUNT_DISABLE
-    else:
-        userAccountControl = userAccountControl | UF_ACCOUNT_DISABLE
-
-    conn.modify(user_dn, {'userAccountControl':(ldap3.MODIFY_REPLACE, [userAccountControl])})
-
-    if conn.result['result'] == 0:
-        LOG.info("Updated userAccountControl attribute successfully")
-    else:
-        raise ResultError(conn.result)
+    userAccountControl(conn, identity, enable, UF_ACCOUNTDISABLE)
