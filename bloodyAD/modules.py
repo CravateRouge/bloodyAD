@@ -53,7 +53,7 @@ def getObjectAttributes(conn, identity):
 
 
 @register_module
-def addUser(conn, sAMAccountName, ou=None):
+def addUser(conn, sAMAccountName, password, ou=None):
     """
     Add a new user in the LDAP database
     By default the user object is put in the OU Users
@@ -78,12 +78,12 @@ def addUser(conn, sAMAccountName, ou=None):
     attr["distinguishedName"] = user_dn
     attr["sAMAccountName"] = sAMAccountName
     attr["userAccountControl"] = 544
-    # TODO: If ldaps -> directly set the password?
-    #password = "cravatterouge!"
-    #encoded_password = base64.b64encode(password.encode("utf16-le"))
-    #attr["unicodePwd"] = encoded_password
+
     ldap_conn.add(user_dn, attributes=attr)
     LOG.info(ldap_conn.result)
+
+    changePassword(conn, sAMAccountName, password)
+
 
 
 @register_module
