@@ -25,9 +25,11 @@ modules = []
 
 def register_module(f):
     modules.append((f.__name__, f))
+
     @wraps(f)
     def wrapper(*args, **kwds):
         return f(*args, **kwds)
+
     return wrapper
 
 
@@ -116,14 +118,46 @@ def addUserToGroup(conn, member, group):
 
 
 @register_module
+def getObjectsInOu(conn, base_ou, object_type='*'):
+    """
+    List the object present in an organisational unit
+    base_ou: the ou to target
+    object_type: the type of object to fetch (user/computer or * to have them all)
+    """
+    ldap_conn = conn.getLdapConnection()
+    ldap_conn.search(base_ou, f'(objectClass={object_type})')
+    res = [entry['dn'] for entry in ldap_conn.response if entry['type'] == 'searchResEntry']
+    return res
+
+
+@register_module
+def getOusInOu(conn, base_ou):
+    """
+    List the user present in an organisational unit
+    """
+    containers = getObjectsInOu(conn, base_ou, "container")
+    for container in containers:
+        LOG.info(container)
+
+
+@register_module
 def getUsersInOu(conn, base_ou):
     """
     List the user present in an organisational unit
     """
-    ldap_conn = conn.getLdapConnection()
-    ldap_conn.search(base_ou, '(objectClass=user)')
-    for entry in ldap_conn.response:
-        LOG.info(entry['dn'])
+    users = getObjectsInOu(conn, base_ou, "user")
+    for user in users:
+        LOG.info(user)
+
+
+@register_module
+def getComputersInOu(conn, base_ou):
+    """
+    List the computers present in an organisational unit
+    """
+    computers = getObjectsInOu(conn, base_ou, "computer")
+    for computer in computers:
+        LOG.info(computer)
 
 
 @register_module
@@ -237,7 +271,42 @@ def rpcChangePassword(conn, target, new_pass):
     resp.dump()
 
 
-# TODO: Add Computer
+@register_module
+def addComputer(conn, hostname, ou=None):
+    """
+    Add a new computer in the LDAP database
+    By default the computer object is put in the OU Computers
+    This can be changed with the ou parameter
+    """
+    ldap_conn = conn.getLdapConnection()
+
+    sAMAccountName = hostname + '$'
+    domain = conn.conf.domain
+
+    if ou:
+        computer_dn = f'cn={sAMAccountName},{ou}'
+    else:
+        naming_context = getDefaultNamingContext(ldap_conn)
+        computer_dn = f'cn={sAMAccountName},cn=Computers,{naming_context}'
+
+    computer_cls = ['top', 'person', 'organizationalPerson', 'user', 'computer']
+    computer_spns = [
+            f'HOST/{hostname}',
+            f'HOST/{hostname}.{domain}',
+            f'RestrictedKrbHost/{hostname}',
+            f'RestrictedKrbHost/{hostname}.{domain}',
+            ]
+    attr = {
+            'objectClass':  computer_cls,
+            'distinguishedName': computer_dn,
+            'sAMAccountName': sAMAccountName,
+            'userAccountControl': 0x1000,
+            'dnsHostName': f'{hostname}.{domain}',
+            'servicePrincipalName': computer_spns,
+            }
+
+    ldap_conn.add(computer_dn, attributes=attr)
+    LOG.info(ldap_conn.result)
 
 
 @register_module
