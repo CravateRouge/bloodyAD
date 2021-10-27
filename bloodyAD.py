@@ -1,8 +1,7 @@
 # Credits to aclpwn
 import argparse
-from inspect import getmembers, isfunction
-from bloodyAD import ldapConnect, modules
-from bloodyAD import config
+from inspect import getmembers, isfunction, signature, _empty
+from bloodyAD import modules, config
 
 
 def main():
@@ -23,28 +22,19 @@ def main():
     funcs = getmembers(modules, isfunction)
     for name, f in funcs:
         subparser = subparsers.add_parser(name, prog=f.__doc__)
-        func_args = f.__code__.co_varnames[1:f.__code__.co_argcount]
-        for func_arg in func_args:
-            subparser.add_argument(func_arg)
-            subparser.set_defaults(func=f)
+        subparser.add_argument('func_args', nargs='*')
+        subparser.set_defaults(func=f)
 
     args = parser.parse_args()
 
-    # Set config object
-    config.cnf = config.Config(domain=args.domain, username=args.username, password=args.password,
-            scheme=args.scheme, host=args.host, kerberos=args.kerberos)
-
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1:args.func.__code__.co_argcount]
-    params = [getattr(args, p) for p in param_names]
+    param_values = args.func_args
+    params = {param_names[i]: param_values[i] for i in range(len(param_values))}
 
     # Launch the command
-    if args.func.__name__ == 'rpcChangePassword':
-        modules.rpcChangePassword(args.domain, args.username, args.password, args.host, *args.params)
-    else:
-        url = args.scheme + '://' + args.host
-        conn = ldapConnect(url, args.domain, args.username, args.password, args.kerberos)
-        args.func(conn, *params)
+    conn = config.ConnectionHandler(args)
+    args.func(conn, **params)
 
         
 if __name__ == '__main__':

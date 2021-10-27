@@ -99,19 +99,6 @@ def getDefaultNamingContext(conn):
     return naming_context
 
 
-def ldapConnect(url, domain, username, password, doKerberos):
-    # Connect to LDAP
-    s = ldap3.Server(url, get_info=ldap3.DSA)
-
-    if doKerberos:
-        c = ldap3.Connection(s, authentication=ldap3.SASL, sasl_mechanism=ldap3.KERBEROS, sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,))
-    else:
-        c = ldap3.Connection(s, user='%s\\%s' % (domain,username), password=password, authentication=ldap3.NTLM)
-
-    c.bind()
-    return c
-
-
 def cryptPassword(session_key, password):
     try:
         from Cryptodome.Cipher import ARC4

