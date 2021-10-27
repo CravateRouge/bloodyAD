@@ -1,14 +1,14 @@
+import logging
+from functools import wraps
+
 import ldap3, impacket, random, string
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
 from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
-
 from impacket.dcerpc.v5 import samr
 from impacket.ldap import ldaptypes
-
-import logging
 
 from .exceptions import ResultError, NoResultError, TooManyResultsError
 from .utils import createACE, createEmptySD
@@ -16,9 +16,22 @@ from .utils import resolvDN, getDefaultNamingContext
 from .utils import cryptPassword
 from .utils import userAccountControl
 
+
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
+modules = []
+
+
+def register_module(f):
+    modules.append((f.__name__, f))
+    @wraps(f)
+    def wrapper(*args, **kwds):
+        return f(*args, **kwds)
+    return wrapper
+
+
+@register_module
 def getGroupMembers(conn, identity):
     """
     Return the list of member for a group whose identity is given as parameter
@@ -29,6 +42,7 @@ def getGroupMembers(conn, identity):
     LOG.info(ldap_conn.response[0]['attributes']['member'])
 
 
+@register_module
 def getObjectAttributes(conn, identity):
     """
     Fetch LDAP attributes for the identity (group or user) provided
@@ -39,6 +53,7 @@ def getObjectAttributes(conn, identity):
     LOG.info(ldap_conn.response[0]['attributes'])
 
 
+@register_module
 def addUser(conn, sAMAccountName, ou=None):
     """
     Add a new user in the LDAP database
@@ -72,6 +87,7 @@ def addUser(conn, sAMAccountName, ou=None):
     LOG.info(ldap_conn.result)
 
 
+@register_module
 def delObject(conn, identity):
     """
     Delete an object (user or group) from the Directory based on the identity provided
@@ -83,6 +99,7 @@ def delObject(conn, identity):
     LOG.info(f"[+] {dn} has been removed")
 
 
+@register_module
 def addUserToGroup(conn, member, group):
     """
     Add an object to a group
@@ -98,6 +115,7 @@ def addUserToGroup(conn, member, group):
     LOG.info(f"[+] Adding {member_dn} to {group_dn}")
 
 
+@register_module
 def getUsersInOu(conn, base_ou):
     """
     List the user present in an organisational unit
@@ -108,6 +126,7 @@ def getUsersInOu(conn, base_ou):
         LOG.info(entry['dn'])
 
 
+@register_module
 def delUserFromGroup(conn, member, group):
     """
     Remove member from group
@@ -118,6 +137,7 @@ def delUserFromGroup(conn, member, group):
     removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
 
 
+@register_module
 def addForeignObjectToGroup(conn, user_sid, group_dn):
     """
     Add foreign principals (users or groups), coming from a trusted domain, to a group
@@ -131,6 +151,7 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
     addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
 
 
+@register_module
 def addDomainSync(conn, identity):
     """
     Give the right to perform DCSync with the user provided (You must have write permission on the domain)
@@ -167,6 +188,7 @@ def addDomainSync(conn, identity):
     ldap_conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
 
+@register_module
 def changePassword(conn, identity, new_pass):
     """
     Change the target password without knowing the old one using LDAPS
@@ -184,6 +206,7 @@ def changePassword(conn, identity, new_pass):
         raise ResultError(ldap_conn.result)
 
 
+@register_module
 def rpcChangePassword(conn, target, new_pass):
     """
     Change the target password without knowing the old one using RPC instead of LDAPS
@@ -216,6 +239,8 @@ def rpcChangePassword(conn, target, new_pass):
 
 # TODO: Add Computer
 
+
+@register_module
 def setRbcd(conn, spn_sid, target_identity):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
@@ -258,6 +283,7 @@ def setRbcd(conn, spn_sid, target_identity):
         raise ResultError(ldap_conn.result)
 
 
+@register_module
 def setShadowCredentials(conn, sAMAccountName):
     """
     Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
@@ -324,6 +350,8 @@ def setShadowCredentials(conn, sAMAccountName):
         LOG.error('Attribute msDS-KeyCredentialLink does not exist')
     return
 
+
+@register_module
 def dontReqPreauth(conn, identity, enable):
     """
     Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
@@ -338,8 +366,8 @@ def dontReqPreauth(conn, identity, enable):
     userAccountControl(ldap_conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
 
 
-
-def accountdisable(conn, identity, enable):
+@register_module
+def setAccountDisableFlag(conn, identity, enable):
     """
     Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
     You must have write permission on the UserAccountControl attribute of the target
@@ -352,6 +380,8 @@ def accountdisable(conn, identity, enable):
     UF_ACCOUNTDISABLE = 2
     userAccountControl(ldap_conn, identity, enable, UF_ACCOUNTDISABLE)
 
+
+@register_module
 def modifyGpoACE(conn, identity, gpo):
     """
     Give permission to a user to modify the GPO

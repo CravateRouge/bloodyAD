@@ -19,7 +19,8 @@ def main():
     # Find list of functions and their arguments in ldap.py
     # And add them all as subparsers
     subparsers = parser.add_subparsers(title="Commands", help='Function to call')
-    funcs = getmembers(modules, isfunction)
+    #funcs = getmembers(modules, isfunction)
+    funcs = modules
     for name, f in funcs:
         subparser = subparsers.add_parser(name, prog=f.__doc__)
         subparser.add_argument('func_args', nargs='*')
