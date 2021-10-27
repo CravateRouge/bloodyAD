@@ -5,6 +5,8 @@ import logging
 from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, transport
 
+from .exceptions import NoResultError, ResultError, TooManyResultsError 
+
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 

@@ -1,7 +1,7 @@
 # Credits to aclpwn
 import argparse
 from inspect import getmembers, isfunction, signature, _empty
-from bloodyAD import modules, config
+from bloodyAD import modules, ConnectionHandler
 
 
 def main():
@@ -19,9 +19,7 @@ def main():
     # Find list of functions and their arguments in ldap.py
     # And add them all as subparsers
     subparsers = parser.add_subparsers(title="Commands", help='Function to call')
-    #funcs = getmembers(modules, isfunction)
-    funcs = modules
-    for name, f in funcs:
+    for name, f in modules:
         subparser = subparsers.add_parser(name, prog=f.__doc__)
         subparser.add_argument('func_args', nargs='*')
         subparser.set_defaults(func=f)
@@ -34,7 +32,7 @@ def main():
     params = {param_names[i]: param_values[i] for i in range(len(param_values))}
 
     # Launch the command
-    conn = config.ConnectionHandler(args)
+    conn = ConnectionHandler(args)
     args.func(conn, **params)
 
         
