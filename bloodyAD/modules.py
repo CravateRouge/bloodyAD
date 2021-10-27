@@ -353,7 +353,7 @@ def setShadowCredentials(conn, identity, outfilePath=None):
     LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
     LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
     ldap_filter = '(objectClass=*)'
-    ldap_conn.search(target_dn, , attributes=['msDS-KeyCredentialLink'])
+    ldap_conn.search(target_dn, ldap_filter, attributes=['msDS-KeyCredentialLink'])
     results = None
     for entry in ldap_conn.response:
         if entry['type'] != 'searchResEntry':
