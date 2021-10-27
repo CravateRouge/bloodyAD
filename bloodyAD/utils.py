@@ -53,7 +53,6 @@ def createEmptySD():
     sd['Dacl'] = acl
     return sd
 
-
 def resolvDN(conn, identity):
     """
     Return the DN for the object based on the parameters identity
@@ -143,3 +142,32 @@ def userAccountControl(conn, identity, enable, flag):
         LOG.info("Updated userAccountControl attribute successfully")
     else:
             raise ResultError(conn.result)
+
+def rpcChangePassword(conn, target, new_pass):
+    """
+    Change the target password without knowing the old one using RPC instead of LDAPS
+    Args: 
+        domain for NTLM authentication
+        NTLM username of the user with permissions on the target
+        NTLM password or hash of the user
+        IP or hostname of the DC to make the password change
+        sAMAccountName of the target
+        new password for the target
+    """
+    dce = conn.getSamrConnection()
+    server_handle = samr.hSamrConnect(dce, conn.conf.host + '\x00')['ServerHandle']
+    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, conn.conf.domain)['DomainId']
+    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']   
+    userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))['RelativeIds']['Element'][0]
+    opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
+
+    req = samr.SamrSetInformationUser2()
+    req['UserHandle'] = opened_user['UserHandle']
+    req['UserInformationClass'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
+    req['Buffer'] = samr.SAMPR_USER_INFO_BUFFER()
+    req['Buffer']['tag'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
+    req['Buffer']['Internal5']['UserPassword'] = cryptPassword(b'SystemLibraryDTC', new_pass)
+    req['Buffer']['Internal5']['PasswordExpired'] = 0
+
+    resp = dce.request(req)
+    resp.dump()
