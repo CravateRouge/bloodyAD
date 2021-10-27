@@ -7,13 +7,12 @@ from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
-from impacket.dcerpc.v5 import samr
 from impacket.ldap import ldaptypes
 
 from .exceptions import ResultError, NoResultError, TooManyResultsError
 from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
-from .utils import cryptPassword
+from .utils import rpcChangePassword
 from .utils import userAccountControl
 
 
@@ -56,7 +55,7 @@ def getObjectAttributes(conn, identity):
 
 
 @register_module
-def addUser(conn, sAMAccountName, ou=None):
+def addUser(conn, sAMAccountName, password, ou=None):
     """
     Add a new user in the LDAP database
     By default the user object is put in the OU Users
@@ -81,12 +80,12 @@ def addUser(conn, sAMAccountName, ou=None):
     attr["distinguishedName"] = user_dn
     attr["sAMAccountName"] = sAMAccountName
     attr["userAccountControl"] = 544
-    # TODO: If ldaps -> directly set the password?
-    #password = "cravatterouge!"
-    #encoded_password = base64.b64encode(password.encode("utf16-le"))
-    #attr["unicodePwd"] = encoded_password
+
     ldap_conn.add(user_dn, attributes=attr)
     LOG.info(ldap_conn.result)
+
+    changePassword(conn, sAMAccountName, password)
+
 
 
 @register_module
@@ -221,7 +220,6 @@ def addDomainSync(conn, identity):
     data = secDesc.getData()
     ldap_conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
 
-
 @register_module
 def changePassword(conn, identity, new_pass):
     """
@@ -233,43 +231,27 @@ def changePassword(conn, identity, new_pass):
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, identity)
 
-    modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-    if ldap_conn.result['result'] == 0:
-        LOG.info('[+] Password changed successfully!')
+    # If LDAPS is not supported use SAMR
+    if conn.conf.scheme == "ldaps":
+        modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
+        if ldap_conn.result['result'] == 0:
+            LOG.info('[+] Password changed successfully!')
+        else:
+            raise ResultError(ldap_conn.result)
     else:
-        raise ResultError(ldap_conn.result)
+        # Check if identity is sAMAccountName
+        sAMAccountName = identity
+        for marker in ["dn=","s-1","{"]:
+            if marker in identity:
+                ldap_filter = '(objectClass=*)'
+                entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
+                try:
+                    sAMAccountName = entries[0]['sAMAccountName']
+                except IndexError:
+                    raise NoResultError(target_dn, ldap_filter)
+                break
 
-
-@register_module
-def rpcChangePassword(conn, target, new_pass):
-    """
-    Change the target password without knowing the old one using RPC instead of LDAPS
-    Args: 
-        domain for NTLM authentication
-        NTLM username of the user with permissions on the target
-        NTLM password or hash of the user
-        IP or hostname of the DC to make the password change
-        sAMAccountName of the target
-        new password for the target
-    """
-    dce = conn.getSamrConnection()
-    server_handle = samr.hSamrConnect(dce, conn.conf.host + '\x00')['ServerHandle']
-    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, conn.conf.domain)['DomainId']
-    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']   
-    userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))['RelativeIds']['Element'][0]
-    opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
-
-    req = samr.SamrSetInformationUser2()
-    req['UserHandle'] = opened_user['UserHandle']
-    req['UserInformationClass'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
-    req['Buffer'] = samr.SAMPR_USER_INFO_BUFFER()
-    req['Buffer']['tag'] = samr.USER_INFORMATION_CLASS.UserInternal5Information
-    req['Buffer']['Internal5']['UserPassword'] = cryptPassword(b'SystemLibraryDTC', new_pass)
-    req['Buffer']['Internal5']['PasswordExpired'] = 0
-
-    resp = dce.request(req)
-    resp.dump()
-
+        rpcChangePassword(conn, sAMAccountName, new_pass)
 
 @register_module
 def addComputer(conn, hostname, ou=None):
@@ -320,9 +302,9 @@ def setRbcd(conn, spn_sid, target_identity):
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, target_identity)
 
-    entries = conn.search(getDefaultNamingContext(ldap_conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
+    entries = ldap_conn.search(getDefaultNamingContext(ldap_conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
     try:
-        spn_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+        spn_sid = entries[0]['objectSid'].raw_values[0]
     except IndexError:
         LOG.error('User not found in LDAP: %s' % spn_sid)
 
