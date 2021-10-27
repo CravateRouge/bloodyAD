@@ -76,7 +76,6 @@ def addUser(conn, sAMAccountName, password, ou=None):
     LOG.debug(user_dn)
     user_cls = ['top', 'person', 'organizationalPerson', 'user']
     attr = {'objectClass':  user_cls}
-    #attr["cn"] = sAMAccountName
     attr["distinguishedName"] = user_dn
     attr["sAMAccountName"] = sAMAccountName
     attr["userAccountControl"] = 544
@@ -85,7 +84,6 @@ def addUser(conn, sAMAccountName, password, ou=None):
     LOG.info(ldap_conn.result)
 
     changePassword(conn, sAMAccountName, password)
-
 
 
 @register_module
@@ -254,7 +252,7 @@ def changePassword(conn, identity, new_pass):
         rpcChangePassword(conn, sAMAccountName, new_pass)
 
 @register_module
-def addComputer(conn, hostname, ou=None):
+def addComputer(conn, hostname, password, ou=None):
     """
     Add a new computer in the LDAP database
     By default the computer object is put in the OU Computers
@@ -289,6 +287,8 @@ def addComputer(conn, hostname, ou=None):
 
     ldap_conn.add(computer_dn, attributes=attr)
     LOG.info(ldap_conn.result)
+
+    changePassword(conn, sAMAccountName, password)
 
 
 @register_module
