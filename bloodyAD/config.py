@@ -18,22 +18,26 @@ class Config:
     url: str = ""
 
     def __post_init__(self):
-        lmhash_maybe, nthash_maybe = self.password.split(':')
+        
+        # Handle case where password is hashes
+        if ':' in self.password:
+            lmhash_maybe, nthash_maybe = self.password.split(':')
 
-        try:
-            int(nthash_maybe, 16)
-        except ValueError:
-            self.lmhash, self.nthash = None, None
-        else:
-            if len(lmhash_maybe) == 0 and len(nthash_maybe) == 32:
-                self.lmhash = "aad3b435b51404eeaad3b435b51404ee"
-                self.nthash = nthash_maybe
-            elif len(lmhash_maybe) == 32 and len(nthash_maybe) == 32:
-                self.lmhash = lmhash_maybe
-                self.nthash = nthash_maybe
-            else:
+            try:
+                int(nthash_maybe, 16)
+            except ValueError:
                 self.lmhash, self.nthash = None, None
+            else:
+                if len(lmhash_maybe) == 0 and len(nthash_maybe) == 32:
+                    self.lmhash = "aad3b435b51404eeaad3b435b51404ee"
+                    self.nthash = nthash_maybe
+                elif len(lmhash_maybe) == 32 and len(nthash_maybe) == 32:
+                    self.lmhash = lmhash_maybe
+                    self.nthash = nthash_maybe
+                else:
+                    self.lmhash, self.nthash = None, None
 
+        # Build the url from parameters given
         self.url = self.scheme + '://' + self.host
 
 
