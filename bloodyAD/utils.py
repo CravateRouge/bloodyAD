@@ -174,4 +174,5 @@ def rpcChangePassword(conn, target, new_pass):
     req['Buffer']['Internal5']['PasswordExpired'] = 0
 
     resp = dce.request(req)
-    resp.dump()
+    #resp.dump()
+    return resp

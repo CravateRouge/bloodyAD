@@ -38,10 +38,14 @@ class Config:
 
 
 class ConnectionHandler():
-    def __init__(self, args):
-        cnf = Config(domain=args.domain, username=args.username,
+    def __init__(self, args=None, config=None):
+        if args:
+            cnf = Config(domain=args.domain, username=args.username,
                      password=args.password, scheme=args.scheme, host=args.host,
                      kerberos=args.kerberos)
+        else:
+            cnf = config
+
         self.conf = cnf
         self.samr = None
         self.ldap = None

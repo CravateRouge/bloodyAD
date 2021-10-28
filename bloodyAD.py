@@ -40,7 +40,7 @@ def main():
     params = {param_names[i]: param_values[i] for i in range(len(param_values))}
 
     # Launch the command
-    conn = ConnectionHandler(args)
+    conn = ConnectionHandler(args=args)
     args.func(conn, **params)
 
 

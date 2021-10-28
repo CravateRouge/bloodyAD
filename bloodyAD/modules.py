@@ -10,7 +10,7 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 from impacket.ldap import ldaptypes
 
-from .exceptions import ResultError, NoResultError
+from .exceptions import BloodyError, ResultError, NoResultError
 from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import rpcChangePassword
@@ -50,7 +50,9 @@ def getObjectAttributes(conn, identity):
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(dn, '(objectClass=*)', attributes='*')
-    LOG.info(ldap_conn.response[0]['attributes'])
+    attributes = ldap_conn.response[0]['attributes']
+    LOG.info(attributes)
+    return attributes
 
 
 @register_module
@@ -80,6 +82,7 @@ def addUser(conn, sAMAccountName, password, ou=None):
         changePassword(conn, sAMAccountName, password)
     else:
         LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
+        raise BloodyError(ldap_conn.result['description'])
 
 
 @register_module
