@@ -146,6 +146,7 @@ def getUsersInOu(conn, base_ou):
     users = getObjectsInOu(conn, base_ou, "user")
     for user in users:
         LOG.info(user)
+    return users
 
 
 @register_module
