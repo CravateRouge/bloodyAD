@@ -18,7 +18,7 @@ class Config:
     url: str = ""
 
     def __post_init__(self):
-        
+
         # Handle case where password is hashes
         if ':' in self.password:
             lmhash_maybe, nthash_maybe = self.password.split(':')
@@ -44,9 +44,7 @@ class Config:
 class ConnectionHandler():
     def __init__(self, args=None, config=None):
         if args:
-            cnf = Config(domain=args.domain, username=args.username,
-                     password=args.password, scheme=args.scheme, host=args.host,
-                     kerberos=args.kerberos)
+            cnf = Config(domain=args.domain, username=args.username, password=args.password, scheme=args.scheme, host=args.host, kerberos=args.kerberos)
         else:
             cnf = config
 

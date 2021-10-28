@@ -136,6 +136,7 @@ def getOusInOu(conn, base_ou):
     containers = getObjectsInOu(conn, base_ou, "container")
     for container in containers:
         LOG.info(container)
+    return containers
 
 
 @register_module
@@ -157,6 +158,7 @@ def getComputersInOu(conn, base_ou):
     computers = getObjectsInOu(conn, base_ou, "computer")
     for computer in computers:
         LOG.info(computer)
+    return computers
 
 
 @register_module
@@ -187,9 +189,9 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
 @register_module
 def addDomainSync(conn, identity):
     """
-    Give the right to perform DCSync with the user provided (You must have write permission on the domain)
+    Give the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
     Args:
-        sAMAccountName, DN, GUID or SID of the user
+        identity: sAMAccountName, DN, GUID or SID of the user
     """
     ldap_conn = conn.getLdapConnection()
     user_dn = resolvDN(ldap_conn, identity)
@@ -223,10 +225,10 @@ def addDomainSync(conn, identity):
 @register_module
 def changePassword(conn, identity, new_pass):
     """
-    Change the target password without knowing the old one using LDAPS
+    Change the target password without knowing the old one using LDAPS or RPC
     Args:
-        sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        new password for the target
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        new_pass: new password for the target
     """
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, identity)
@@ -258,8 +260,12 @@ def changePassword(conn, identity, new_pass):
 def addComputer(conn, hostname, password, ou=None):
     """
     Add a new computer in the LDAP database
-    By default the computer object is put in the OU Computers
+    By default the computer object is put in the OU CN=Computers
     This can be changed with the ou parameter
+    Args:
+        hostname: computer name (without the trailing $ symbol)
+        password: the password that will be set for the computer account
+        ou: Optional parameters - Where to put the computer object in the LDAP directory
     """
     ldap_conn = conn.getLdapConnection()
 
@@ -297,8 +303,8 @@ def setRbcd(conn, spn_sid, target_identity):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args:
-        object sid of the SPN (Controlled by you)
-        sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+        spn_sid: object sid of the SPN (Controlled by you)
+        target_identity: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
     """
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, target_identity)
