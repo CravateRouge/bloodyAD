@@ -1,4 +1,5 @@
 
+
 class BloodyError(Exception):
     pass
 
@@ -9,7 +10,7 @@ class LDAPError(BloodyError):
 
 class ResultError(LDAPError):
 
-    def __init__(self, result):
+    def __init__(self, conn, result):
         self.result = result
 
         if self.result['result'] == 50:
@@ -40,14 +41,12 @@ class TooManyResultsError(LDAPError):
         self.entries = entries
 
         if len(self.entries) <= self.limit:
-            LOG.error(self.entries)
             self.results = "\n".join(entry['dn'] for entry in entries)
             self.message = f'[-] {len(self.entries)} objects found in {self.base} with filter: {ldap_filter}\n'
-            self.message += f'\tPlease put the full target DN\n'
+            self.message += '\tPlease put the full target DN\n'
             self.message += f'\tResult of query: \n{self.results}'
         else:
             self.message = f"\tMore than {self.limit} entries in {self.base} match {self.filter}"
-            self.message += f'\tPlease put the full target DN'
+            self.message += '\tPlease put the full target DN'
 
         super().__init__(self.message)
-

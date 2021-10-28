@@ -1,14 +1,15 @@
-
 import ldap3
 import impacket
 import logging
 from impacket.ldap import ldaptypes
-from impacket.dcerpc.v5 import samr, transport
+from impacket.dcerpc.v5 import samr
 
-from .exceptions import NoResultError, ResultError, TooManyResultsError 
+from .exceptions import NoResultError, ResultError, TooManyResultsError
+
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+
 
 # 983551 Full control
 def createACE(sid, privguid=None, accesstype=983551):
@@ -54,6 +55,7 @@ def createEmptySD():
     acl.aces = []
     sd['Dacl'] = acl
     return sd
+
 
 def resolvDN(conn, identity):
     """
@@ -107,12 +109,10 @@ def cryptPassword(session_key, password):
         LOG.error("Warning: You don't have any crypto installed. You need pycryptodomex")
         LOG.error("See https://pypi.org/project/pycryptodomex/")
 
-    from impacket import crypto
-
     sam_user_pass = samr.SAMPR_USER_PASSWORD()
     encoded_pass = password.encode('utf-16le')
     plen = len(encoded_pass)
-    sam_user_pass['Buffer'] = b'A'*(512-plen) + encoded_pass
+    sam_user_pass['Buffer'] = b'A' * (512 - plen) + encoded_pass
     sam_user_pass['Length'] = plen
     pwdBuff = sam_user_pass.getData()
 
@@ -123,32 +123,34 @@ def cryptPassword(session_key, password):
     sam_user_pass_enc['Buffer'] = encBuf
     return sam_user_pass_enc
 
-def userAccountControl(conn, identity, enable, flag):
-    enable = enable == True
 
-    user_dn = resolvDN(conn,identity)
+def userAccountControl(conn, identity, enable, flag):
+    enable = enable == "True"
+
+    user_dn = resolvDN(conn, identity)
     conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
     entry = conn.entries[0]
     userAccountControl = int(entry["userAccountControl"].value)
-    LOG.debug("Original userAccountControl: %s" % userAccountControl) 
+    LOG.debug("Original userAccountControl: {userAccountControl}")
 
     if enable:
         userAccountControl = userAccountControl | flag
     else:
         userAccountControl = userAccountControl & ~flag
 
-    LOG.debug("Updated userAccountControl: %s" % userAccountControl) 
-    conn.modify(user_dn, {'userAccountControl':(ldap3.MODIFY_REPLACE, [userAccountControl])})
+    LOG.debug(f"Updated userAccountControl: {userAccountControl}")
+    conn.modify(user_dn, {'userAccountControl': (ldap3.MODIFY_REPLACE, [userAccountControl])})
 
     if conn.result['result'] == 0:
         LOG.info("Updated userAccountControl attribute successfully")
     else:
-            raise ResultError(conn.result)
+        raise ResultError(conn.result)
+
 
 def rpcChangePassword(conn, target, new_pass):
     """
     Change the target password without knowing the old one using RPC instead of LDAPS
-    Args: 
+    Args:
         domain for NTLM authentication
         NTLM username of the user with permissions on the target
         NTLM password or hash of the user
@@ -159,7 +161,7 @@ def rpcChangePassword(conn, target, new_pass):
     dce = conn.getSamrConnection()
     server_handle = samr.hSamrConnect(dce, conn.conf.host + '\x00')['ServerHandle']
     domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, conn.conf.domain)['DomainId']
-    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']   
+    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)['DomainHandle']
     userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))['RelativeIds']['Element'][0]
     opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
 

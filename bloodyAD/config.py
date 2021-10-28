@@ -40,8 +40,8 @@ class Config:
 class ConnectionHandler():
     def __init__(self, args):
         cnf = Config(domain=args.domain, username=args.username,
-                password=args.password, scheme=args.scheme, host=args.host,
-                kerberos=args.kerberos)
+                     password=args.password, scheme=args.scheme, host=args.host,
+                     kerberos=args.kerberos)
         self.conf = cnf
         self.samr = None
         self.ldap = None
@@ -55,7 +55,7 @@ class ConnectionHandler():
         cnf = self.conf
         rpctransport = transport.SMBTransport(cnf.host, filename=r'\samr')
         rpctransport.set_credentials(cnf.username, cnf.password, cnf.domain,
-                lmhash=cnf.lmhash, nthash=cnf.nthash)
+                                     lmhash=cnf.lmhash, nthash=cnf.nthash)
         dce = rpctransport.get_dce_rpc()
         dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
         dce.connect()
@@ -72,13 +72,12 @@ class ConnectionHandler():
         s = ldap3.Server(cnf.url, get_info=ldap3.DSA)
 
         if cnf.kerberos:
-            c = ldap3.Connection(s, authentication=ldap3.SASL, 
-                    sasl_mechanism=ldap3.KERBEROS, 
-                    sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,))
+            c = ldap3.Connection(s, authentication=ldap3.SASL,
+                                 sasl_mechanism=ldap3.KERBEROS,
+                                 sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,))
         else:
-            c = ldap3.Connection(s, user='%s\\%s' % (cnf.domain, cnf.username), 
-                    password=cnf.password, authentication=ldap3.NTLM)
+            c = ldap3.Connection(s, user='%s\\%s' % (cnf.domain, cnf.username),
+                                 password=cnf.password, authentication=ldap3.NTLM)
 
         c.bind()
         return c
-

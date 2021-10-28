@@ -1,11 +1,12 @@
 # Credits to aclpwn
+import sys
 import argparse
-from inspect import getmembers, isfunction, signature, _empty
 from bloodyAD import modules, ConnectionHandler
 
 
 def main():
     parser = argparse.ArgumentParser(description='Active Directory Privilege Escalation Framework', formatter_class=argparse.RawTextHelpFormatter)
+
     parser._optionals.title = 'Main options'
     parser._positionals.title = 'Required options'
 
@@ -29,12 +30,19 @@ def main():
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1:args.func.__code__.co_argcount]
     param_values = args.func_args
+
+    if len(param_values) > len(param_names):
+        print("You provided too many arguments\n")
+        print(args.func.__name__ + ':')
+        print(args.func.__doc__)
+        sys.exit(1)
+
     params = {param_names[i]: param_values[i] for i in range(len(param_values))}
 
     # Launch the command
     conn = ConnectionHandler(args)
     args.func(conn, **params)
 
-        
+
 if __name__ == '__main__':
     main()
