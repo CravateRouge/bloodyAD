@@ -195,10 +195,8 @@ def addDomainSync(conn, identity):
         identity: sAMAccountName, DN, GUID or SID of the user
     """
     ldap_conn = conn.getLdapConnection()
-    user_dn = resolvDN(ldap_conn, identity)
-    # Query for the sid of our target user
-    ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
-    user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+
+    user_sid = getObjectSID(conn, identity)
 
     # Set SD flags to only query for DACL
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
