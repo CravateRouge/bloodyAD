@@ -1,7 +1,7 @@
 # Credits to aclpwn
 import sys
 import argparse
-from bloodyAD import modules, ConnectionHandler
+from bloodyAD import functions, ConnectionHandler
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     # Find list of functions and their arguments in ldap.py
     # And add them all as subparsers
     subparsers = parser.add_subparsers(title="Commands", help='Function to call')
-    for name, f in modules:
+    for name, f in functions:
         subparser = subparsers.add_parser(name, prog=f.__doc__)
         subparser.add_argument('func_args', nargs='*')
         subparser.set_defaults(func=f)

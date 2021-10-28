@@ -18,11 +18,11 @@ from .utils import userAccountControl
 from .utils import LOG
 
 
-modules = []
+functions = []
 
 
 def register_module(f):
-    modules.append((f.__name__, f))
+    functions.append((f.__name__, f))
 
     @wraps(f)
     def wrapper(*args, **kwds):
@@ -39,7 +39,9 @@ def getGroupMembers(conn, identity):
     ldap_conn = conn.getLdapConnection()
     group_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(group_dn, '(objectClass=group)', attributes='member')
-    LOG.info(ldap_conn.response[0]['attributes']['member'])
+    members = ldap_conn.response[0]['attributes']['member']
+    LOG.info(members)
+    return members
 
 
 @register_module
