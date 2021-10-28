@@ -14,12 +14,13 @@ logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 # 983551 Full control
 def createACE(sid, privguid=None, accesstype=983551):
     nace = ldaptypes.ACE()
-    nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
     nace['AceFlags'] = 0x00
 
     if privguid is None:
         acedata = ldaptypes.ACCESS_ALLOWED_ACE()
-    else:
+        nace['AceType'] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
+    else:   
+        nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
         acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
         acedata['ObjectType'] = impacket.uuid.string_to_bin(privguid)
         acedata['InheritedObjectType'] = b''
@@ -128,9 +129,8 @@ def userAccountControl(conn, identity, enable, flag):
     enable = enable == "True"
 
     user_dn = resolvDN(conn, identity)
-    conn.search(user_dn, '(objectClass=*)', attributes=['userAccountControl'])
-    entry = conn.entries[0]
-    userAccountControl = int(entry["userAccountControl"].value)
+    conn.search(user_dn, '(objectClass=*)', attributes='userAccountControl')
+    userAccountControl = int(conn.entries[0]["userAccountControl"].value)
     LOG.debug("Original userAccountControl: {userAccountControl}")
 
     if enable:

