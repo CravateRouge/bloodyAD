@@ -4,6 +4,7 @@ import string
 from functools import wraps
 
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
+from ldap3.protocol.formatters.formatters import format_sid
 from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
@@ -425,18 +426,31 @@ def setAccountDisableFlag(conn, identity, enable):
 
 
 @register_module
+def getObjectSID(conn, identity):
+    """
+    Get the SID for the given identity
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object
+    """
+    ldap_conn = conn.getLdapConnection()
+    object_dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(object_dn, '(objectClass=*)', attributes=['objectSid'])
+    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+    LOG.info(format_sid(object_sid))
+    return object_sid
+
+
+@register_module
 def modifyGpoACE(conn, identity, gpo):
     """
     Give permission to a user to modify the GPO
     Args:
-        sAMAccountName, DN, GUID or SID of the user
-        name of the GPO (ldap name)
+        identity: sAMAccountName, DN, GUID or SID of the user
+        gpo: name of the GPO (ldap name)
     """
     ldap_conn = conn.getLdapConnection()
 
-    user_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(user_dn, '(objectClass=*)', attributes=['objectSid'])
-    user_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+    user_sid = getObjectSID(conn, identity)
 
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
     ldap_filter = '(&(objectClass=groupPolicyContainer)(name=%s))' % gpo
