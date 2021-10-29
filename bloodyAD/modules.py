@@ -67,10 +67,21 @@ def getObjectSID(conn, identity):
     """
     ldap_conn = conn.getLdapConnection()
     object_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(object_dn, '(objectClass=*)', attributes=['objectSid'])
+    ldap_conn.search(object_dn, '(objectClass=*)', attributes='objectSid')
     object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
-    LOG.info(format_sid(object_sid))
+    #LOG.info(format_sid(object_sid))
     return object_sid
+
+def getDefaultPasswordPolicy(conn):
+    """
+    """
+    ldap_conn = conn.getLdapConnection()
+    domain_dn = getDefaultNamingContext(ldap_conn)
+    ldap_conn.search(domain_dn, '(objectClass=domain)', attributes='minPwdLength')
+    attributes = ldap_conn.response[0]['attributes']
+    LOG.info(attributes)
+    return attributes
+
 
 
 @register_module
@@ -506,8 +517,8 @@ def setAccountDisableFlag(conn, identity, enable):
     Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
     You must have write permission on the UserAccountControl attribute of the target
     Args:
-        sAMAccountName, DN, GUID or SID of the target
-        set the flag on the UserAccountControl attribute
+        identity: sAMAccountName, DN, GUID or SID of the target
+        enable: True to enable the identity or False to disable it
     """
     ldap_conn = conn.getLdapConnection()
 
