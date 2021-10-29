@@ -59,6 +59,19 @@ def getObjectAttributes(conn, identity):
 
 
 @register_module
+def getDefaultPasswordPolicy(conn):
+    """
+    """
+    ldap_conn = conn.getLdapConnection()
+    domain_dn = getDefaultNamingContext(ldap_conn)
+    ldap_conn.search(domain_dn, '(objectClass=domain)', attributes='minPwdLength')
+    attributes = ldap_conn.response[0]['attributes']
+    LOG.info(attributes)
+    return attributes
+
+
+
+@register_module
 def addUser(conn, sAMAccountName, password, ou=None):
     """
     Add a new user in the LDAP database
@@ -298,7 +311,7 @@ def addComputer(conn, hostname, password, ou=None):
 
 
 @register_module
-def setRbcd(conn, spn_sid, target_identity):
+def setRbcd(conn, identity, target_identity):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args:
@@ -308,11 +321,8 @@ def setRbcd(conn, spn_sid, target_identity):
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, target_identity)
 
-    entries = ldap_conn.search(getDefaultNamingContext(ldap_conn), '(sAMAccountName=%s)' % spn_sid, attributes=['objectSid'])
-    try:
-        spn_sid = entries[0]['objectSid'].raw_values[0]
-    except IndexError:
-        LOG.error('User not found in LDAP: %s' % spn_sid)
+    spn_sid = getObjectSID(conn, identity)
+    print(spn_sid)
 
     ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['SAMAccountName', 'objectSid', 'msDS-AllowedToActOnBehalfOfOtherIdentity'])
     targetuser = None
@@ -414,8 +424,8 @@ def setAccountDisableFlag(conn, identity, enable):
     Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
     You must have write permission on the UserAccountControl attribute of the target
     Args:
-        sAMAccountName, DN, GUID or SID of the target
-        set the flag on the UserAccountControl attribute
+        identity: sAMAccountName, DN, GUID or SID of the target
+        enable: True to enable the identity or False to disable it
     """
     ldap_conn = conn.getLdapConnection()
 
@@ -434,7 +444,7 @@ def getObjectSID(conn, identity):
     object_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(object_dn, '(objectClass=*)', attributes=['objectSid'])
     object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
-    LOG.info(format_sid(object_sid))
+    #LOG.info(format_sid(object_sid))
     return object_sid
 
 
