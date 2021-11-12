@@ -203,7 +203,7 @@ def changePassword(conn, identity, new_pass):
 
 
 @register_module
-def addUserToGroup(conn, member, group):
+def addObjectToGroup(conn, member, group):
     """
     Add an object to a group
         member: the user or group to add into the group
@@ -233,7 +233,7 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
 
 
 @register_module
-def delUserFromGroup(conn, member, group):
+def delObjectFromGroup(conn, member, group):
     """
     Remove member from group
     """
@@ -525,7 +525,7 @@ def modifyGpoACL(conn, identity, gpo):
 
     ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [sd.getData()])}, controls=controls)
     if ldap_conn.result["result"] == 0:
-        LOG.info('LDAP server claims to have taken the sdriptor. Have fun')
+        LOG.info('LDAP server claims to have taken the security descriptor. Have fun')
     else:
         raise ResultError(ldap_conn.result)
 

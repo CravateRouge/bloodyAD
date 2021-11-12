@@ -60,8 +60,13 @@ class ConnectionHandler():
     def _connectSamr(self):
         cnf = self.conf
         rpctransport = transport.SMBTransport(cnf.host, filename=r'\samr')
-        rpctransport.set_credentials(cnf.username, cnf.password, cnf.domain,
-                                     lmhash=cnf.lmhash, nthash=cnf.nthash)
+
+        if cnf.nthash:
+            rpctransport.set_credentials(cnf.username, cnf.password, cnf.domain,
+                                        lmhash=cnf.lmhash, nthash=cnf.nthash)
+        else:
+            rpctransport.set_credentials(cnf.username, cnf.password, cnf.domain)
+
         dce = rpctransport.get_dce_rpc()
         dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
         dce.connect()
@@ -80,10 +85,32 @@ class ConnectionHandler():
         if cnf.kerberos:
             c = ldap3.Connection(s, authentication=ldap3.SASL,
                                  sasl_mechanism=ldap3.KERBEROS,
-                                 sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,))
+                                 sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,), raise_exceptions=True)
         else:
             c = ldap3.Connection(s, user='%s\\%s' % (cnf.domain, cnf.username),
-                                 password=cnf.password, authentication=ldap3.NTLM)
+                                 password=cnf.password, authentication=ldap3.NTLM, raise_exceptions=True)
 
         c.bind()
         return c
+    
+    def close(self):
+        self._closeSamr()
+        self._closeLdap()
+        
+    def _closeSamr(self):
+        if self.samr:
+            self.samr.disconnect()
+            self.samr = None
+    
+    def _closeLdap(self):
+        if self.ldap:
+            self.ldap.unbind()
+            self.ldap = None
+
+    def switchUser(self, username, password):
+        self.conf.username = username
+        self.conf.password = password
+        if self.ldap:
+            self.ldap.rebind(user='%s\\%s' % (self.conf.domain, username), password=password, authentication=ldap3.NTLM)
+        self._closeSamr()
+
