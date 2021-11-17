@@ -20,17 +20,33 @@ class Database:
    
     @staticmethod
     def _setWeight(tx):
-        tx.run("MATCH (n)-[r:MemberOf]->(m:Group) SET r.bloodycost = 0 ")
-        tx.run("MATCH (n)-[r:AddMember|GenericAll|GenericWrite|AllExtendedRights]->(m:Group) SET r.bloodycost = 1 ")
-        tx.run("MATCH (n)-[r:WriteOwner]->(m:Group) SET r.bloodycost = 3 ")
-        tx.run("MATCH (n)-[r:WriteDacl|Owns]->(m:Group) SET r.bloodycost = 2 ")
-        # These privileges on user objects are not wanted since they work only when resetting passwords
-        tx.run("MATCH (n)-[r:WriteDacl|Owns|WriteOwner|GenericAll|GenericWrite|ForceChangePassword|AllExtendedRights]->(m:User) SET r.bloodycost = 200 ")
-        tx.run("MATCH (n)-[r:WriteDacl]->(m:Domain) SET r.bloodycost = 1 ")
-        tx.run("MATCH (n)-[r:DCSync|GetChangesAll|AllExtendedRights]->(m:Domain) SET r.bloodycost = 0")
+        bloodycosts = [
+            {'cost':0, 'edges':'MemberOf', 'endnode':'Group'},
+            {'cost':100, 'edges':'AddMember|GenericAll|GenericWrite|AllExtendedRights', 'endnode':'Group'},
+            {'cost':200, 'edges':'WriteDacl|Owns', 'endnode':'Group'},
+            {'cost':300, 'edges':'WriteOwner', 'endnode':'Group'},
 
-    # TODO: Alternative with only CYPHER https://neo4j.com/blog/journey-planning-why-i-love-cypher/ - https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
-    # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin and weight setting
+            {'cost':1, 'edges':'DCSync|GenericAll|GetChangesAll|AllExtendedRights', 'endnode':'Domain'},
+            {'cost':101, 'edges':'WriteDacl|Owns', 'endnode':'Domain'},
+            {'cost':102, 'edges':'WriteOwner', 'endnode':'Domain'},
+
+            {'cost':100000, 'edges':'GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'User'},
+            {'cost':100001, 'edges':'WriteDacl|Owns', 'endnode':'User'},
+            {'cost':100002, 'edges':'WriteOwner', 'endnode':'User'},
+
+            {'cost':100100, 'edges':'GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'Computer'},
+            {'cost':100101, 'edges':'WriteDacl|Owns', 'endnode':'Computer'},
+            {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'}
+
+            # TODO: Maybe take into account path with GenericAll on GPO
+            # TODO: Maybe take into account path with GenericAll on OU
+        ]
+
+        for bloodycost in bloodycosts:
+            tx.run(f"MATCH ()-[r:{bloodycost.edges}]->(:{bloodycost.endnode}) SET r.bloodycost = {bloodycost.cost}")
+
+    # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
+    # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin
     @staticmethod 
     def _findShortestPath(tx, source, target):
         # result = tx.run("MATCH (source {name: $source}), (target {name: $target}) "
@@ -47,7 +63,7 @@ class Database:
         "YIELD path RETURN path",source=source, target=target)
         return result.single()[0].relationships
     
-    @staticmethod
-    def _retrieveCheaperEdge(tx, start, end):
-        result = tx.run("MATCH (start)-[r]->(end) WHERE id(start)=$start and id(end)=$end RETURN r ORDER BY r.bloodycost LIMIT 1", start=start, end=end)
-        return result.single()[0]
+    # @staticmethod
+    # def _retrieveCheaperEdge(tx, start, end):
+    #     result = tx.run("MATCH (start)-[r]->(end) WHERE id(start)=$start and id(end)=$end RETURN r ORDER BY r.bloodycost LIMIT 1", start=start, end=end)
+    #     return result.single()[0]
