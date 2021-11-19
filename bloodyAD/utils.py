@@ -239,10 +239,9 @@ def modifySecDesc(conn, identity, target,
                     LOG.debug('    %s' % ace_sid.formatCanonical())
                     aces_to_keep.append(ace)
                     sd['Dacl'].aces = aces_to_keep
-            # Remove the attribute if there is no ace to keep
-        if len(sd['Dacl'].aces) > 0 and ldap_attribute == 'nTSecurityDescriptor':
+        # Remove the attribute if there is no ace to keep
+        if len(sd['Dacl'].aces) > 0 or ldap_attribute == 'nTSecurityDescriptor':
             attr_values.append(sd.getData())
-
 
     ldap_conn.modify(entry_dn, {ldap_attribute: [ldap3.MODIFY_REPLACE, attr_values]}, controls=controls)
     if ldap_conn.result['result'] == 0:

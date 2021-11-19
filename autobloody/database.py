@@ -27,14 +27,14 @@ class Database:
             {'cost':300, 'edges':'WriteOwner', 'endnode':'Group'},
 
             {'cost':1, 'edges':'DCSync|GenericAll|GetChangesAll|AllExtendedRights', 'endnode':'Domain'},
-            {'cost':101, 'edges':'WriteDacl|Owns', 'endnode':'Domain'},
-            {'cost':102, 'edges':'WriteOwner', 'endnode':'Domain'},
+            {'cost':2, 'edges':'WriteDacl|Owns', 'endnode':'Domain'},
+            {'cost':3, 'edges':'WriteOwner', 'endnode':'Domain'},
 
-            {'cost':100000, 'edges':'GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'User'},
+            {'cost':100000, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'User'},
             {'cost':100001, 'edges':'WriteDacl|Owns', 'endnode':'User'},
             {'cost':100002, 'edges':'WriteOwner', 'endnode':'User'},
 
-            {'cost':100100, 'edges':'GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'Computer'},
+            {'cost':100100, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'Computer'},
             {'cost':100101, 'edges':'WriteDacl|Owns', 'endnode':'Computer'},
             {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'}
 
@@ -43,7 +43,7 @@ class Database:
         ]
 
         for bloodycost in bloodycosts:
-            tx.run(f"MATCH ()-[r:{bloodycost.edges}]->(:{bloodycost.endnode}) SET r.bloodycost = {bloodycost.cost}")
+            tx.run(f"MATCH ()-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
 
     # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
     # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin
