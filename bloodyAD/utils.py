@@ -1,33 +1,33 @@
 import ldap3
 import impacket
 import logging
+from ldap3.protocol.formatters.formatters import format_sid
 from impacket.ldap import ldaptypes
-from impacket.dcerpc.v5 import samr
+from impacket.dcerpc.v5 import samr, dtypes
 
 from .exceptions import NoResultError, ResultError, TooManyResultsError
-
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 
 # 983551 Full control
-def createACE(sid, privguid=None, accesstype=983551):
+def createACE(sid, object_type=None, access_mask=983551):
     nace = ldaptypes.ACE()
     nace['AceFlags'] = 0x00
 
-    if privguid is None:
+    if object_type is None:
         acedata = ldaptypes.ACCESS_ALLOWED_ACE()
         nace['AceType'] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
     else:   
         nace['AceType'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
         acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
-        acedata['ObjectType'] = impacket.uuid.string_to_bin(privguid)
+        acedata['ObjectType'] = impacket.uuid.string_to_bin(object_type)
         acedata['InheritedObjectType'] = b''
         acedata['Flags'] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
 
     acedata['Mask'] = ldaptypes.ACCESS_MASK()
-    acedata['Mask']['Mask'] = accesstype
+    acedata['Mask']['Mask'] = access_mask
 
     if type(sid) is str:
         acedata['Sid'] = ldaptypes.LDAP_SID()
@@ -58,14 +58,12 @@ def createEmptySD():
     return sd
 
 
-def resolvDN(conn, identity):
+def resolvDN(conn, identity, objtype=None):
     """
     Return the DN for the object based on the parameters identity
-    The parameter identity can be:
-      - a DN, in which case it it not validated and returned as is
-      - a sAMAccountName
-      - a GUID
-      - a SID
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the user
+        objtype: None is default or GPO
     """
 
     if "dc=" in identity.lower():
@@ -76,9 +74,13 @@ def resolvDN(conn, identity):
     if "s-1-" in identity.lower():
         # We assume identity is an SID
         ldap_filter = f'(objectSid={identity})'
+
     elif "{" in identity:
-        # We assume identity is a GUID
-        ldap_filter = f'(objectGUID={identity})'
+        if objtype == "GPO":
+            ldap_filter = f'(&(objectClass=groupPolicyContainer)(name={identity}))'
+        else:        
+            # We assume identity is a GUID
+            ldap_filter = f'(objectGUID={identity})'
     else:
         # By default, we assume identity is a sam account name
         ldap_filter = f'(sAMAccountName={identity})'
@@ -101,6 +103,20 @@ def resolvDN(conn, identity):
 def getDefaultNamingContext(conn):
     naming_context = conn.server.info.other['defaultNamingContext'][0]
     return naming_context
+
+
+def getObjectSID(conn, identity):
+    """
+    Get the SID for the given identity
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object
+    """
+    ldap_conn = conn.getLdapConnection()
+    object_dn = resolvDN(ldap_conn, identity)
+    ldap_conn.search(object_dn, '(objectClass=*)', attributes='objectSid')
+    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+    LOG.info(f'[+] {identity} SID is: {format_sid(object_sid)}')
+    return object_sid
 
 
 def cryptPassword(session_key, password):
@@ -127,11 +143,12 @@ def cryptPassword(session_key, password):
 
 def userAccountControl(conn, identity, enable, flag):
     enable = enable == "True"
-
+    
+    conn = conn.getLdapConnection()
     user_dn = resolvDN(conn, identity)
     conn.search(user_dn, '(objectClass=*)', attributes='userAccountControl')
     userAccountControl = int(conn.entries[0]["userAccountControl"].value)
-    LOG.debug("Original userAccountControl: {userAccountControl}")
+    LOG.debug(f"Original userAccountControl: {userAccountControl}")
 
     if enable:
         userAccountControl = userAccountControl | flag
@@ -175,3 +192,60 @@ def rpcChangePassword(conn, target, new_pass):
 
     resp = dce.request(req)
     return resp
+
+def modifySecDesc(conn, identity, target,
+    ldap_filter='(objectClass=*)', ldap_attribute='nTSecurityDescriptor',
+    object_type=None, access_mask=ldaptypes.ACCESS_MASK.GENERIC_ALL, control_flag=None, enable="True"):
+
+    enable = enable == "True"
+    ldap_conn = conn.getLdapConnection()
+
+    target_dn = resolvDN(ldap_conn, target)
+    controls=None
+    if control_flag:
+        controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
+    ldap_conn.search(target_dn, ldap_filter, attributes=ldap_attribute, controls=controls)
+
+    if len(ldap_conn.entries) <= 0:
+        raise NoResultError(target_dn, ldap_filter)
+
+    entry_dn = ldap_conn.entries[0].entry_dn
+
+    sd_data = ldap_conn.entries[0][ldap_attribute].raw_values
+    if len(sd_data) < 1:
+        sd = createEmptySD()
+    else:
+        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
+
+    old_sd = sd
+    user_sid = getObjectSID(conn, identity)
+    attr_values = []
+
+    if control_flag == dtypes.OWNER_SECURITY_INFORMATION:
+        sd['OwnerSid'] = ldaptypes.LDAP_SID()
+        sd['OwnerSid'].fromCanonical(format_sid(user_sid))
+        attr_values.append(sd.getData())
+    else:
+        if enable:
+            sd['Dacl'].aces.append(createACE(sid=user_sid, access_mask=access_mask))
+        else:
+            aces_to_keep = []
+            LOG.debug('Currently allowed sids:')
+            for ace in sd['Dacl'].aces:
+                ace_sid = ace['Ace']['Sid']
+                if ace_sid.getData() == user_sid:
+                    LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
+                else:
+                    LOG.debug('    %s' % ace_sid.formatCanonical())
+                    aces_to_keep.append(ace)
+                    sd['Dacl'].aces = aces_to_keep
+            # Remove the attribute if there is no ace to keep
+        if len(sd['Dacl'].aces) > 0 and ldap_attribute == 'nTSecurityDescriptor':
+            attr_values.append(sd.getData())
+
+
+    ldap_conn.modify(entry_dn, {ldap_attribute: [ldap3.MODIFY_REPLACE, attr_values]}, controls=controls)
+    if ldap_conn.result['result'] == 0:
+        return old_sd
+    else:
+        raise ResultError(ldap_conn.result)
