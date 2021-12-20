@@ -15,15 +15,16 @@ The following are required:
 - DSinternals
 - Impacket
 - Ldap3
+Use the requirements.txt for your virtual environment: `pip3 install -r requirements.txt`
 
 ### Usage
 Simple usage:
-```
+```ps1
 python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799ac25b439bd6a31 changePassword mytarget 'Password123!'
 ```
 
 List of all available functions:
-```
+```ps1
 [bloodyAD]$ python bloodyAD.py -h
 usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] [--host HOST] {getGroupMembers,
 getObjectAttributes, getObjectSID, addUser, addComputer, delObject, changePassword, addObjectToGroup, addForeignObjectToGroup,
@@ -54,7 +55,7 @@ Commands:
 ```
 
 Help text to use a specific function:
-```
+```ps1
 [bloodyAD]$ python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
 usage: 
     Change the target password without knowing the old one using LDAPS or RPC
@@ -95,12 +96,12 @@ The following are required:
 First data must be imported into BloodHound (e.g using SharpHound or BloodHound.py) and Neo4j must be running.
 
 Simple usage:
-```
+```ps1
 pathgen.py -dp neo4jPass -ds 'OWNED_USER@ATTACK.LOCAL' -dt 'TARGET_USER@ATTACK.LOCAL' && autobloody.py -d ATTACK -u 'owned_user' -p 'owned_user_pass' --host 172.16.1.15
 ```
 
 Full help for `pathgen.py`:
-```
+```ps1
 $ python pathgen.py -h
 usage: pathgen.py [-h] [--dburi DBURI] [-du DBUSER] -dp DBPASSWORD -ds DBSOURCE -dt DBTARGET [-f FILEPATH]
 
@@ -122,7 +123,7 @@ optional arguments:
 ```
 
 Full help for `autobloody.py`:
-```
+```ps1
 $ python autobloody.py -h
 usage: autobloody.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] --host HOST [--path PATH]
 
