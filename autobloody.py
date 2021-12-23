@@ -1,3 +1,4 @@
+#!/usr/bin/python 
 import argparse, json
 from autobloody import automation
 

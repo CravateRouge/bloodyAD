@@ -1,3 +1,4 @@
+#!/usr/bin/python 
 # Credits to aclpwn
 import sys
 import argparse

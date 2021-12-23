@@ -1,6 +1,9 @@
 import ldap3
 import random
 import string
+import types
+import re
+from .addcomputer import ADDCOMPUTER
 from functools import wraps
 
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
@@ -99,11 +102,10 @@ def addUser(conn, sAMAccountName, password, ou=None):
         LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
         raise BloodyError(ldap_conn.result['description'])
 
-
 @register_module
 def addComputer(conn, hostname, password, ou=None):
     """
-    Add a new computer in the LDAP database
+    Add a new computer in the AD database
     By default the computer object is put in the OU CN=Computers
     This can be changed with the ou parameter
     Args:
@@ -111,35 +113,23 @@ def addComputer(conn, hostname, password, ou=None):
         password: the password that will be set for the computer account
         ou: Optional parameters - Where to put the computer object in the LDAP directory
     """
-    ldap_conn = conn.getLdapConnection()
-
-    sAMAccountName = hostname + '$'
-    domain = conn.conf.domain
-
-    if ou:
-        computer_dn = f'cn={sAMAccountName},{ou}'
+    cnf = conn.conf
+    if re.search('[a-zA-Z]', cnf.host):
+        dc_host = cnf.host
+        dc_ip = None
     else:
-        naming_context = getDefaultNamingContext(ldap_conn)
-        computer_dn = f'cn={sAMAccountName},cn=Computers,{naming_context}'
-
-    computer_cls = ['top', 'person', 'organizationalPerson', 'user', 'computer']
-    computer_spns = [f'HOST/{hostname}',
-                     f'HOST/{hostname}.{domain}',
-                     f'RestrictedKrbHost/{hostname}',
-                     f'RestrictedKrbHost/{hostname}.{domain}',
-                     ]
-    attr = {'objectClass': computer_cls,
-            'distinguishedName': computer_dn,
-            'sAMAccountName': sAMAccountName,
-            'userAccountControl': 0x1000,
-            'dnsHostName': f'{hostname}.{domain}',
-            'servicePrincipalName': computer_spns,
-            }
-
-    ldap_conn.add(computer_dn, attributes=attr)
-    LOG.info(ldap_conn.result)
-
-    changePassword(conn, sAMAccountName, password)
+        dc_host = None
+        dc_ip = cnf.host
+    options = types.SimpleNamespace(
+        hashes=f'{cnf.lmhash}:{cnf.nthash}' if cnf.nthash else None,
+        aesKey=None, k=cnf.kerberos, kdc_host=None,
+        dc_host=dc_host, dc_ip=dc_ip,
+        computer_name=hostname, computer_pass=password,
+        method='LDAPS' if cnf.scheme.lower() == 'ldaps' else 'SAMR',
+        port=None, domain_netbios=None,
+        no_add=None, delete=None, baseDN=None,
+        computer_group=ou)
+    ADDCOMPUTER(cnf.username, cnf.password, cnf.domain, options).run()
 
 
 @register_module
