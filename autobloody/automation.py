@@ -15,6 +15,7 @@ class Automation:
             100000 : self._forceChangePassword,
             100001 : self._aclObj,
             100002 : self._ownerObj,
+            100100 : self._forceChangePassword,
             100101 : self._aclObj,
             100102 : self._ownerObj
         }
@@ -81,13 +82,13 @@ class Automation:
     # TODO: change password change with shadow credentials when it's possible
     # TODO: don't perform change password if it's explicitly refused by user
     def _forceChangePassword(self, rel):
-        user = rel['end_node']['name'].split('@')[0]
+        user = rel['end_node']['distinguishedname']
         pwd = 'Password512!'
         LOG.debug(f'[+] changing {user} password')
         modules.changePassword(self.conn, user, pwd)
-        LOG.info(f'[+] password changed for to {pwd} for {user}')
+        LOG.info(f'[+] password changed to {pwd} for {user}')
         self._switchUser(user, pwd)
-        LOG.debug(f'[+] switch LDAP/SAMR connection to user {user}')
+        LOG.debug(f'[+] switching to LDAP/SAMR connection for user {user}')
 
     def _genericAll(self, rel):
         user = rel['start_node']['distinguishedname']
