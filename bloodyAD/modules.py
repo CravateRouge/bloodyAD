@@ -40,6 +40,8 @@ def register_module(f):
 def getGroupMembers(conn, identity):
     """
     Return the list of member for a group whose identity is given as parameter
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
     """
     ldap_conn = conn.getLdapConnection()
     group_dn = resolvDN(ldap_conn, identity)
@@ -53,6 +55,8 @@ def getGroupMembers(conn, identity):
 def getObjectAttributes(conn, identity):
     """
     Fetch LDAP attributes for the identity (group or user) provided
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
     """
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
@@ -79,6 +83,9 @@ def addUser(conn, sAMAccountName, password, ou=None):
     Add a new user in the LDAP database
     By default the user object is put in the OU Users
     This can be changed with the ou parameter
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
+        password: the password that will be set for the user account
     """
     ldap_conn = conn.getLdapConnection()
 
@@ -136,6 +143,8 @@ def addComputer(conn, hostname, password, ou=None):
 def delObject(conn, identity):
     """
     Delete an object (user or group) from the Directory based on the identity provided
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
     """
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)

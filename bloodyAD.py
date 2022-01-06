@@ -28,6 +28,10 @@ def main():
 
     args = parser.parse_args()
 
+    if not 'func' in args :
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+        
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1:args.func.__code__.co_argcount]
     param_values = args.func_args
