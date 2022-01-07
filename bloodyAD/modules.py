@@ -60,10 +60,13 @@ def getObjectAttributes(conn, identity):
     """
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(dn, '(objectClass=*)', attributes='*')
-    attributes = ldap_conn.response[0]['attributes']
-    LOG.info(attributes)
-    return attributes
+
+    # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
+    control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
+    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
+    ldap_conn.search(dn, '(objectClass=*)', attributes='*', controls=controls)
+    LOG.info(ldap_conn.entries[0].entry_to_ldif())
+    return ldap_conn.response[0]['attributes']
 
 def getDefaultPasswordPolicy(conn):
     """
@@ -71,9 +74,8 @@ def getDefaultPasswordPolicy(conn):
     ldap_conn = conn.getLdapConnection()
     domain_dn = getDefaultNamingContext(ldap_conn)
     ldap_conn.search(domain_dn, '(objectClass=domain)', attributes='minPwdLength')
-    attributes = ldap_conn.response[0]['attributes']
-    LOG.info(attributes)
-    return attributes
+    LOG.info(ldap_conn.response[0].entry_to_ldif())
+    return ldap_conn.response[0]['attributes']
 
 
 
@@ -177,9 +179,9 @@ def changePassword(conn, identity, new_pass):
         for marker in ["dc=", "s-1", "{"]:
             if marker in identity.lower():
                 ldap_filter = '(objectClass=*)'
-                entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
+                ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
                 try:
-                    sAMAccountName = entries[0]['sAMAccountName']
+                    sAMAccountName = ldap_conn.entries[0]['sAMAccountName']
                 except IndexError:
                     raise NoResultError(target_dn, ldap_filter)
                 break
