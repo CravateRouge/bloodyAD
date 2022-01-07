@@ -175,7 +175,7 @@ def changePassword(conn, identity, new_pass):
         # Check if identity is sAMAccountName
         sAMAccountName = identity
         for marker in ["dc=", "s-1", "{"]:
-            if marker in identity:
+            if marker in identity.lower():
                 ldap_filter = '(objectClass=*)'
                 entries = ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
                 try:
