@@ -46,13 +46,12 @@ def getGroupMembers(conn, identity):
     ldap_conn = conn.getLdapConnection()
     group_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(group_dn, '(objectClass=group)', attributes='member')
-    members = ldap_conn.response[0]['attributes']['member']
-    LOG.info(members)
-    return members
+    LOG.info(ldap_conn.response_to_json())
+    return ldap_conn.entries[0]['attributes']['member']
 
 
 @register_module
-def getObjectAttributes(conn, identity):
+def getObjectAttributes(conn, identity, attr='*'):
     """
     Fetch LDAP attributes for the identity (group or user) provided
     Args:
@@ -64,8 +63,8 @@ def getObjectAttributes(conn, identity):
     # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
     control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
-    ldap_conn.search(dn, '(objectClass=*)', attributes='*', controls=controls)
-    LOG.info(ldap_conn.entries[0].entry_to_ldif())
+    ldap_conn.search(dn, '(objectClass=*)', attributes=attr, controls=controls)
+    LOG.info(ldap_conn.response_to_json())
     return ldap_conn.response[0]['attributes']
 
 def getDefaultPasswordPolicy(conn):
@@ -74,8 +73,8 @@ def getDefaultPasswordPolicy(conn):
     ldap_conn = conn.getLdapConnection()
     domain_dn = getDefaultNamingContext(ldap_conn)
     ldap_conn.search(domain_dn, '(objectClass=domain)', attributes='minPwdLength')
-    LOG.info(ldap_conn.response[0].entry_to_ldif())
-    return ldap_conn.response[0]['attributes']
+    LOG.info(ldap_conn.response_to_json())
+    return ldap_conn.response[0]['attributes']['minPwdLength']
 
 
 
@@ -181,7 +180,7 @@ def changePassword(conn, identity, new_pass):
                 ldap_filter = '(objectClass=*)'
                 ldap_conn.search(target_dn, ldap_filter, attributes=['SAMAccountName'])
                 try:
-                    sAMAccountName = ldap_conn.entries[0]['sAMAccountName']
+                    sAMAccountName = ldap_conn.response[0]['attributes']['sAMAccountName']
                 except IndexError:
                     raise NoResultError(target_dn, ldap_filter)
                 break
@@ -297,7 +296,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
 
     ldap_conn.search(target_dn, '(objectClass=*)', attributes=['msDS-KeyCredentialLink'])
 
-    new_values = ldap_conn.entries[0]['msDS-KeyCredentialLink'].raw_values + [keyCredential.toDNWithBinary().toString()]
+    new_values = ldap_conn.response[0]['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
     LOG.debug(new_values)
     LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
     ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})

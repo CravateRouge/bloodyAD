@@ -114,7 +114,7 @@ def getObjectSID(conn, identity):
     ldap_conn = conn.getLdapConnection()
     object_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(object_dn, '(objectClass=*)', attributes='objectSid')
-    object_sid = ldap_conn.entries[0]['objectSid'].raw_values[0]
+    object_sid = ldap_conn.response[0]['raw_attributes']['objectSid']
     LOG.info(f'[+] {identity} SID is: {format_sid(object_sid)}')
     return object_sid
 
@@ -147,7 +147,7 @@ def userAccountControl(conn, identity, enable, flag):
     conn = conn.getLdapConnection()
     user_dn = resolvDN(conn, identity)
     conn.search(user_dn, '(objectClass=*)', attributes='userAccountControl')
-    userAccountControl = int(conn.entries[0]["userAccountControl"].value)
+    userAccountControl = conn.response[0]['attributes']['userAccountControl']
     LOG.debug(f"Original userAccountControl: {userAccountControl}")
 
     if enable:
@@ -206,7 +206,7 @@ def modifySecDesc(conn, identity, target,
         controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
     ldap_conn.search(target_dn, ldap_filter, attributes=ldap_attribute, controls=controls)
 
-    if len(ldap_conn.entries) <= 0:
+    if len(ldap_conn.entries) < 1:
         raise NoResultError(target_dn, ldap_filter)
 
     entry_dn = ldap_conn.entries[0].entry_dn

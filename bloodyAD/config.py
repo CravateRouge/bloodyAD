@@ -80,7 +80,7 @@ class ConnectionHandler():
 
     def _connectLDAP(self):
         cnf = self.conf
-        s = ldap3.Server(cnf.url, get_info=ldap3.DSA)
+        s = ldap3.Server(cnf.url, get_info=ldap3.ALL)
 
         if cnf.kerberos:
             c = ldap3.Connection(s, authentication=ldap3.SASL,
