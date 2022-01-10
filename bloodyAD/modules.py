@@ -7,7 +7,6 @@ from .addcomputer import ADDCOMPUTER
 from functools import wraps
 
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
-from ldap3.protocol.formatters.formatters import format_sid
 from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
@@ -16,7 +15,6 @@ from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, dtypes
 
 from .exceptions import BloodyError, ResultError, NoResultError
-from .utils import createACE, createEmptySD
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import rpcChangePassword
 from .utils import userAccountControl, modifySecDesc
