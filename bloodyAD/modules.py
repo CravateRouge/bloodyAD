@@ -49,19 +49,22 @@ def getGroupMembers(conn, identity):
 
 
 @register_module
-def getObjectAttributes(conn, identity, attr='*'):
+def getObjectAttributes(conn, identity, attr='*', fetchSD="False"):
     """
     Fetch LDAP attributes for the identity (group or user) provided
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target
+        attr: attributes to fetch separated with ',' (default fetch all attributes)
+        fetchSD: True fetch nTSecurityDescriptor that contains DACL (default is False)
     """
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
-
-    # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
-    control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
+    control_flag = 0
+    if fetchSD == "True":
+        # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
+        control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
-    ldap_conn.search(dn, '(objectClass=*)', attributes=attr, controls=controls)
+    ldap_conn.search(dn, '(objectClass=*)', attributes=attr.split(','), controls=controls)
     LOG.info(ldap_conn.response_to_json())
     return ldap_conn.response[0]['attributes']
 
@@ -345,7 +348,7 @@ def setGenericAll(conn, identity, target, enable="True"):
         target:  sAMAccountName, GPO name, DN, GUID or SID
         enable: True to add GenericAll for the user or False to remove it (default is True)
     """
-    modifySecDesc(conn=conn, identity=identity, target=target, enable=enable)
+    modifySecDesc(conn=conn, identity=identity, target=target, enable=enable, control_flag=dtypes.DACL_SECURITY_INFORMATION)
     if enable == "True":
         LOG.info(f'[+] {identity} can now write the attributes of {target}')
 
@@ -386,7 +389,8 @@ def setDCSync(conn, identity, enable='True'):
         identity: sAMAccountName, DN, GUID or SID of the user
         enable: True to add DCSync and False to remove it (default is True)
     """
-    modifySecDesc(conn=conn, identity=identity, target=getDefaultNamingContext(conn.getLdapConnection()), ldap_filter='(objectCategory=domain)', enable=enable)
+    modifySecDesc(conn=conn, identity=identity, target=getDefaultNamingContext(conn.getLdapConnection()),
+    ldap_filter='(objectCategory=domain)', enable=enable, control_flag=dtypes.DACL_SECURITY_INFORMATION)
     if enable == 'True':
         LOG.info(f'{identity} can now DCSync')
 
