@@ -114,7 +114,7 @@ def getObjectSID(conn, identity):
     ldap_conn = conn.getLdapConnection()
     object_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(object_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes='objectSid')
-    object_sid = ldap_conn.response[0]['raw_attributes']['objectSid']
+    object_sid = ldap_conn.response[0]['raw_attributes']['objectSid'][0]
     LOG.info(f'[+] {identity} SID is: {format_sid(object_sid)}')
     return object_sid
 
