@@ -193,8 +193,8 @@ def changePassword(conn, identity, new_pass):
 def addObjectToGroup(conn, member, group):
     """
     Add an object to a group
-        member: the user or group to add into the group
-        group: the group to add to
+        member: sAMAccountName, DN, GUID or SID of the object to add to the group
+        group: DN, GUID or SID of the group
     """
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
@@ -210,8 +210,8 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
     """
     Add foreign principals (users or groups), coming from a trusted domain, to a group
     Args:
-        foreign object sid
-        group dn in which to add the foreign object
+        user_sid: foreign object sid
+        group_dn: group DN in which to add the foreign object
     """
     ldap_conn = conn.getLdapConnection()
     # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
@@ -223,6 +223,9 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
 def delObjectFromGroup(conn, member, group):
     """
     Remove member from group
+    Args:
+        member: sAMAccountName, DN, GUID or SID of the object to delete from the group
+        group: DN, GUID or SID of the group
     """
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
@@ -234,8 +237,9 @@ def delObjectFromGroup(conn, member, group):
 def getObjectsInOu(conn, base_ou, object_type='*'):
     """
     List the object present in an organisational unit
-    base_ou: the ou to target
-    object_type: the type of object to fetch (user/computer or * to have them all)
+    Args:
+        base_ou: DN of the targeted OU
+        object_type: the type of object to fetch (user/computer or * to have them all)
     """
     ldap_conn = conn.getLdapConnection()
     ldap_conn.search(base_ou, f'(objectClass={object_type})')
@@ -246,7 +250,9 @@ def getObjectsInOu(conn, base_ou, object_type='*'):
 @register_module
 def getOusInOu(conn, base_ou):
     """
-    List the user present in an organisational unit
+    List the organisational units present in an organisational unit
+    Args:
+        base_ou: DN of the targeted OU
     """
     containers = getObjectsInOu(conn, base_ou, "container")
     for container in containers:
@@ -258,6 +264,8 @@ def getOusInOu(conn, base_ou):
 def getUsersInOu(conn, base_ou):
     """
     List the user present in an organisational unit
+    Args:
+        base_ou: DN of the targeted OU
     """
     users = getObjectsInOu(conn, base_ou, "user")
     for user in users:
@@ -269,6 +277,8 @@ def getUsersInOu(conn, base_ou):
 def getComputersInOu(conn, base_ou):
     """
     List the computers present in an organisational unit
+    Args:
+        base_ou: DN of the targeted OU
     """
     computers = getObjectsInOu(conn, base_ou, "computer")
     for computer in computers:
