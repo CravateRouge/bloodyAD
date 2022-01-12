@@ -3,6 +3,7 @@ import random
 import string
 import types
 import re
+import json
 from .addcomputer import ADDCOMPUTER
 from functools import wraps
 
@@ -78,6 +79,19 @@ def getDefaultPasswordPolicy(conn):
     return ldap_conn.response[0]['attributes']['minPwdLength']
 
 
+@register_module
+def setAttribute(conn, identity, attribute, value):
+    """
+    Add or replace an attribute of an object
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object
+        attribute: Name of the attribute 
+        value: jSON array (e.g ["john.doe"])
+    """
+    value = json.loads(value)
+    ldap_conn = conn.getLdapConnection()
+    dn = resolvDN(ldap_conn, identity)
+    ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
 
 @register_module
 def addUser(conn, sAMAccountName, password, ou=None):
