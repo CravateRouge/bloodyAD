@@ -75,6 +75,29 @@ optional arguments:
 ### How it works
 bloodyAD communicates with a DC using mainly the LDAP protocol in order to get information or add/modify/delete AD objects. A password cannot be updated with LDAP, it must be a secure connection that is LDAPS or SAMR. A DC doesn't have LDAPS activated by default because it must be configured (with a certificate) so SAMR is used in those cases.
 
+### Useful commands
+```ps1
+# Get group members
+python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes Users member 
+
+# Get minimum password length policy
+python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
+
+# Get all users of the domain
+python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
+
+# Get all computers of the domain
+python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' computer
+
+# Get all containers of the domain
+python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' container
+
+# Enable DONT_REQ_PREAUTH for ASREPRoast
+python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x400000
+
+# Disable ACCOUNTDISABLE
+python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x0002 False
+```
 ## autobloody
 ### Description
 This tool automate the AD privesc between two AD objects, the source (the one we own) and the target (the one we want) if a privesc path exists.
