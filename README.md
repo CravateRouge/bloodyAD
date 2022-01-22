@@ -26,10 +26,10 @@ python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799a
 List of all available functions:
 ```ps1
 [bloodyAD]$ python bloodyAD.py -h
-usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] [--host HOST] {getGroupMembers,
-getObjectAttributes, getObjectSID, addUser, addComputer, delObject, changePassword, addObjectToGroup, addForeignObjectToGroup,
-delObjectFromGroup, getObjectsInOu, getOusInOu, getUsersInOu, getComputersInOu, addDomainSync, delDomainSync, addRbcd, delRbcd,
-addShadowCredentials, delShadowCredentials, modifyGpoACL, setDontReqPreauthFlag, setAccountDisableFlag}
+usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] [--host HOST]
+{getObjectAttributes,checkSDProp,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
+addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,
+setRbcd,setDCSync,setUserAccountControl}
                           ...
 
 Active Directory Privilege Escalation Framework
@@ -47,11 +47,10 @@ Main options:
                         Use LDAP over TLS (default is LDAP)
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
 
-Commands:
-  {getGroupMembers, getObjectAttributes, getObjectSID, addUser, addComputer, delObject, changePassword, addObjectToGroup,
-  addForeignObjectToGroup, delObjectFromGroup, getObjectsInOu, getOusInOu, getUsersInOu, getComputersInOu, addDomainSync,
-  delDomainSync, addRbcd, delRbcd, addShadowCredentials, delShadowCredentials, modifyGpoACL, setDontReqPreauthFlag,
-  setAccountDisableFlag}   Function to call
+Command:
+  {getObjectAttributes,checkSDProp,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
+  addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,
+  setRbcd,setDCSync,setUserAccountControl}   Function to call
 ```
 
 Help text to use a specific function:
