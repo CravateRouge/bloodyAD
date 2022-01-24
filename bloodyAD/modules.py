@@ -240,9 +240,9 @@ def setShadowCredentials(conn, identity, enable="True", outfilePath=None):
     """
     Add ord delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        outfilePath: file path for the generated certificate (default is current path)
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)        
         enable: True to add Shadow Credentials for the user or False to remove it (default is True)
+        outfilePath: file path for the generated certificate (default is current path)
     """
     if enable == True:
         addShadowCredentials(conn, identity, outfilePath)
