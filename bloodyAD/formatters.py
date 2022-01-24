@@ -1,4 +1,5 @@
 
+import base64
 from impacket.ldap import ldaptypes
 
 def decodeAccessMask(mask):
@@ -58,19 +59,28 @@ def decodeGuid(guid):
 
 def formatSD(sd_bytes):
         sd=ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
-        pretty_sd = []
-        for ace in sd['Dacl'].aces:
-            ace_val = ace['Ace']
-            pretty_ace = {
-                'TypeName':ace['TypeName'], 
-                'Sid':ace_val['Sid'].formatCanonical(),
-                'Mask':decodeAccessMask(ace_val['Mask'])
-            }
-            if ace['AceFlags'] > 0:
-                pretty_ace['Flags'] = decodeAceFlags(ace)
-            if 'ObjectType' in ace_val.__dict__['fields'] and len(ace_val['ObjectType']) != 0:
-                pretty_ace['ObjectType'] = decodeGuid(ace_val['ObjectType'])
-            if 'InheritedObjectType' in ace_val.__dict__['fields'] and len(ace_val['InheritedObjectType']) != 0:
-                pretty_ace['InheritedObjectType'] = decodeGuid(ace_val['InheritedObjectType'])
-            pretty_sd.append(pretty_ace)
+        pretty_sd = {}
+        if sd['OffsetOwner'] != 0:
+            pretty_sd['OwnerSid'] = sd['OwnerSid'].formatCanonical()
+        if sd['OffsetGroup'] != 0:
+            pretty_sd['GroupSid'] = sd['GroupSid'].formatCanonical()
+        if sd['OffsetSacl'] != 0:
+            pretty_sd['Sacl'] = base64.b64encode(sd['Sacl'].getData())
+        if sd['OffsetDacl'] != 0:
+            pretty_aces = []
+            for ace in sd['Dacl'].aces:
+                ace_val = ace['Ace']
+                pretty_ace = {
+                    'TypeName':ace['TypeName'], 
+                    'Sid':ace_val['Sid'].formatCanonical(),
+                    'Mask':decodeAccessMask(ace_val['Mask'])
+                }
+                if ace['AceFlags'] > 0:
+                    pretty_ace['Flags'] = decodeAceFlags(ace)
+                if 'ObjectType' in ace_val.__dict__['fields'] and len(ace_val['ObjectType']) != 0:
+                    pretty_ace['ObjectType'] = decodeGuid(ace_val['ObjectType'])
+                if 'InheritedObjectType' in ace_val.__dict__['fields'] and len(ace_val['InheritedObjectType']) != 0:
+                    pretty_ace['InheritedObjectType'] = decodeGuid(ace_val['InheritedObjectType'])
+                pretty_aces.append(pretty_ace)
+            pretty_sd['Dacl'] = pretty_aces
         return pretty_sd
