@@ -244,7 +244,7 @@ def setShadowCredentials(conn, identity, enable="True", outfilePath=None):
         enable: True to add Shadow Credentials for the user or False to remove it (default is True)
         outfilePath: file path for the generated certificate (default is current path)
     """
-    if enable == True:
+    if enable == "True":
         addShadowCredentials(conn, identity, outfilePath)
     else:
         delShadowCredentials(conn, identity)
