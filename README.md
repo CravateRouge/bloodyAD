@@ -27,7 +27,7 @@ List of all available functions:
 ```ps1
 [bloodyAD]$ python bloodyAD.py -h
 usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] [--host HOST]
-{getObjectAttributes,checkSDProp,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
+{getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
 addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,
 setRbcd,setDCSync,setUserAccountControl}
                           ...
@@ -48,7 +48,7 @@ Main options:
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
 
 Command:
-  {getObjectAttributes,checkSDProp,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
+  {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,
   addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,
   setRbcd,setDCSync,setUserAccountControl}   Function to call
 ```
@@ -81,6 +81,9 @@ python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 get
 
 # Get minimum password length policy
 python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
+
+# Get AD version (conversion AD schema to AD version is needed)
+python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'CN=Schema,CN=Configuration,DC=bloody,DC=local' objectVersion
 
 # Get all users of the domain
 python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
