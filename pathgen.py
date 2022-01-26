@@ -1,3 +1,4 @@
+#!/usr/bin/python 
 import argparse, json
 from autobloody import database
 
@@ -8,8 +9,8 @@ def main():
     parser.add_argument("--dburi", default="bolt://localhost:7687", help="The host neo4j is running on. Default: localhost.")
     parser.add_argument("-du", "--dbuser", default="neo4j", help="Neo4j username to use")
     parser.add_argument("-dp", "--dbpassword", help="Neo4j password to use", required=True)
-    parser.add_argument("-ds", "--dbsource", help="Label of the source node", required=True)
-    parser.add_argument("-dt", "--dbtarget", help="Label of the target node", required=True)
+    parser.add_argument("-ds", "--dbsource", help="Case sensitive label of the source node (name property in bloodhound)", required=True)
+    parser.add_argument("-dt", "--dbtarget", help="Case sensitive label of the target node (name property in bloodhound)", required=True)
     parser.add_argument("-f", "--filepath", help="File path for the graph path file (default is path.json)", default="path.json")
 
 

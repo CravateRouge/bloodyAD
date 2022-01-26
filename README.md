@@ -82,7 +82,7 @@ python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 get
 # Get minimum password length policy
 python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
 
-# Get AD version (conversion AD schema to AD version is needed)
+# Get AD version
 python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'CN=Schema,CN=Configuration,DC=bloody,DC=local' objectVersion
 
 # Get all users of the domain
@@ -99,6 +99,9 @@ python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.
 
 # Disable ACCOUNTDISABLE
 python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x0002 False
+
+# Get UserAccountControl flags
+python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
 ```
 ## autobloody
 ### Description
@@ -140,9 +143,9 @@ optional arguments:
   -dp DBPASSWORD, --dbpassword DBPASSWORD
                         Neo4j password to use
   -ds DBSOURCE, --dbsource DBSOURCE
-                        Label of the source node
+                        Case sensitive label of the source node (name property in bloodhound)
   -dt DBTARGET, --dbtarget DBTARGET
-                        Label of the target node
+                        Case sensitive label of the target node (name property in bloodhound)
   -f FILEPATH, --filepath FILEPATH
                         File path for the graph path file (default is path.json)
 ```
