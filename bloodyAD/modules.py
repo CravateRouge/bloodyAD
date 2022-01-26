@@ -47,7 +47,7 @@ def getObjectAttributes(conn, identity, attr='*', fetchSD="False"):
     controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
     ldap_conn.search(dn, "(objectClass=*)", search_scope=ldap3.BASE, attributes=attr.split(','), controls=controls)
     LOG.info(ldap_conn.response_to_json())
-    return ldap_conn.response[0]['attributes']
+    return ldap_conn.response[0]
 
 
 @register_module
