@@ -25,7 +25,9 @@ def main():
 
     with open(args.filepath, 'w+') as f:
         json.dump(jsonable_path, f)
+        print(f"[+] Graph path saved in {args.filepath}")
     db.close()
+    print(f"[+] Done, {len(jsonable_path)} edges have been found between {args.dbsource} and {args.dbtarget}")
 
 if __name__ == '__main__':
     main()
