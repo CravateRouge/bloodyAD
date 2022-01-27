@@ -14,6 +14,7 @@ from .utils import rpcChangePassword
 from .utils import modifySecDesc
 from .utils import addShadowCredentials, delShadowCredentials
 from .utils import LOG
+from .formatters import ACCESS_FLAGS
 
 
 functions = []
@@ -63,6 +64,11 @@ def setAttribute(conn, identity, attribute, value):
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
     ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
+
+    if ldap_conn.result['result'] == 0:
+        LOG.info(f"{attribute} set successfully")
+    else:
+        raise ResultError(conn.result)
 
 
 @register_module
@@ -286,7 +292,9 @@ def setRbcd(conn, spn, target, enable="True"):
         target: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
         enable: True to add Rbcd and False to remove it (default is True)
     """
-    modifySecDesc(conn=conn, identity=spn, target=target, ldap_attribute='msDS-AllowedToActOnBehalfOfOtherIdentity', enable=enable)
+    attr = 'msDS-AllowedToActOnBehalfOfOtherIdentity'
+    modifySecDesc(conn=conn, identity=spn, target=target, ldap_attribute=attr, access_mask=ACCESS_FLAGS['ADS_RIGHT_DS_CONTROL_ACCESS'], enable=enable)
+    LOG.info(f"[+] Attribute {attr} correctly set")
     LOG.info('[+] Delegation rights modified successfully!')
     if enable == "True":
         LOG.info(f'{spn} can now impersonate users on {target} via S4U2Proxy')
@@ -318,21 +326,13 @@ def setUserAccountControl(conn, identity, flags, enable="True"):
     enable = enable == "True"
     flags = int(flags,16)
     
-    conn = conn.getLdapConnection()
-    user_dn = resolvDN(conn, identity)
-    conn.search(user_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes='userAccountControl')
-    userAccountControl = conn.response[0]['attributes']['userAccountControl']
-    LOG.debug(f"Original userAccountControl: {userAccountControl}")
+    LOG.info("Original userAccountControl:")
+    response = getObjectAttributes(conn, identity, 'userAccountControl')
+    rawAccountControl = int(response['raw_attributes']['userAccountControl'][0].decode())
 
     if enable:
-        userAccountControl = userAccountControl | flags
+        rawAccountControl = rawAccountControl | flags
     else:
-        userAccountControl = userAccountControl & ~flags
+        rawAccountControl = rawAccountControl & ~flags
 
-    LOG.debug(f"Updated userAccountControl: {userAccountControl}")
-    conn.modify(user_dn, {'userAccountControl': (ldap3.MODIFY_REPLACE, [userAccountControl])})
-
-    if conn.result['result'] == 0:
-        LOG.info("Updated userAccountControl attribute successfully")
-    else:
-        raise ResultError(conn.result)
+    setAttribute(conn, identity, 'userAccountControl', str(rawAccountControl))

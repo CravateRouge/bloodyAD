@@ -2,8 +2,8 @@
 import base64
 from impacket.ldap import ldaptypes
 
-def decodeAccessMask(mask):
-    flags = {
+# https://docs.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
+ACCESS_FLAGS = {
     # Flag constants
     'GENERIC_READ' : 0x80000000,
     'GENERIC_WRITE' : 0x40000000,
@@ -25,13 +25,10 @@ def decodeAccessMask(mask):
     'ADS_RIGHT_DS_READ_PROP' : 0x00000010,
     'ADS_RIGHT_DS_WRITE_PROP' : 0x00000020,
     'ADS_RIGHT_DS_SELF' : 0x00000008
-    }
-    pretty_mask = [key for key,val in flags.items() if mask.hasPriv(val)]
-    return pretty_mask if len(pretty_mask) > 0 else mask['Mask']
+}
 
-
-def decodeAceFlags(ace):
-    flags = {
+# https://docs.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-addauditaccessobjectace
+ACE_FLAGS = {
     # Flag constants
     'CONTAINER_INHERIT_ACE' : 0x02,
     'FAILED_ACCESS_ACE_FLAG' : 0x80,
@@ -40,8 +37,54 @@ def decodeAceFlags(ace):
     'NO_PROPAGATE_INHERIT_ACE' : 0x04,
     'OBJECT_INHERIT_ACE' : 0x01,
     'SUCCESSFUL_ACCESS_ACE_FLAG' : 0x40
-    }
-    pretty_flags = [key for key,val in flags.items() if ace.hasFlag(val)]
+}
+
+# see https://social.technet.microsoft.com/wiki/contents/articles/37395.active-directory-schema-versions.aspx
+AD_VERSION = {
+    '13' : 'Windows 2000 Server',
+    '30' : 'Windows Server 2003',
+    '31' : 'Windows Server 2003 R2',
+    '44' : 'Windows Server 2008',
+    '47' : 'Windows Server 2008 R2',
+    '56' : 'Windows Server 2012',
+    '69' : 'Windows Server 2012 R2',
+    '87' : 'Windows Server 2016',
+    '88' : 'Windows Server 2019/2022'
+}
+
+# see https://docs.microsoft.com/fr-fr/troubleshoot/windows-server/identity/useraccountcontrol-manipulate-account-properties
+ACCOUNT_FLAGS = {
+    'SCRIPT' : 0x0001,
+    'ACCOUNTDISABLE' : 0x0002,
+    'HOMEDIR_REQUIRED' : 0x0008,
+    'LOCKOUT' : 0x0010,
+    'PASSWD_NOTREQD' : 0x0020,
+    'PASSWD_CANT_CHANGE' : 0x0040,
+    'ENCRYPTED_TEXT_PWD_ALLOWED' : 0x0080,
+    'TEMP_DUPLICATE_ACCOUNT' : 0x0100,
+    'NORMAL_ACCOUNT' : 0x0200,
+    'INTERDOMAIN_TRUST_ACCOUNT' : 0x0800,
+    'WORKSTATION_TRUST_ACCOUNT' : 0x1000,
+    'SERVER_TRUST_ACCOUNT' : 0x2000,
+    'DONT_EXPIRE_PASSWORD' : 0x10000,
+    'MNS_LOGON_ACCOUNT' : 0x20000,
+    'SMARTCARD_REQUIRED' : 0x40000,
+    'TRUSTED_FOR_DELEGATION' : 0x80000,
+    'NOT_DELEGATED' : 0x100000,
+    'USE_DES_KEY_ONLY' : 0x200000,
+    'DONT_REQ_PREAUTH' : 0x400000,
+    'PASSWORD_EXPIRED' : 0x800000,
+    'TRUSTED_TO_AUTH_FOR_DELEGATION' : 0x1000000,
+    'PARTIAL_SECRETS_ACCOUNT' : 0x04000000
+}
+
+def decodeAccessMask(mask):
+    pretty_mask = [key for key,val in ACCESS_FLAGS.items() if mask.hasPriv(val)]
+    return pretty_mask if len(pretty_mask) > 0 else mask['Mask']
+
+
+def decodeAceFlags(ace):
+    pretty_flags = [key for key,val in ACE_FLAGS.items() if ace.hasFlag(val)]
     return pretty_flags if len(pretty_flags) > 0 else ace['AceFlags']
 
 
@@ -85,52 +128,15 @@ def formatSD(sd_bytes):
             pretty_sd['Dacl'] = pretty_aces
         return pretty_sd
 
+
 def formatVersion(objectVersion):
     objectVersion = objectVersion.decode()
-    # see https://social.technet.microsoft.com/wiki/contents/articles/37395.active-directory-schema-versions.aspx
-    ADversion = {
-        '13' : 'Windows 2000 Server',
-        '30' : 'Windows Server 2003',
-        '31' : 'Windows Server 2003 R2',
-        '44' : 'Windows Server 2008',
-        '47' : 'Windows Server 2008 R2',
-        '56' : 'Windows Server 2012',
-        '69' : 'Windows Server 2012 R2',
-        '87' : 'Windows Server 2016',
-        '88' : 'Windows Server 2019/2022'
-    }
-    return ADversion[objectVersion] if objectVersion in ADversion else objectVersion
+    return AD_VERSION[objectVersion] if objectVersion in AD_VERSION else objectVersion
+
 
 def formatAccountControl(userAccountControl):
     userAccountControl = int(userAccountControl.decode())
-    
-    # see https://docs.microsoft.com/fr-fr/troubleshoot/windows-server/identity/useraccountcontrol-manipulate-account-properties
-    accountCodes = {
-       0x0001:'SCRIPT',
-       0x0002:'ACCOUNTDISABLE',
-       0x0008:'HOMEDIR_REQUIRED',
-       0x0010:'LOCKOUT',
-       0x0020:'PASSWD_NOTREQD',
-       0x0040:'PASSWD_CANT_CHANGE',
-       0x0080:'ENCRYPTED_TEXT_PWD_ALLOWED',
-       0x0100:'TEMP_DUPLICATE_ACCOUNT',
-       0x0200:'NORMAL_ACCOUNT',
-       0x0800:'INTERDOMAIN_TRUST_ACCOUNT',
-       0x1000:'WORKSTATION_TRUST_ACCOUNT',
-       0x2000:'SERVER_TRUST_ACCOUNT',
-       0x10000:'DONT_EXPIRE_PASSWORD',
-       0x20000:'MNS_LOGON_ACCOUNT',
-       0x40000:'SMARTCARD_REQUIRED',
-       0x80000:'TRUSTED_FOR_DELEGATION',
-       0x100000:'NOT_DELEGATED',
-       0x200000:'USE_DES_KEY_ONLY',
-       0x400000:'DONT_REQ_PREAUTH',
-       0x800000:'PASSWORD_EXPIRED',
-       0x1000000:'TRUSTED_TO_AUTH_FOR_DELEGATION',
-       0x04000000:'PARTIAL_SECRETS_ACCOUNT'
-    }
-
-    return [val for key,val in accountCodes.items() if userAccountControl & key == key]
+    return [key for key,val in ACCOUNT_FLAGS.items() if userAccountControl & val == val]
     
     
 

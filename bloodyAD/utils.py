@@ -12,6 +12,7 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 from .exceptions import NoResultError, ResultError, TooManyResultsError
+from .formatters import ACCESS_FLAGS
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
@@ -178,7 +179,7 @@ def rpcChangePassword(conn, target, new_pass):
 
 def modifySecDesc(conn, identity, target,
     ldap_filter='(objectClass=*)', ldap_attribute='nTSecurityDescriptor',
-    object_type=None, access_mask=ldaptypes.ACCESS_MASK.GENERIC_ALL, control_flag=None, enable="True"):
+    object_type=None, access_mask=ACCESS_FLAGS['GENERIC_ALL'], control_flag=None, enable="True"):
 
     enable = enable == "True"
     ldap_conn = conn.getLdapConnection()
@@ -218,10 +219,10 @@ def modifySecDesc(conn, identity, target,
                 ace_sid = ace['Ace']['Sid']
                 if ace_sid.getData() == user_sid:
                     LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
+                    sd['Dacl'].aces.remove(ace)
                 else:
                     LOG.debug('    %s' % ace_sid.formatCanonical())
-                    aces_to_keep.append(ace)
-                    sd['Dacl'].aces = aces_to_keep
+
         # Remove the attribute if there is no ace to keep
         if len(sd['Dacl'].aces) > 0 or ldap_attribute == 'nTSecurityDescriptor':
             attr_values.append(sd.getData())
