@@ -20,6 +20,7 @@ class Database:
    
     @staticmethod
     def _setWeight(tx):
+        # Existing edges on https://github.com/BloodHoundAD/BloodHound/blob/master/docs/data-analysis/edges.rst
         bloodycosts = [
             {'cost':0, 'edges':'MemberOf', 'endnode':'Group'},
             {'cost':100, 'edges':'AddMember|GenericAll|GenericWrite|AllExtendedRights', 'endnode':'Group'},
@@ -36,14 +37,25 @@ class Database:
 
             {'cost':100100, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'Computer'},
             {'cost':100101, 'edges':'WriteDacl|Owns', 'endnode':'Computer'},
-            {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'}
+            {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'},
+
+            {'cost':0, 'edges':'GenericAll', 'endnode':'OU'},
+            {'cost':250, 'edges':'WriteDacl', 'endnode':'OU'}                 
 
             # TODO: Maybe take into account path with GenericAll on GPO
-            # TODO: Maybe take into account path with GenericAll on OU
         ]
-
         for bloodycost in bloodycosts:
             tx.run(f"MATCH ()-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
+        
+        # Specific for Contains edges to handle inheritence
+        bloodycosts = [
+            {'cost':0, 'edges':'Contains', 'endnode':'OU'},
+            {'cost':100, 'edges':'Contains', 'endnode':'Group'},
+            {'cost':100000, 'edges':'Contains', 'endnode':'User'},
+            {'cost':100100, 'edges':'Contains', 'endnode':'Computer'}
+        ]
+        for bloodycost in bloodycosts:
+            tx.run(f"MATCH (:OU {{blocksinheritance:False}})-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
 
     # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
     # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin

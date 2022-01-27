@@ -5,7 +5,7 @@ class Automation:
     def __init__(self, args):
         self.conn = config.ConnectionHandler(args=args)
         self.rel_types = {
-            0 : self._memberOf,
+            0 : self._nextHop,
             1 : self._dcSync,
             2 : self._setDCSync,
             3 : self._ownerDomain,
@@ -17,7 +17,8 @@ class Automation:
             100002 : self._ownerObj,
             100100 : self._forceChangePassword,
             100101 : self._aclObj,
-            100102 : self._ownerObj
+            100102 : self._ownerObj,
+            250: self._genericAll
         }
         self.dirty_laundry = []
 
@@ -42,7 +43,7 @@ class Automation:
         self._washer()
         self.conn.switchUser(user, pwd)
 
-    def _memberOf(self, rel):
+    def _nextHop(self, rel):
         return
     
     def _dcSync(self, rel):
