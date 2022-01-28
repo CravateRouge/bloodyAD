@@ -48,7 +48,7 @@ class Database:
 
             {'cost':0, 'edges':'GenericWrite|GenericAll|Contains', 'endnode':'GPO'},
             {'cost':250, 'edges':'WriteDacl|Owns', 'endnode':'GPO'},
-            {'cost':350, 'edges':'WriteOwner', 'endnode':'GPO'},          
+            {'cost':350, 'edges':'WriteOwner', 'endnode':'GPO'}          
         ]
         for bloodycost in bloodycosts:
             tx.run(f"MATCH ()-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")

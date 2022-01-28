@@ -9,7 +9,7 @@ from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMem
 from impacket.dcerpc.v5 import dtypes
 
 from .exceptions import BloodyError, ResultError, NoResultError
-from .utils import resolvDN, getDefaultNamingContext
+from .utils import resolvDN, getDefaultNamingContext, getObjAttr, setAttr
 from .utils import rpcChangePassword
 from .utils import modifySecDesc
 from .utils import addShadowCredentials, delShadowCredentials
@@ -39,16 +39,7 @@ def getObjectAttributes(conn, identity, attr='*', fetchSD="False"):
         attr: attributes to fetch separated with ',' (default fetch all attributes)
         fetchSD: True fetch nTSecurityDescriptor that contains DACL (default is False)
     """
-    ldap_conn = conn.getLdapConnection()
-    dn = resolvDN(ldap_conn, identity)
-    control_flag = 0
-    if fetchSD == "True":
-        # If SACL is asked the server will not return the nTSecurityDescriptor for a standard user because it needs privileges
-        control_flag = dtypes.OWNER_SECURITY_INFORMATION + dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
-    controls = ldap3.protocol.microsoft.security_descriptor_control(sdflags=control_flag)
-    ldap_conn.search(dn, "(objectClass=*)", search_scope=ldap3.BASE, attributes=attr.split(','), controls=controls)
-    LOG.info(ldap_conn.response_to_json())
-    return ldap_conn.response[0]
+    getObjAttr(conn, identity, attr, fetchSD, True)
 
 
 @register_module
@@ -61,14 +52,7 @@ def setAttribute(conn, identity, attribute, value):
         value: jSON array (e.g ["john.doe"])
     """
     value = json.loads(value)
-    ldap_conn = conn.getLdapConnection()
-    dn = resolvDN(ldap_conn, identity)
-    ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
-
-    if ldap_conn.result['result'] == 0:
-        LOG.info(f"{attribute} set successfully")
-    else:
-        raise ResultError(conn.result)
+    setAttr(conn, identity, attribute, value)
 
 
 @register_module
@@ -242,18 +226,19 @@ def getChildObjects(conn, parent_obj, object_type='*'):
     return res
 
 @register_module
-def setShadowCredentials(conn, identity, enable="True", outfilePath=None):
+def setShadowCredentials(conn, identity, enable="True", outfilePath=None, deviceID=None):
     """
-    Add ord delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
+    Add or delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)        
         enable: True to add Shadow Credentials for the user or False to remove it (default is True)
         outfilePath: file path for the generated certificate (default is current path)
+        deviceID: DeviceID of the shadow credentials to remove from the target object (default is all)
     """
     if enable == "True":
         addShadowCredentials(conn, identity, outfilePath)
     else:
-        delShadowCredentials(conn, identity)
+        delShadowCredentials(conn, identity, deviceID)
 
 
 @register_module
@@ -326,8 +311,8 @@ def setUserAccountControl(conn, identity, flags, enable="True"):
     enable = enable == "True"
     flags = int(flags,16)
     
-    LOG.info("Original userAccountControl:")
-    response = getObjectAttributes(conn, identity, 'userAccountControl')
+    response = getObjAttr(conn, identity, 'userAccountControl')
+    LOG.info("Original userAccountControl: "+str(response['attributes']['userAccountControl']))
     rawAccountControl = int(response['raw_attributes']['userAccountControl'][0].decode())
 
     if enable:
