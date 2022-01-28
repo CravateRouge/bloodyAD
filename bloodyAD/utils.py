@@ -12,7 +12,7 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 
 from .exceptions import NoResultError, ResultError, TooManyResultsError
-from .formatters import ACCESS_FLAGS
+from .formatters import ACCESS_FLAGS, ACE_FLAGS
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 # 983551 Full control
 def createACE(sid, object_type=None, access_mask=983551):
     nace = ldaptypes.ACE()
-    nace['AceFlags'] = 0x00
+    nace['AceFlags'] = ACE_FLAGS['CONTAINER_INHERIT_ACE'] + ACE_FLAGS['OBJECT_INHERIT_ACE']
 
     if object_type is None:
         acedata = ldaptypes.ACCESS_ALLOWED_ACE()
