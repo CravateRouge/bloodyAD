@@ -23,39 +23,39 @@ class Database:
         # Existing edges on https://github.com/BloodHoundAD/BloodHound/blob/master/docs/data-analysis/edges.rst
         bloodycosts = [
             {'cost':0, 'edges':'MemberOf', 'endnode':'Group'},
-            {'cost':100, 'edges':'AddMember|GenericAll|GenericWrite|AllExtendedRights', 'endnode':'Group'},
+            {'cost':100, 'edges':'AddMember|GenericAll|GenericWrite|AllExtendedRights|Contains', 'endnode':'Group'},
             {'cost':200, 'edges':'WriteDacl|Owns', 'endnode':'Group'},
             {'cost':300, 'edges':'WriteOwner', 'endnode':'Group'},
+            
 
             {'cost':1, 'edges':'DCSync|GenericAll|GetChangesAll|AllExtendedRights', 'endnode':'Domain'},
             {'cost':2, 'edges':'WriteDacl|Owns', 'endnode':'Domain'},
             {'cost':3, 'edges':'WriteOwner', 'endnode':'Domain'},
 
-            {'cost':100000, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'User'},
+            {'cost':100000, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights|Contains', 'endnode':'User'},
             {'cost':100001, 'edges':'WriteDacl|Owns', 'endnode':'User'},
             {'cost':100002, 'edges':'WriteOwner', 'endnode':'User'},
 
-            {'cost':100100, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights', 'endnode':'Computer'},
+            {'cost':100100, 'edges':'GenericWrite|GenericAll|ForceChangePassword|AllExtendedRights|Contains', 'endnode':'Computer'},
             {'cost':100101, 'edges':'WriteDacl|Owns', 'endnode':'Computer'},
             {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'},
 
-            {'cost':0, 'edges':'GenericAll', 'endnode':'OU'},
-            {'cost':250, 'edges':'WriteDacl', 'endnode':'OU'}                 
+            # If we already have GenericAll right on OU we must ensure inheritance so we'll add a new GenericAll ACE with inheritance
+            {'cost':0, 'edges':'Contains', 'endnode':'OU'},
+            {'cost':250, 'edges':'GenericWrite|GenericAll', 'endnode':'OU'},
+            {'cost':250, 'edges':'WriteDacl|Owns', 'endnode':'OU'},
+            {'cost':350, 'edges':'WriteOwner', 'endnode':'OU'},
 
-            # TODO: Maybe take into account path with GenericAll on GPO
+            {'cost':0, 'edges':'GenericWrite|GenericAll|Contains', 'endnode':'GPO'},
+            {'cost':250, 'edges':'WriteDacl|Owns', 'endnode':'GPO'},
+            {'cost':350, 'edges':'WriteOwner', 'endnode':'GPO'},          
         ]
         for bloodycost in bloodycosts:
             tx.run(f"MATCH ()-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
         
         # Specific for Contains edges to handle inheritence
-        bloodycosts = [
-            {'cost':0, 'edges':'Contains', 'endnode':'OU'},
-            {'cost':100, 'edges':'Contains', 'endnode':'Group'},
-            {'cost':100000, 'edges':'Contains', 'endnode':'User'},
-            {'cost':100100, 'edges':'Contains', 'endnode':'Computer'}
-        ]
-        for bloodycost in bloodycosts:
-            tx.run(f"MATCH (:OU {{blocksinheritance:False}})-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
+        #for bloodycost in bloodycosts:
+        #    tx.run(f"MATCH (:OU {{blocksinheritance:False}})-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
 
     # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
     # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin

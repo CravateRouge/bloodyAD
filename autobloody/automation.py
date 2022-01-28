@@ -18,7 +18,8 @@ class Automation:
             100100 : self._forceChangePassword,
             100101 : self._aclObj,
             100102 : self._ownerObj,
-            250: self._genericAll
+            250: self._genericAll,
+            350: self._ownerSpecialObj
         }
         self.dirty_laundry = []
 
@@ -79,6 +80,10 @@ class Automation:
     def _ownerObj(self, rel):
         self._setOwner(rel)
         self._aclObj(rel)
+    
+    def _ownerSpecialObj(self, rel):
+        self._setOwner(rel)
+        self._genericAll(rel)
 
     # TODO: change password change with shadow credentials when it's possible
     # TODO: don't perform change password if it's explicitly refused by user
