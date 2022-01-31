@@ -1,6 +1,8 @@
 
-import base64
+import base64, binascii
 from impacket.ldap import ldaptypes
+from impacket.structure import Structure
+from Cryptodome.Hash import MD4
 
 # https://docs.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
 ACCESS_FLAGS = {
@@ -40,7 +42,7 @@ ACE_FLAGS = {
 }
 
 # see https://social.technet.microsoft.com/wiki/contents/articles/37395.active-directory-schema-versions.aspx
-AD_VERSION = {
+SCHEMA_VERSION = {
     '13' : 'Windows 2000 Server',
     '30' : 'Windows Server 2003',
     '31' : 'Windows Server 2003 R2',
@@ -50,6 +52,18 @@ AD_VERSION = {
     '69' : 'Windows Server 2012 R2',
     '87' : 'Windows Server 2016',
     '88' : 'Windows Server 2019/2022'
+}
+
+# https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/d7422d35-448a-451a-8846-6a7def0044df?redirectedfrom=MSDN
+FUNCTIONAL_LEVEL = {
+    '0' : 'DS_BEHAVIOR_WIN2000',
+    '1' : 'DS_BEHAVIOR_WIN2003_WITH_MIXED_DOMAINS',
+    '2' : 'DS_BEHAVIOR_WIN2003',
+    '3' : 'DS_BEHAVIOR_WIN2008',
+    '4' : 'DS_BEHAVIOR_WIN2008R2',
+    '5' : 'DS_BEHAVIOR_WIN2012',
+    '6' : 'DS_BEHAVIOR_WIN2012R2',
+    '7' : 'DS_BEHAVIOR_WIN2016'
 }
 
 # see https://docs.microsoft.com/fr-fr/troubleshoot/windows-server/identity/useraccountcontrol-manipulate-account-properties
@@ -129,14 +143,61 @@ def formatSD(sd_bytes):
         return pretty_sd
 
 
-def formatVersion(objectVersion):
+def formatFunctionalLevel(behavior_version):
+    behavior_version = behavior_version.decode()
+    return FUNCTIONAL_LEVEL[behavior_version] if behavior_version in FUNCTIONAL_LEVEL else behavior_version
+
+def formatSchemaVersion(objectVersion):
     objectVersion = objectVersion.decode()
-    return AD_VERSION[objectVersion] if objectVersion in AD_VERSION else objectVersion
+    return SCHEMA_VERSION[objectVersion] if objectVersion in SCHEMA_VERSION else objectVersion
 
 
 def formatAccountControl(userAccountControl):
     userAccountControl = int(userAccountControl.decode())
     return [key for key,val in ACCOUNT_FLAGS.items() if userAccountControl & val == val]
+
+
+class MSDS_MANAGEDPASSWORD_BLOB(Structure):
+    structure = (
+        ('Version','<H'),
+        ('Reserved','<H'),
+        ('Length','<L'),
+        ('CurrentPasswordOffset','<H'),
+        ('PreviousPasswordOffset','<H'),
+        ('QueryPasswordIntervalOffset','<H'),
+        ('UnchangedPasswordIntervalOffset','<H'),
+        ('CurrentPassword',':'),
+        ('PreviousPassword',':'),
+        #('AlignmentPadding',':'),
+        ('QueryPasswordInterval',':'),
+        ('UnchangedPasswordInterval',':'),
+    )
+
+    def __init__(self, data = None):
+        Structure.__init__(self, data = data)
+
+    def fromString(self, data):
+        Structure.fromString(self,data)
+
+        if self['PreviousPasswordOffset'] == 0:
+            endData = self['QueryPasswordIntervalOffset']
+        else:
+            endData = self['PreviousPasswordOffset']
+
+        self['CurrentPassword'] = self.rawData[self['CurrentPasswordOffset']:][:endData - self['CurrentPasswordOffset']]
+        if self['PreviousPasswordOffset'] != 0:
+            self['PreviousPassword'] = self.rawData[self['PreviousPasswordOffset']:][:self['QueryPasswordIntervalOffset']-self['PreviousPasswordOffset']]
+
+        self['QueryPasswordInterval'] = self.rawData[self['QueryPasswordIntervalOffset']:][:self['UnchangedPasswordIntervalOffset']-self['QueryPasswordIntervalOffset']]
+        self['UnchangedPasswordInterval'] = self.rawData[self['UnchangedPasswordIntervalOffset']:]
+
+def formatGMSApass(managedPassword):
+    blob = MSDS_MANAGEDPASSWORD_BLOB(managedPassword)
+    hash = MD4.new()
+    hash.update(blob['CurrentPassword'][:-2])
+    passwd = "aad3b435b51404eeaad3b435b51404ee:" + binascii.hexlify(hash.digest()).decode()
+    return passwd
+
     
     
 

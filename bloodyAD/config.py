@@ -3,7 +3,7 @@ from impacket.dcerpc.v5 import transport, samr
 from impacket.dcerpc.v5 import rpcrt
 from dataclasses import dataclass
 
-from .formatters import formatSD, formatVersion, formatAccountControl
+from .formatters import formatFunctionalLevel, formatGMSApass, formatSD, formatSchemaVersion, formatAccountControl
 
 @dataclass
 class Config:
@@ -81,7 +81,13 @@ class ConnectionHandler():
 
     def _connectLDAP(self):
         cnf = self.conf
-        s = ldap3.Server(cnf.url, get_info=ldap3.ALL,formatter={'nTSecurityDescriptor':formatSD, 'msDS-AllowedToActOnBehalfOfOtherIdentity':formatSD, 'objectVersion':formatVersion, 'userAccountControl':formatAccountControl})
+        s = ldap3.Server(cnf.url, get_info=ldap3.ALL,formatter={
+            'nTSecurityDescriptor':formatSD,
+            'msDS-AllowedToActOnBehalfOfOtherIdentity':formatSD,
+            'msDS-Behavior-Version':formatFunctionalLevel,
+            'objectVersion':formatSchemaVersion,
+            'userAccountControl':formatAccountControl,
+            'msDS-ManagedPassword':formatGMSApass})
 
         if cnf.kerberos:
             c = ldap3.Connection(s, authentication=ldap3.SASL,

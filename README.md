@@ -82,8 +82,8 @@ python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 get
 # Get minimum password length policy
 python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
 
-# Get AD version
-python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'CN=Schema,CN=Configuration,DC=bloody,DC=local' objectVersion
+# Get AD functional level
+python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' msDS-Behavior-Version
 
 # Get all users of the domain
 python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
@@ -102,6 +102,9 @@ python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.
 
 # Get UserAccountControl flags
 python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
+
+# Read GMSA account password
+python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 -s ldaps getObjectAttributes gmsaAccount$ msDS-ManagedPassword
 ```
 ## autobloody
 ### Description
