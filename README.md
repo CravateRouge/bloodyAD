@@ -43,8 +43,7 @@ Main options:
   -p PASSWORD, --password PASSWORD
                         Cleartext password or LMHASH:NTHASH for NTLM authentication
   -k, --kerberos
-  -s {ldap,ldaps,rpc}, --scheme {ldap,ldaps,rpc}
-                        Use LDAP over TLS (default is LDAP)
+  -s , --secure         Try to use LDAP over TLS aka LDAPS (default is LDAP)
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
 
 Command:
@@ -169,8 +168,7 @@ optional arguments:
   -p PASSWORD, --password PASSWORD
                         Cleartext password or LMHASH:NTHASH for NTLM authentication
   -k, --kerberos
-  -s {ldap,ldaps,rpc}, --scheme {ldap,ldaps,rpc}
-                        Use LDAP over TLS (default is LDAP)
+  -s , --secure         Try to use LDAP over TLS aka LDAPS (default is LDAP)
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
   --path PATH           Path file (to generate with pathgen.py)
 

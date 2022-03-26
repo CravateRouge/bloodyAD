@@ -21,7 +21,7 @@ class Config:
     def __post_init__(self):
 
         # Handle case where password is hashes
-        if ':' in self.password:
+        if self.password and ':' in self.password:
             lmhash_maybe, nthash_maybe = self.password.split(':')
             try:
                 int(nthash_maybe, 16)
@@ -45,7 +45,8 @@ class Config:
 class ConnectionHandler():
     def __init__(self, args=None, config=None):
         if args:
-            cnf = Config(domain=args.domain, username=args.username, password=args.password, scheme=args.scheme, host=args.host, kerberos=args.kerberos)
+            scheme = "ldaps" if args.secure else "ldap"
+            cnf = Config(domain=args.domain, username=args.username, password=args.password, scheme=scheme, host=args.host, kerberos=args.kerberos)
         else:
             cnf = config
 
@@ -91,8 +92,7 @@ class ConnectionHandler():
 
         if cnf.kerberos:
             c = ldap3.Connection(s, authentication=ldap3.SASL,
-                                 sasl_mechanism=ldap3.KERBEROS,
-                                 sasl_credentials=(ldap3.ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,), raise_exceptions=True)
+                                 sasl_mechanism=ldap3.KERBEROS, raise_exceptions=True)
         else:
             c = ldap3.Connection(s, user='%s\\%s' % (cnf.domain, cnf.username),
                                  password=cnf.password, authentication=ldap3.NTLM, raise_exceptions=True)
