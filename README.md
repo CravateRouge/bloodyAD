@@ -23,6 +23,8 @@ Simple usage:
 python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799ac25b439bd6a31 changePassword mytarget 'Password123!'
 ```
 
+**Note:** You can find more examples on https://cravaterouge.github.io/
+
 List of all available functions:
 ```ps1
 [bloodyAD]$ python bloodyAD.py -h
