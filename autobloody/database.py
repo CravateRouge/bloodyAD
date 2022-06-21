@@ -17,7 +17,8 @@ class Database:
     def _prepareDb(self):
         with self.driver.session() as session:
             session.write_transaction(self._setWeight)
-   
+            session.write_transaction(self._createGraph)
+
     @staticmethod
     def _setWeight(tx):
         # Existing edges on https://github.com/BloodHoundAD/BloodHound/blob/master/docs/data-analysis/edges.rst
@@ -57,6 +58,13 @@ class Database:
         #for bloodycost in bloodycosts:
         #    tx.run(f"MATCH (:OU {{blocksinheritance:False}})-[r:{bloodycost['edges']}]->(:{bloodycost['endnode']}) SET r.bloodycost = {bloodycost['cost']}")
 
+    @staticmethod
+    def _createGraph(tx):
+        graph_exists = tx.run("RETURN gds.graph.exists('autobloody')").single()[0]
+        if graph_exists:
+            tx.run("CALL gds.graph.drop('autobloody')")
+        tx.run("CALL gds.graph.project('autobloody','*',{all:{type:'*', properties:'bloodycost'}})")
+
     # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
     # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin
     @staticmethod 
@@ -69,9 +77,7 @@ class Database:
         # "YIELD path "
         # "RETURN path", source=source, target=target)
         result = tx.run("MATCH (s {name:$source}), (t {name:$target}) "
-        "CALL gds.shortestPath.dijkstra.stream({ "
-        "sourceNode:s, targetNode:t, relationshipWeightProperty:'bloodycost', "
-        "nodeProjection:'*', relationshipProjection:{all:{type:'*', properties:'bloodycost'}}}) "
+        "CALL gds.shortestPath.dijkstra.stream('autobloody',{sourceNode:s, targetNode:t, relationshipWeightProperty:'bloodycost'})"
         "YIELD path RETURN path",source=source, target=target)
         return result.single()[0].relationships
     
