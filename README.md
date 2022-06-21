@@ -1,4 +1,4 @@
-# BloodyAD Framework
+# ![bloodyAD logo](https://repository-images.githubusercontent.com/415977068/9b2fed72-35fb-4faa-a8d3-b120cd3c396f) BloodyAD Framework
 BloodyAD is an Active Directory Privilege Escalation Framework, it can be used manually using `bloodyAD.py` or automatically by combining `pathgen.py` and `autobloody.py`.
 
 This framework supports NTLM (with password or NTLM hashes) and Kerberos authentication and binds to LDAP/LDAPS/SAMR services of a domain controller to obtain AD privesc.
