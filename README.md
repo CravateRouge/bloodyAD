@@ -15,6 +15,7 @@ The following are required:
 - DSinternals
 - Impacket
 - Ldap3
+
 Use the requirements.txt for your virtual environment: `pip3 install -r requirements.txt`
 
 ### Usage
