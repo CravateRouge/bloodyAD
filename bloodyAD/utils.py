@@ -299,7 +299,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
         LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
         if outfilePath is None:
             path = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
-            LOG.info("No outfile path was provided. The certificate(s) will be store with the filename: %s" % path)
+            LOG.info("No outfile path was provided. The certificate(s) will be stored with the filename: %s" % path)
         else:
             path = outfilePath
 
@@ -321,7 +321,7 @@ def delShadowCredentials(conn, identity, deviceID):
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
     """
     attr = 'msDS-KeyCredentialLink'
-    keyCreds = getObjAttr(conn, identity)['raw_attributes'][attr]
+    keyCreds = getObjAttr(conn, identity, attr)['raw_attributes'][attr]
     newKeyCreds = []
     for keyCred in keyCreds:    
         dnBin = DNWithBinary.DNWithBinary.fromRawDNWithBinary(keyCred)
