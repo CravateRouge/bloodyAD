@@ -6,7 +6,7 @@ from bloodyAD import functions, ConnectionHandler
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Active Directory Privilege Escalation Framework', formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description='AD Privesc Swiss Army Knife', formatter_class=argparse.RawTextHelpFormatter)
 
     parser._optionals.title = 'Main options'
     parser._positionals.title = 'Required options'

@@ -63,7 +63,7 @@ class Database:
         graph_exists = tx.run("RETURN gds.graph.exists('autobloody')").single()[0]
         if graph_exists:
             tx.run("CALL gds.graph.drop('autobloody')")
-        tx.run("CALL gds.graph.project('autobloody','*',{all:{type:'*', properties:'bloodycost'}})")
+        tx.run("CALL gds.graph.project('autobloody','*',{all:{type:'*', properties:{bloodycost:{defaultValue:9999999999}}}},{validateRelationships:true})")
 
     # Alternative with only CYPHER https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html
     # CONS: Less efficient, more complex PROS: Doesn't need GDS plugin

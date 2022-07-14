@@ -141,9 +141,10 @@ def setAttr(conn, identity, attribute, value):
     ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]})
 
     if ldap_conn.result['result'] == 0:
-        LOG.info(f"{attribute} set successfully")
+        LOG.debug(f"[+] {attribute} set successfully")
     else:
         raise ResultError(conn.result)
+
 
 def getDefaultNamingContext(conn):
     naming_context = conn.server.info.other['defaultNamingContext'][0]
@@ -160,7 +161,7 @@ def getObjectSID(conn, identity):
     object_dn = resolvDN(ldap_conn, identity)
     ldap_conn.search(object_dn, '(objectClass=*)', search_scope=ldap3.BASE, attributes='objectSid')
     object_sid = ldap_conn.response[0]['raw_attributes']['objectSid'][0]
-    LOG.info(f'[+] {identity} SID is: {format_sid(object_sid)}')
+    LOG.debug(f'[*] {identity} SID is: {format_sid(object_sid)}')
     return object_sid
 
 
@@ -307,7 +308,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
         LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
         LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
         LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-        LOG.info("Run the following command to obtain a TGT")
+        LOG.info("Run the following command to obtain a TGT:")
         LOG.info("python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem -key-pem %s_priv.pem %s/%s %s.ccache" % (path, path, conn.conf.domain, identity, path))
 
     else:
@@ -328,6 +329,6 @@ def delShadowCredentials(conn, identity, deviceID):
         if deviceID and KeyCredential.fromDNWithBinary(dnBin).DeviceId.toFormatD() != deviceID:
             newKeyCreds.append(keyCred)
         else:
-            LOG.info("[*] Key to delete found")
+            LOG.debug("[*] Key to delete found")
 
     setAttr(conn, identity, attr, newKeyCreds)

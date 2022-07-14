@@ -127,9 +127,9 @@ def delObject(conn, identity):
     """
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
-    LOG.debug(f"Trying to remove {dn}")
+    LOG.debug(f"[*] Trying to remove {dn}")
     ldap_conn.delete(dn)
-    LOG.info(f"[+] {dn} has been removed")
+    LOG.info(f"[-] {dn} has been removed")
 
 
 @register_module
@@ -146,9 +146,7 @@ def changePassword(conn, identity, new_pass):
     # If LDAPS is not supported use SAMR
     if conn.conf.scheme == "ldaps":
         modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-        if ldap_conn.result['result'] == 0:
-            LOG.info('[+] Password changed successfully!')
-        else:
+        if ldap_conn.result['result'] != 0:
             raise ResultError(ldap_conn.result)
     else:
         # Check if identity is sAMAccountName
@@ -164,6 +162,8 @@ def changePassword(conn, identity, new_pass):
                 break
 
         rpcChangePassword(conn, sAMAccountName, new_pass)
+    
+    LOG.info('[+] Password changed successfully!')
 
 
 @register_module
@@ -175,11 +175,11 @@ def addObjectToGroup(conn, member, group):
     """
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
-    LOG.debug(f"[+] {member} found at {member_dn}")
+    LOG.debug(f"[*] {member} found at {member_dn}")
     group_dn = resolvDN(ldap_conn, group)
-    LOG.debug(f"[+] {group} found at {group_dn}")
+    LOG.debug(f"[*] {group} found at {group_dn}")
     addMembersToGroups.ad_add_members_to_groups(ldap_conn, member_dn, group_dn, raise_error=True)
-    LOG.info(f"[+] Adding {member_dn} to {group_dn}")
+    LOG.info(f"[+] {member_dn} added to {group_dn}")
 
 
 @register_module
@@ -193,7 +193,8 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
     ldap_conn = conn.getLdapConnection()
     # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
     magic_user_dn = f"<SID={user_sid}>"
-    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
+    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, fix=True, raise_error=True)
+    LOG.info(f"[+] {user_sid} added to {group_dn}")
 
 
 @register_module
@@ -208,6 +209,7 @@ def delObjectFromGroup(conn, member, group):
     member_dn = resolvDN(ldap_conn, member)
     group_dn = resolvDN(ldap_conn, group)
     removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
+    LOG.info(f"[-] {member} removed from {group_dn}")
 
 
 @register_module
@@ -224,6 +226,20 @@ def getChildObjects(conn, parent_obj, object_type='*'):
     for child in res:
         LOG.info(child)
     return res
+
+@register_module
+def search(conn, search_base, ldap_filter, attr='*'):
+    """
+    Search in LDAP database 
+    Args:
+        search_base: DN of the parent object
+        ldap_filter: Filter to apply to the LDAP search (see LDAP filter syntax)
+        attr: attributes to fetch (default is '*')
+    """
+    ldap_conn = conn.getLdapConnection()
+    ldap_conn.search(search_base, ldap_filter, search_scope=ldap3.SUBTREE, attributes=attr.split(','))
+    print(ldap_conn.response_to_json())
+
 
 @register_module
 def setShadowCredentials(conn, identity, enable="True", outfilePath=None, deviceID=None):
@@ -279,10 +295,10 @@ def setRbcd(conn, spn, target, enable="True"):
     """
     attr = 'msDS-AllowedToActOnBehalfOfOtherIdentity'
     modifySecDesc(conn=conn, identity=spn, target=target, ldap_attribute=attr, access_mask=ACCESS_FLAGS['ADS_RIGHT_DS_CONTROL_ACCESS'], enable=enable)
-    LOG.info(f"[+] Attribute {attr} correctly set")
-    LOG.info('[+] Delegation rights modified successfully!')
+    LOG.debug(f"[+] Attribute {attr} correctly set")
+    LOG.debug('[+] Delegation rights modified successfully!')
     if enable == "True":
-        LOG.info(f'{spn} can now impersonate users on {target} via S4U2Proxy')
+        LOG.info(f'[+] {spn} can now impersonate users on {target} via S4U2Proxy')
 
 
 @register_module
@@ -296,7 +312,7 @@ def setDCSync(conn, identity, enable='True'):
     modifySecDesc(conn=conn, identity=identity, target=getDefaultNamingContext(conn.getLdapConnection()),
     ldap_filter='(objectCategory=domain)', enable=enable, control_flag=dtypes.DACL_SECURITY_INFORMATION)
     if enable == 'True':
-        LOG.info(f'{identity} can now DCSync')
+        LOG.info(f'[+] {identity} can now DCSync')
 
         
 @register_module
@@ -312,7 +328,7 @@ def setUserAccountControl(conn, identity, flags, enable="True"):
     flags = int(flags,16)
     
     response = getObjAttr(conn, identity, 'userAccountControl')
-    LOG.info("Original userAccountControl: "+str(response['attributes']['userAccountControl']))
+    LOG.debug("[*] Original userAccountControl: "+str(response['attributes']['userAccountControl']))
     rawAccountControl = int(response['raw_attributes']['userAccountControl'][0].decode())
 
     if enable:

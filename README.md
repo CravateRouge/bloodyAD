@@ -21,19 +21,19 @@ Use the requirements.txt for your virtual environment: `pip3 install -r requirem
 ### Usage
 Simple usage:
 ```ps1
-python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799ac25b439bd6a31 changePassword mytarget 'Password123!'
+python bloodyAD.py --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword john.doe 'Password123!'
 ```
 
 **Note:** You can find more examples on https://cravaterouge.github.io/
 
 List of all available functions:
 ```ps1
-[bloodyAD]$ python .\bloodyAD.py -h
+[bloodyAD]$ python bloodyAD.py -h
 usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
                    {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl}
                    ...
 
-Active Directory Privilege Escalation Framework
+AD Privesc Swiss Army Knife
 
 Main options:
   -h, --help            show this help message and exit
@@ -56,7 +56,7 @@ Commands:
 
 Help text to use a specific function:
 ```ps1
-[bloodyAD]$ python bloodyAD.py --host 172.16.1.15 -d MYDOM -u myuser -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
+[bloodyAD]$ python bloodyAD.py --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
 usage: 
     Change the target password without knowing the old one using LDAPS or RPC
     Args:
@@ -134,16 +134,16 @@ pathgen.py -dp neo4jPass -ds 'OWNED_USER@ATTACK.LOCAL' -dt 'TARGET_USER@ATTACK.L
 
 Full help for `pathgen.py`:
 ```ps1
-$ python pathgen.py -h
+[bloodyAD]$ python pathgen.py -h
 usage: pathgen.py [-h] [--dburi DBURI] [-du DBUSER] -dp DBPASSWORD -ds DBSOURCE -dt DBTARGET [-f FILEPATH]
 
-Active Directory Privilege Escalation Framework
+Attack Path Generator
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
-  --dburi DBURI         The host neo4j is running on. Default: localhost.
+  --dburi DBURI         The host neo4j is running on (default is "bolt://localhost:7687")
   -du DBUSER, --dbuser DBUSER
-                        Neo4j username to use
+                        Neo4j username to use (default is "neo4j")
   -dp DBPASSWORD, --dbpassword DBPASSWORD
                         Neo4j password to use
   -ds DBSOURCE, --dbsource DBSOURCE
@@ -151,17 +151,17 @@ optional arguments:
   -dt DBTARGET, --dbtarget DBTARGET
                         Case sensitive label of the target node (name property in bloodhound)
   -f FILEPATH, --filepath FILEPATH
-                        File path for the graph path file (default is path.json)
+                        File path for the graph path file (default is "path.json")
 ```
 
 Full help for `autobloody.py`:
 ```ps1
-$ python autobloody.py -h
+[bloodyAD]$ python autobloody.py -h
 usage: autobloody.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-s {ldap,ldaps,rpc}] --host HOST [--path PATH]
 
-Active Directory Privilege Escalation Framework
+Attack Path Executor
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -d DOMAIN, --domain DOMAIN
                         Domain used for NTLM authentication
@@ -170,10 +170,11 @@ optional arguments:
   -p PASSWORD, --password PASSWORD
                         Cleartext password or LMHASH:NTHASH for NTLM authentication
   -k, --kerberos
-  -s , --secure         Try to use LDAP over TLS aka LDAPS (default is LDAP)
+  -c CERTIFICATE, --certificate CERTIFICATE
+                        Certificate authentication, e.g: "path/to/key:path/to/cert"
+  -s, --secure          Try to use LDAP over TLS aka LDAPS (default is LDAP)
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
-  --path PATH           Path file (to generate with pathgen.py)
-
+  --path PATH           Filename of the attack path generated with pathgen.py (default is "path.json")
 ```
 
 ### How it works

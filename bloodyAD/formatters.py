@@ -1,8 +1,11 @@
 
-import base64, binascii
+import base64, binascii, uuid
 from impacket.ldap import ldaptypes
 from impacket.structure import Structure
 from Cryptodome.Hash import MD4
+
+ldap_conn = None
+
 
 # https://docs.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
 ACCESS_FLAGS = {
@@ -102,25 +105,41 @@ def decodeAceFlags(ace):
     return pretty_flags if len(pretty_flags) > 0 else ace['AceFlags']
 
 
-def decodeGuid(guid):
-    part_sizes = [4,6,8,10]
-    pretty_guid = ''
-    i = 0
-    while i < len(guid):
-        pretty_guid += f'{guid[i]:x}'
-        i += 1
-        if i in part_sizes:
-            pretty_guid += f'-'
-    return pretty_guid
+def ldap_search(base_dn, filter, attr):
+    if not ldap_conn.search(base_dn, filter, attributes=attr) or not len(ldap_conn.entries) or attr not in ldap_conn.entries[0]:
+        return None
+    return ldap_conn.entries[0][attr].value
+
+def resolveSid(sid):
+    root_dn = ldap_conn.server.info.other['defaultNamingContext'][0]
+    r = ldap_search(f"CN=WellKnown Security Principals,CN=Configuration,{root_dn}", f"(objectSid={sid})",'name')
+    if r:
+        return r
+    r = ldap_search(root_dn, f"(objectSid={sid})",'sAMAccountName')
+    return r if r else sid
+
+
+def resolveGUID(guid_raw):
+    attr = 'name'
+    guid_canonical = str(uuid.UUID(bytes_le=guid_raw))
+    guid_str = '\\'+'\\'.join(['{:02x}'.format(b) for b in guid_raw])
+    schema_dn = ldap_conn.server.info.other['schemaNamingContext'][0]
+    r = ldap_search(f"CN=Extended-Rights,{ldap_conn.server.info.other['configurationNamingContext'][0]}", f"(rightsGuid={guid_canonical})", attr)
+    if not r:
+        r = ldap_search(schema_dn, f"(schemaIDGUID={guid_str})", attr)
+        return r if r else guid_canonical
+    if not ldap_conn.search(schema_dn,f"(attributeSecurityGUID={guid_str})",attributes=attr) or not len(ldap_conn.entries):
+        return r
+    return {r:[entry[attr].value for entry in ldap_conn.entries]}
 
 
 def formatSD(sd_bytes):
         sd=ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
         pretty_sd = {}
-        if sd['OffsetOwner'] != 0:
-            pretty_sd['OwnerSid'] = sd['OwnerSid'].formatCanonical()
+        if sd['OffsetOwner'] != 0:           
+            pretty_sd['Owner'] = resolveSid(sd['OwnerSid'].formatCanonical())
         if sd['OffsetGroup'] != 0:
-            pretty_sd['GroupSid'] = sd['GroupSid'].formatCanonical()
+            pretty_sd['Group'] = resolveSid(sd['GroupSid'].formatCanonical())
         if sd['OffsetSacl'] != 0:
             pretty_sd['Sacl'] = base64.b64encode(sd['Sacl'].getData())
         if sd['OffsetDacl'] != 0:
@@ -129,15 +148,15 @@ def formatSD(sd_bytes):
                 ace_val = ace['Ace']
                 pretty_ace = {
                     'TypeName':ace['TypeName'], 
-                    'Sid':ace_val['Sid'].formatCanonical(),
+                    'Trustee': resolveSid(ace_val['Sid'].formatCanonical()),
                     'Mask':decodeAccessMask(ace_val['Mask'])
                 }
                 if ace['AceFlags'] > 0:
                     pretty_ace['Flags'] = decodeAceFlags(ace)
-                if 'ObjectType' in ace_val.__dict__['fields'] and len(ace_val['ObjectType']) != 0:
-                    pretty_ace['ObjectType'] = decodeGuid(ace_val['ObjectType'])
                 if 'InheritedObjectType' in ace_val.__dict__['fields'] and len(ace_val['InheritedObjectType']) != 0:
-                    pretty_ace['InheritedObjectType'] = decodeGuid(ace_val['InheritedObjectType'])
+                    pretty_ace['InheritedObjectType'] = resolveGUID(ace_val['InheritedObjectType'])
+                if 'ObjectType' in ace_val.__dict__['fields'] and len(ace_val['ObjectType']) != 0:
+                    pretty_ace['ObjectType'] = resolveGUID(ace_val['ObjectType'])
                 pretty_aces.append(pretty_ace)
             pretty_sd['Dacl'] = pretty_aces
         return pretty_sd
@@ -146,6 +165,7 @@ def formatSD(sd_bytes):
 def formatFunctionalLevel(behavior_version):
     behavior_version = behavior_version.decode()
     return FUNCTIONAL_LEVEL[behavior_version] if behavior_version in FUNCTIONAL_LEVEL else behavior_version
+
 
 def formatSchemaVersion(objectVersion):
     objectVersion = objectVersion.decode()
@@ -190,6 +210,7 @@ class MSDS_MANAGEDPASSWORD_BLOB(Structure):
 
         self['QueryPasswordInterval'] = self.rawData[self['QueryPasswordIntervalOffset']:][:self['UnchangedPasswordIntervalOffset']-self['QueryPasswordIntervalOffset']]
         self['UnchangedPasswordInterval'] = self.rawData[self['UnchangedPasswordIntervalOffset']:]
+
 
 def formatGMSApass(managedPassword):
     blob = MSDS_MANAGEDPASSWORD_BLOB(managedPassword)

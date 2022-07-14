@@ -5,6 +5,7 @@ from impacket.dcerpc.v5 import rpcrt
 from dataclasses import dataclass
 
 from .formatters import formatFunctionalLevel, formatGMSApass, formatSD, formatSchemaVersion, formatAccountControl
+from . import formatters
 
 @dataclass
 class Config:
@@ -133,6 +134,7 @@ class ConnectionHandler():
         else:
             c.bind()
 
+        formatters.ldap_conn = c
         return c
     
     def close(self):

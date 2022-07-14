@@ -1,18 +1,21 @@
 #!/usr/bin/python 
-import argparse, json
+import argparse, json, sys
 from autobloody import database
 
 def main():
-    parser = argparse.ArgumentParser(description='Active Directory Privilege Escalation Framework', formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description='Attack Path Generator', formatter_class=argparse.RawTextHelpFormatter)
 
     # DB parameters
-    parser.add_argument("--dburi", default="bolt://localhost:7687", help="The host neo4j is running on. Default: localhost.")
-    parser.add_argument("-du", "--dbuser", default="neo4j", help="Neo4j username to use")
+    parser.add_argument("--dburi", default="bolt://localhost:7687", help="The host neo4j is running on (default is \"bolt://localhost:7687\")")
+    parser.add_argument("-du", "--dbuser", default="neo4j", help="Neo4j username to use (default is \"neo4j\")")
     parser.add_argument("-dp", "--dbpassword", help="Neo4j password to use", required=True)
     parser.add_argument("-ds", "--dbsource", help="Case sensitive label of the source node (name property in bloodhound)", required=True)
     parser.add_argument("-dt", "--dbtarget", help="Case sensitive label of the target node (name property in bloodhound)", required=True)
-    parser.add_argument("-f", "--filepath", help="File path for the graph path file (default is path.json)", default="path.json")
+    parser.add_argument("-f", "--filepath", help="File path for the graph path file (default is \"path.json\")", default="path.json")
 
+    if len(sys.argv)==1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
 
     args = parser.parse_args()
     db = database.Database(args.dburi, args.dbuser, args.dbpassword)
