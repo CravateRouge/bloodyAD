@@ -105,7 +105,7 @@ python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.
 python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
 
 # Read GMSA account password
-python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 -s ldaps getObjectAttributes gmsaAccount$ msDS-ManagedPassword
+python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 -s getObjectAttributes gmsaAccount$ msDS-ManagedPassword
 ```
 ## autobloody
 ### Description

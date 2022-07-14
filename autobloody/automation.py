@@ -49,7 +49,7 @@ class Automation:
         return
     
     def _dcSync(self, rel):
-        printf(f"[+] You can now dump the NTDS using: secretsdump.py '{self.conn.conf.domain}/{self.conn.conf.username}:{self.conn.conf.password}@{self.conn.conf.host}'")
+        print(f"[+] You can now dump the NTDS using: secretsdump.py '{self.conn.conf.domain}/{self.conn.conf.username}:{self.conn.conf.password}@{self.conn.conf.host}'")
         return
     
     def _setDCSync(self, rel):
