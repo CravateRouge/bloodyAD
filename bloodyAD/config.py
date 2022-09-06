@@ -1,11 +1,12 @@
+from bloodyAD import patch
 import ldap3
 import ssl
 from impacket.dcerpc.v5 import transport, samr
 from impacket.dcerpc.v5 import rpcrt
 from dataclasses import dataclass
 
-from .formatters import formatFunctionalLevel, formatGMSApass, formatSD, formatSchemaVersion, formatAccountControl
-from . import formatters
+from bloodyAD.formatters import formatFunctionalLevel, formatGMSApass, formatSD, formatSchemaVersion, formatAccountControl
+from bloodyAD import formatters
 
 @dataclass
 class Config:
@@ -103,7 +104,7 @@ class ConnectionHandler():
                 'msDS-ManagedPassword':formatGMSApass
                 }
         }
-        ldap_connection_kwargs = {'raise_exceptions' : True}
+        ldap_connection_kwargs = {'session_security' : 'ENCRYPT', 'raise_exceptions' : True}
 
         if cnf.crt:
             key = cnf.key if cnf.key else None

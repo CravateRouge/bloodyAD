@@ -13,8 +13,8 @@ from dsinternals.system.DateTime import DateTime
 from dsinternals.common.data.hello.KeyCredential import KeyCredential
 from dsinternals.common.data import DNWithBinary
 
-from .exceptions import NoResultError, ResultError, TooManyResultsError
-from .formatters import ACCESS_FLAGS, ACE_FLAGS
+from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
+from bloodyAD.formatters import ACCESS_FLAGS, ACE_FLAGS
 
 LOG = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')

@@ -8,13 +8,13 @@ from functools import wraps
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
 from impacket.dcerpc.v5 import dtypes
 
-from .exceptions import BloodyError, ResultError, NoResultError
-from .utils import resolvDN, getDefaultNamingContext, getObjAttr, setAttr
-from .utils import rpcChangePassword
-from .utils import modifySecDesc
-from .utils import addShadowCredentials, delShadowCredentials
-from .utils import LOG
-from .formatters import ACCESS_FLAGS
+from bloodyAD.exceptions import BloodyError, ResultError, NoResultError
+from bloodyAD.utils import resolvDN, getDefaultNamingContext, getObjAttr, setAttr
+from bloodyAD.utils import rpcChangePassword
+from bloodyAD.utils import modifySecDesc
+from bloodyAD.utils import addShadowCredentials, delShadowCredentials
+from bloodyAD.utils import LOG
+from bloodyAD.formatters import ACCESS_FLAGS
 
 
 functions = []
