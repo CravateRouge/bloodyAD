@@ -2,7 +2,6 @@ import ldap3
 import types
 import re
 import json
-from .addcomputer import ADDCOMPUTER
 from functools import wraps
 
 from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
@@ -73,16 +72,18 @@ def addUser(conn, sAMAccountName, password, ou=None):
         naming_context = getDefaultNamingContext(ldap_conn)
         user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
 
-    user_cls = ['top', 'person', 'organizationalPerson', 'user']
-    attr = {'objectClass': user_cls}
-    attr["distinguishedName"] = user_dn
-    attr["sAMAccountName"] = sAMAccountName
-    attr["userAccountControl"] = 544
+    attr = {
+    'objectClass': ['top', 'person', 'organizationalPerson', 'user'],
+    'distinguishedName' : user_dn,
+    'sAMAccountName' : sAMAccountName,
+    'userAccountControl' : 544,
+    'unicodePwd': ('"%s"' % password).encode('utf-16-le')
+    }
 
     ldap_conn.add(user_dn, attributes=attr)
 
     if ldap_conn.result['description'] == 'success':
-        changePassword(conn, sAMAccountName, password)
+        LOG.info(f"[+] {sAMAccountName} has been successfully added")
     else:
         LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
         raise BloodyError(ldap_conn.result['description'])
@@ -100,23 +101,54 @@ def addComputer(conn, hostname, password, ou=None):
         ou: Optional parameters - Where to put the computer object in the LDAP directory
     """
     cnf = conn.conf
-    if re.search('[a-zA-Z]', cnf.host):
-        dc_host = cnf.host
-        dc_ip = None
-    else:
-        dc_host = None
-        dc_ip = cnf.host
-    options = types.SimpleNamespace(
-        hashes=f'{cnf.lmhash}:{cnf.nthash}' if cnf.nthash else None,
-        aesKey=None, k=cnf.kerberos, kdc_host=None,
-        dc_host=dc_host, dc_ip=dc_ip,
-        computer_name=hostname, computer_pass=password,
-        method='LDAPS' if cnf.scheme.lower() == 'ldaps' else 'SAMR',
-        port=None, domain_netbios=None,
-        no_add=None, delete=None, baseDN=None,
-        computer_group=ou)
-    ADDCOMPUTER(cnf.username, cnf.password, cnf.domain, options).run()
+    ldap_conn = conn.getLdapConnection()
 
+    if ou:
+        computer_dn = f"cn={hostname},{ou}"
+    else:
+        naming_context = getDefaultNamingContext(ldap_conn)
+        computer_dn = f"cn={hostname},cn=Computers,{naming_context}"
+
+    # Default computer SPNs
+    spns = [
+        'HOST/%s' % hostname,
+        'HOST/%s.%s' % (hostname, cnf.domain),
+        'RestrictedKrbHost/%s' % hostname,
+        'RestrictedKrbHost/%s.%s' % (hostname, cnf.domain),
+    ]
+    attr = {
+        'objectClass' : ['top','person','organizationalPerson','user','computer'],
+        'dnsHostName': '%s.%s' % (hostname, cnf.domain),
+        'userAccountControl': 0x1000,
+        'servicePrincipalName': spns,
+        'sAMAccountName': f"{hostname}$",
+        'unicodePwd': ('"%s"' % password).encode('utf-16-le')
+    }
+
+    ldap_conn.add(computer_dn, attributes=attr)
+    
+    if ldap_conn.result['description'] == 'success':
+        LOG.info(f"[+] {hostname} has been successfully added")
+    else:
+        LOG.error(hostname + ': ' + ldap_conn.result['description'])
+        raise BloodyError(ldap_conn.result['description'])
+
+    # if re.search('[a-zA-Z]', cnf.host):
+    #     dc_host = cnf.host
+    #     dc_ip = None
+    # else:
+    #     dc_host = None
+    #     dc_ip = cnf.host
+    # options = types.SimpleNamespace(
+    #     hashes=f'{cnf.lmhash}:{cnf.nthash}' if cnf.nthash else None,
+    #     aesKey=None, k=cnf.kerberos, kdc_host=None,
+    #     dc_host=dc_host, dc_ip=dc_ip,
+    #     computer_name=hostname, computer_pass=password,
+    #     method='LDAPS' if cnf.scheme.lower() == 'ldaps' else 'SAMR',
+    #     port=None, domain_netbios=None,
+    #     no_add=None, delete=None, baseDN=None,
+    #     computer_group=ou)
+    # ADDCOMPUTER(cnf.username, cnf.password, cnf.domain, options).run()
 
 @register_module
 def delObject(conn, identity):
@@ -144,24 +176,24 @@ def changePassword(conn, identity, new_pass):
     target_dn = resolvDN(ldap_conn, identity)
 
     # If LDAPS is not supported use SAMR
-    if conn.conf.scheme == "ldaps":
-        modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-        if ldap_conn.result['result'] != 0:
-            raise ResultError(ldap_conn.result)
-    else:
-        # Check if identity is sAMAccountName
-        sAMAccountName = identity
-        for marker in ["dc=", "s-1", "{"]:
-            if marker in identity.lower():
-                ldap_filter = '(objectClass=*)'
-                ldap_conn.search(target_dn, ldap_filter, search_scope=ldap3.BASE, attributes=['SAMAccountName'])
-                try:
-                    sAMAccountName = ldap_conn.response[0]['attributes']['sAMAccountName']
-                except IndexError:
-                    raise NoResultError(target_dn, ldap_filter)
-                break
+    # if conn.conf.scheme == "ldaps":
+    modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
+    if ldap_conn.result['result'] != 0:
+        raise ResultError(ldap_conn.result)
+    # else:
+    #     # Check if identity is sAMAccountName
+    #     sAMAccountName = identity
+    #     for marker in ["dc=", "s-1", "{"]:
+    #         if marker in identity.lower():
+    #             ldap_filter = '(objectClass=*)'
+    #             ldap_conn.search(target_dn, ldap_filter, search_scope=ldap3.BASE, attributes=['SAMAccountName'])
+    #             try:
+    #                 sAMAccountName = ldap_conn.response[0]['attributes']['sAMAccountName']
+    #             except IndexError:
+    #                 raise NoResultError(target_dn, ldap_filter)
+    #             break
 
-        rpcChangePassword(conn, sAMAccountName, new_pass)
+    #     rpcChangePassword(conn, sAMAccountName, new_pass)
     
     LOG.info('[+] Password changed successfully!')
 
