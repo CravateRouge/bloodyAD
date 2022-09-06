@@ -73,7 +73,7 @@ optional arguments:
   ```
 
 ### How it works
-bloodyAD communicates with a DC using mainly the LDAP protocol in order to get information or add/modify/delete AD objects. A password cannot be updated with LDAP, it must be a secure connection that is LDAPS or SAMR. A DC doesn't have LDAPS activated by default because it must be configured (with a certificate) so SAMR is used in those cases.
+bloodyAD communicates with a DC using mainly the LDAP protocol in order to get information or add/modify/delete AD objects. ~~A password cannot be updated with LDAP, it must be a secure connection that is LDAPS or SAMR. A DC doesn't have LDAPS activated by default because it must be configured (with a certificate) so SAMR is used in those cases.~~ Exchange of sensitive information such as passwords are now supported using cleartext LDAP.
 
 ### Useful commands
 ```ps1
@@ -105,7 +105,7 @@ python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.
 python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
 
 # Read GMSA account password
-python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 -s getObjectAttributes gmsaAccount$ msDS-ManagedPassword
+python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes gmsaAccount$ msDS-ManagedPassword
 ```
 ## autobloody
 ### Description
