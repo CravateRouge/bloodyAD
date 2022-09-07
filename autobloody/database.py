@@ -42,8 +42,7 @@ class Database:
             {'cost':100102, 'edges':'WriteOwner', 'endnode':'Computer'},
 
             # If we already have GenericAll right on OU we must ensure inheritance so we'll add a new GenericAll ACE with inheritance
-            {'cost':0, 'edges':'Contains', 'endnode':'OU'},
-            {'cost':250, 'edges':'GenericWrite|GenericAll', 'endnode':'OU'},
+            {'cost':0, 'edges':'Contains|GenericWrite|GenericAll', 'endnode':'OU'},
             {'cost':250, 'edges':'WriteDacl|Owns', 'endnode':'OU'},
             {'cost':350, 'edges':'WriteOwner', 'endnode':'OU'},
 

@@ -1,5 +1,4 @@
-#!/usr/bin/python 
-# Credits to aclpwn
+#!/usr/bin/env python3
 import sys
 import argparse
 from bloodyAD import functions, ConnectionHandler
