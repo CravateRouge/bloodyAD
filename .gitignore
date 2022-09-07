@@ -1,6 +1,4 @@
 __pycache__/
 *.pem
 *.ccache
-tests/
-*.json
 venv/
