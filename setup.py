@@ -1,12 +1,18 @@
 from setuptools import setup
 
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 setup(name='bloodyAD',
-      version='0.1',
+      version='0.1.1',
       description='AD Privesc Swiss Army Knife',
+      long_description=long_description,
+      long_description_content_type='text/markdown',
       author='CravateRouge',
       author_email='baptiste.crepin@ntymail.com',
       url='https://github.com/CravateRouge/bloodyAD',
-      download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.tar.gz',
+      download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.1.tar.gz',
       packages=['bloodyAD'],
       license='MIT',
       install_requires=['dsinternals>=1.2.4','impacket>=0.10.0','ldap3>=2.9; python_version >= "3.6"'],
@@ -20,5 +26,8 @@ setup(name='bloodyAD',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10'
       ],
-      python_requires='>=3.6'
-      )
+      python_requires='>=3.6',
+      entry_points={
+        "console_scripts":["bloodyAD = bloodyAD.main:main"]
+      }
+)
