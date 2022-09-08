@@ -6,6 +6,7 @@ setup(name='bloodyAD',
       author='CravateRouge',
       author_email='baptiste.crepin@ntymail.com',
       url='https://github.com/CravateRouge/bloodyAD',
+      download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.tar.gz',
       packages=['bloodyAD'],
       license='MIT',
       install_requires=['dsinternals>=1.2.4','impacket>=0.10.0','ldap3>=2.9; python_version >= "3.6"'],
@@ -19,6 +20,5 @@ setup(name='bloodyAD',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10'
       ],
-      scripts=['bloodyAD.py'],
       python_requires='>=3.6'
       )
