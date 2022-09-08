@@ -9,27 +9,37 @@ This tool can perform specific LDAP/SAMR calls to a domain controller in order t
 
 It is designed to be used transparently with a SOCKS proxy.
 
-## Requirements
-The following are required:
+## Installation
+A python package is available:
+```ps1
+pip install bloodyAD
+bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password123!'
+```
+
+Or you can clone the repo:
+```ps1
+git clone --depth 1 https://github.com/CravateRouge/bloodyAD
+pip install .
+bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password123!'
+```
+### Dependencies
 - Python 3
 - DSinternals
 - Impacket
 - Ldap3
 
-Use the requirements.txt for your virtual environment: `pip3 install -r requirements.txt`
-
 ## Usage
 Simple usage:
 ```ps1
-python bloodyAD.py --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword john.doe 'Password123!'
+bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword john.doe 'Password123!'
 ```
 
 **Note:** You can find more examples on https://cravaterouge.github.io/
 
 List of all available functions:
 ```ps1
-[bloodyAD]$ python bloodyAD.py -h
-usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
+[bloodyAD]$ bloodyAD -h
+usage: bloodyAD [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
                    {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl}
                    ...
 
@@ -56,7 +66,7 @@ Commands:
 
 Help text to use a specific function:
 ```ps1
-[bloodyAD]$ python bloodyAD.py --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
+[bloodyAD]$ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
 usage: 
     Change the target password without knowing the old one using LDAPS or RPC
     Args:
@@ -78,32 +88,32 @@ bloodyAD communicates with a DC using mainly the LDAP protocol in order to get i
 ## Useful commands
 ```ps1
 # Get group members
-python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes Users member 
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes Users member 
 
 # Get minimum password length policy
-python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
 
 # Get AD functional level
-python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' msDS-Behavior-Version
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' msDS-Behavior-Version
 
 # Get all users of the domain
-python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
 
 # Get all computers of the domain
-python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' computer
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' computer
 
 # Get all containers of the domain
-python bloodyAD.py -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' container
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' container
 
 # Enable DONT_REQ_PREAUTH for ASREPRoast
-python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x400000
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x400000
 
 # Disable ACCOUNTDISABLE
-python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x0002 False
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x0002 False
 
 # Get UserAccountControl flags
-python bloodyAD.py -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
 
 # Read GMSA account password
-python bloodyAD.py -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes gmsaAccount$ msDS-ManagedPassword
+bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes gmsaAccount$ msDS-ManagedPassword
 ```

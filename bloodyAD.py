@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import bloodyAD
+from bloodyAD import main
 
 if __name__ == '__main__':
-    bloodyAD.main()
+    main.main()
