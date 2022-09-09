@@ -104,7 +104,7 @@ class ConnectionHandler():
                 'msDS-ManagedPassword':formatGMSApass
                 }
         }
-        ldap_connection_kwargs = {'session_security' : 'ENCRYPT', 'raise_exceptions' : True}
+        ldap_connection_kwargs = {'raise_exceptions' : True}
 
         if cnf.crt:
             key = cnf.key if cnf.key else None
@@ -119,13 +119,15 @@ class ConnectionHandler():
         elif cnf.kerberos:
             ldap_connection_kwargs.update({
                 'authentication' : ldap3.SASL,
-                'sasl_mechanism' : ldap3.KERBEROS
+                'sasl_mechanism' : ldap3.KERBEROS,
+                'session_security' : 'ENCRYPT'
             })            
         else:
             ldap_connection_kwargs.update({
                 'user' : '%s\\%s' % (cnf.domain, cnf.username),
                 'password' : cnf.password,
-                'authentication' : ldap3.NTLM, 
+                'authentication' : ldap3.NTLM,
+                'session_security' : 'ENCRYPT'
             })
 
         s = ldap3.Server(**ldap_server_kwargs)
