@@ -225,9 +225,11 @@ def addForeignObjectToGroup(conn, user_sid, group_dn):
     ldap_conn = conn.getLdapConnection()
     # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
     magic_user_dn = f"<SID={user_sid}>"
-    addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, fix=True, raise_error=True)
-    LOG.info(f"[+] {user_sid} added to {group_dn}")
-
+    try:
+        addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
+        LOG.info(f"[+] {user_sid} added to {group_dn}")
+    except ldap3.core.exceptions.LDAPEntryAlreadyExistsResult:
+        LOG.warning(f"[!] {user_sid} already exists in {group_dn}")
 
 @register_module
 def delObjectFromGroup(conn, member, group):
@@ -308,10 +310,10 @@ def setOwner(conn, identity, target):
     """
     Set an AD object as the owner of the target object
     Args:
-        identity: sAMAccountName, DN, GUID or SID of the object you control
+        identity: sAMAccountName, DN, GUID or SID of your user (You must be Domain Admins to set another user)
         target: sAMAccountName, DN, GUID or SID of the targeted object (You must have WriteOwner permission on it)
     """
-    old_sid = modifySecDesc(conn, identity=identity, target=target, control_flag=dtypes.OWNER_SECURITY_INFORMATION)['OwnerSid'].formatCanonical()
+    old_sid = modifySecDesc(conn, identity=identity, target=target, control_flag=dtypes.OWNER_SECURITY_INFORMATION)
     LOG.info(f'[+] Old owner {old_sid} is now replaced by {identity} on {target}')
     return old_sid
 

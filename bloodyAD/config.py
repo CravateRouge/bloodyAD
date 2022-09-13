@@ -157,7 +157,6 @@ class ConnectionHandler():
     def switchUser(self, username, password):
         self.conf.username = username
         self.conf.password = password
-        if self.ldap:
-            self.ldap.rebind(user='%s\\%s' % (self.conf.domain, username), password=password, authentication=ldap3.NTLM)
+        self._closeLdap()
         self._closeSamr()
 

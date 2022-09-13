@@ -240,27 +240,43 @@ def modifySecDesc(conn, identity, target,
     else:
         sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
 
-    old_sd = sd
+
     user_sid = getObjectSID(conn, identity)
     attr_values = []
+    old_owner = ''
 
     if control_flag == dtypes.OWNER_SECURITY_INFORMATION:
-        sd['OwnerSid'] = ldaptypes.LDAP_SID()
+        old_owner = sd['OwnerSid'].formatCanonical()
         sd['OwnerSid'].fromCanonical(format_sid(user_sid))
         attr_values.append(sd.getData())
+        
     else:
+        existing_ace = None
+        ace_haspriv = False
+        LOG.debug('Currently allowed sids:')
+        for ace in sd['Dacl'].aces:
+            ace_sid = ace['Ace']['Sid']
+            LOG.debug('\t%s' % ace_sid.formatCanonical())
+            if ace_sid.getData() == user_sid:
+                existing_ace = ace
+                ace_haspriv = ace['Ace']['Mask'].hasPriv(access_mask)
+                if ace_haspriv:
+                    break
         if enable:
-            sd['Dacl'].aces.append(createACE(sid=user_sid, access_mask=access_mask))
-        else:
-            aces_to_keep = []
-            LOG.debug('Currently allowed sids:')
-            for ace in sd['Dacl'].aces:
-                ace_sid = ace['Ace']['Sid']
-                if ace_sid.getData() == user_sid:
-                    LOG.debug('    %s (will be removed)' % ace_sid.formatCanonical())
-                    sd['Dacl'].aces.remove(ace)
+            if existing_ace:
+                if ace_haspriv:
+                    LOG.warning(f"[!] {identity} already has this right on {target}")
                 else:
-                    LOG.debug('    %s' % ace_sid.formatCanonical())
+                    existing_ace['Ace']['Mask'].setPriv(access_mask)
+                    LOG.info("[+] Existing ACE modified to add the new right")
+            else:
+                sd['Dacl'].aces.append(createACE(sid=user_sid, access_mask=access_mask))
+                LOG.info(f"[+] ACE created for {identity} on {target}")
+        else:
+            if existing_ace:
+                if ace_haspriv:
+                    existing_ace['Ace']['Mask'].removePriv(access_mask)
+                    LOG.info(f"[-] Right removed for {identity} on {target}")
 
         # Remove the attribute if there is no ace to keep
         if len(sd['Dacl'].aces) > 0 or ldap_attribute == 'nTSecurityDescriptor':
@@ -268,7 +284,7 @@ def modifySecDesc(conn, identity, target,
 
     ldap_conn.modify(entry_dn, {ldap_attribute: [ldap3.MODIFY_REPLACE, attr_values]}, controls=controls)
     if ldap_conn.result['result'] == 0:
-        return old_sd
+        return old_owner
     else:
         raise ResultError(ldap_conn.result)
 

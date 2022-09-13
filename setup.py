@@ -5,14 +5,14 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
 setup(name='bloodyAD',
-      version='0.1.3',
+      version='0.1.4',
       description='AD Privesc Swiss Army Knife',
       long_description=long_description,
       long_description_content_type='text/markdown',
       author='CravateRouge',
       author_email='baptiste.crepin@ntymail.com',
       url='https://github.com/CravateRouge/bloodyAD',
-      download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.3.tar.gz',
+      download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.4.tar.gz',
       packages=['bloodyAD'],
       license='MIT',
       install_requires=['dsinternals>=1.2.4','impacket>=0.10.0','ldap3>=2.9.1; python_version >= "3.6"'],
