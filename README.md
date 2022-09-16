@@ -116,4 +116,7 @@ bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjec
 
 # Read GMSA account password
 bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes gmsaAccount$ msDS-ManagedPassword
+
+# Read quota for adding computer objects to domain
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' ms-DS-MachineAccountQuota
 ```
