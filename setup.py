@@ -15,7 +15,7 @@ setup(name='bloodyAD',
       download_url='https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.4.tar.gz',
       packages=['bloodyAD'],
       license='MIT',
-      install_requires=['dsinternals>=1.2.4','impacket>=0.10.0','ldap3>=2.9.1; python_version >= "3.6"'],
+      install_requires=['dsinternals>=1.2.4','impacket>=0.10.0','ldap3>=2.9.1; python_version >= "3.6"','requests-kerberos>=0.14.0'],
       keywords = ['Active Directory', 'Privilege Escalation'],
       classifiers=[
         'Intended Audience :: Information Technology',
