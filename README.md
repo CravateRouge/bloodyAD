@@ -10,6 +10,21 @@ This tool can perform specific LDAP/SAMR calls to a domain controller in order t
 It is designed to be used transparently with a SOCKS proxy.
 
 ## Installation
+First if you run it on Linux, you must have `libkrb5-dev` installed on your OS in order for kerberos to work:
+```ps1
+# Debian/Ubuntu/Kali
+apt-get install libkrb5-dev
+
+# Centos/RHEL
+yum install krb5-devel
+
+# Fedora
+dnf install krb5-devel
+
+# Arch Linux
+pacman -S krb5
+```
+
 A python package is available:
 ```ps1
 pip install bloodyAD
@@ -27,6 +42,7 @@ bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password
 - DSinternals
 - Impacket
 - Ldap3
+- Gssapi (linux) or Winkerberos (Windows)
 
 ## Usage
 Simple usage:
