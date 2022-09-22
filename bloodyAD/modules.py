@@ -203,7 +203,7 @@ def addObjectToGroup(conn, member, group):
     """
     Add an object to a group
         member: sAMAccountName, DN, GUID or SID of the object to add to the group
-        group: DN, GUID or SID of the group
+        group: sAMAccountName, DN, GUID or SID of the group
     """
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
@@ -215,16 +215,18 @@ def addObjectToGroup(conn, member, group):
 
 
 @register_module
-def addForeignObjectToGroup(conn, user_sid, group_dn):
+def addForeignObjectToGroup(conn, user_sid, group):
     """
     Add foreign principals (users or groups), coming from a trusted domain, to a group
     Args:
         user_sid: foreign object sid
-        group_dn: group DN in which to add the foreign object
+        group: sAMAccountName, DN, GUID or SID of the group
     """
     ldap_conn = conn.getLdapConnection()
     # https://social.technet.microsoft.com/Forums/en-US/6b7217e1-a197-4e24-9357-351c2d23edfe/ldap-query-to-add-foreignsecurityprincipals-to-a-group?forum=winserverDS
     magic_user_dn = f"<SID={user_sid}>"
+    group_dn = resolvDN(ldap_conn, group)
+    LOG.debug(f"[*] {group} found at {group_dn}")
     try:
         addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
         LOG.info(f"[+] {user_sid} added to {group_dn}")
@@ -237,7 +239,7 @@ def delObjectFromGroup(conn, member, group):
     Remove member from group
     Args:
         member: sAMAccountName, DN, GUID or SID of the object to delete from the group
-        group: DN, GUID or SID of the group
+        group: sAMAccountName, DN, GUID or SID of the group
     """
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
