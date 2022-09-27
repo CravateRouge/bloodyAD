@@ -4,6 +4,7 @@ import ldap3
 import impacket
 import logging
 import json
+import sys
 from ldap3.protocol.formatters.formatters import format_sid
 from impacket.ldap import ldaptypes
 from impacket.dcerpc.v5 import samr, dtypes
@@ -16,8 +17,11 @@ from dsinternals.common.data import DNWithBinary
 from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
 from bloodyAD.formatters import ACCESS_FLAGS, ACE_FLAGS
 
-LOG = logging.getLogger()
+LOG = logging.getLogger('bloodyAD')
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+LOG.addHandler(handler)
 
 
 # 983551 Full control

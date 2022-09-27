@@ -119,16 +119,23 @@ class ConnectionHandler():
         elif cnf.kerberos:
             ldap_connection_kwargs.update({
                 'authentication' : ldap3.SASL,
-                'sasl_mechanism' : ldap3.KERBEROS,
-                'session_security' : 'ENCRYPT'
-            })            
+                'sasl_mechanism' : ldap3.KERBEROS
+            })
+            if cnf.scheme != "ldaps":
+                ldap_connection_kwargs.update({
+                    'session_security' : 'ENCRYPT'
+                })
+                
         else:
             ldap_connection_kwargs.update({
                 'user' : '%s\\%s' % (cnf.domain, cnf.username),
                 'password' : cnf.password,
-                'authentication' : ldap3.NTLM,
-                'session_security' : 'ENCRYPT'
+                'authentication' : ldap3.NTLM
             })
+            if cnf.scheme != "ldaps":
+                ldap_connection_kwargs.update({
+                    'session_security' : 'ENCRYPT'
+                })
 
         s = ldap3.Server(**ldap_server_kwargs)
         c = ldap3.Connection(s,**ldap_connection_kwargs)
