@@ -1,16 +1,24 @@
 import ldap3
-import types
-import re
 import json
 from functools import wraps
 
-from ldap3.extend.microsoft import addMembersToGroups, modifyPassword, removeMembersFromGroups
+from ldap3.extend.microsoft import (
+    addMembersToGroups,
+    modifyPassword,
+    removeMembersFromGroups,
+)
+from ldap3.protocol.formatters.formatters import format_sid
 from impacket.dcerpc.v5 import dtypes
 
-from bloodyAD.exceptions import BloodyError, ResultError, NoResultError
-from bloodyAD.utils import resolvDN, getDefaultNamingContext, getObjAttr, setAttr
-from bloodyAD.utils import rpcChangePassword
-from bloodyAD.utils import modifySecDesc
+from bloodyAD.exceptions import BloodyError, ResultError
+from bloodyAD import utils
+from bloodyAD.utils import (
+    resolvDN,
+    getDefaultNamingContext,
+    setAttr,
+    getObjectSID,
+)
+from bloodyAD.utils import getSD, addRight, delRight
 from bloodyAD.utils import addShadowCredentials, delShadowCredentials
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import ACCESS_FLAGS
@@ -30,15 +38,30 @@ def register_module(f):
 
 
 @register_module
-def getObjectAttributes(conn, identity, attr='*', fetchSD="False"):
+def getObjectAttributes(conn, identity, attr="*", fetchSD="False"):
     """
     Fetch LDAP attributes for the identity (group or user) provided
     Args:
         identity: sAMAccountName, DN, GUID or SID of the target
         attr: attributes to fetch separated with ',' (default fetch all attributes)
-        fetchSD: True fetch nTSecurityDescriptor that contains DACL (default is False)
+        fetchSD: If True, fetch security descriptor permissions (default is False)
     """
-    getObjAttr(conn, identity, attr, fetchSD, True)
+    fetchSD = fetchSD == "True"
+    control_flag = dtypes.OWNER_SECURITY_INFORMATION
+    if fetchSD:
+        control_flag += (
+            dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
+        )
+    utils.search(conn, identity, attr=attr, control_flag=control_flag)
+    print(
+        json.dumps(
+            json.loads(conn.getLdapConnection().response_to_json())["entries"][0][
+                "attributes"
+            ],
+            indent=4,
+            sort_keys=True,
+        )
+    )
 
 
 @register_module
@@ -47,7 +70,7 @@ def setAttribute(conn, identity, attribute, value):
     Add or replace an attribute of an object
     Args:
         identity: sAMAccountName, DN, GUID or SID of the object
-        attribute: Name of the attribute 
+        attribute: Name of the attribute
         value: jSON array (e.g ["john.doe"])
     """
     value = json.loads(value)
@@ -73,20 +96,20 @@ def addUser(conn, sAMAccountName, password, ou=None):
         user_dn = f"cn={sAMAccountName},cn=Users,{naming_context}"
 
     attr = {
-    'objectClass': ['top', 'person', 'organizationalPerson', 'user'],
-    'distinguishedName' : user_dn,
-    'sAMAccountName' : sAMAccountName,
-    'userAccountControl' : 544,
-    'unicodePwd': ('"%s"' % password).encode('utf-16-le')
+        "objectClass": ["top", "person", "organizationalPerson", "user"],
+        "distinguishedName": user_dn,
+        "sAMAccountName": sAMAccountName,
+        "userAccountControl": 544,
+        "unicodePwd": ('"%s"' % password).encode("utf-16-le"),
     }
 
     ldap_conn.add(user_dn, attributes=attr)
 
-    if ldap_conn.result['description'] == 'success':
+    if ldap_conn.result["description"] == "success":
         LOG.info(f"[+] {sAMAccountName} has been successfully added")
     else:
-        LOG.error(sAMAccountName + ': ' + ldap_conn.result['description'])
-        raise BloodyError(ldap_conn.result['description'])
+        LOG.error(sAMAccountName + ": " + ldap_conn.result["description"])
+        raise BloodyError(ldap_conn.result["description"])
 
 
 @register_module
@@ -111,44 +134,34 @@ def addComputer(conn, hostname, password, ou=None):
 
     # Default computer SPNs
     spns = [
-        'HOST/%s' % hostname,
-        'HOST/%s.%s' % (hostname, cnf.domain),
-        'RestrictedKrbHost/%s' % hostname,
-        'RestrictedKrbHost/%s.%s' % (hostname, cnf.domain),
+        "HOST/%s" % hostname,
+        "HOST/%s.%s" % (hostname, cnf.domain),
+        "RestrictedKrbHost/%s" % hostname,
+        "RestrictedKrbHost/%s.%s" % (hostname, cnf.domain),
     ]
     attr = {
-        'objectClass' : ['top','person','organizationalPerson','user','computer'],
-        'dnsHostName': '%s.%s' % (hostname, cnf.domain),
-        'userAccountControl': 0x1000,
-        'servicePrincipalName': spns,
-        'sAMAccountName': f"{hostname}$",
-        'unicodePwd': ('"%s"' % password).encode('utf-16-le')
+        "objectClass": [
+            "top",
+            "person",
+            "organizationalPerson",
+            "user",
+            "computer",
+        ],
+        "dnsHostName": "%s.%s" % (hostname, cnf.domain),
+        "userAccountControl": 0x1000,
+        "servicePrincipalName": spns,
+        "sAMAccountName": f"{hostname}$",
+        "unicodePwd": ('"%s"' % password).encode("utf-16-le"),
     }
 
     ldap_conn.add(computer_dn, attributes=attr)
-    
-    if ldap_conn.result['description'] == 'success':
+
+    if ldap_conn.result["description"] == "success":
         LOG.info(f"[+] {hostname} has been successfully added")
     else:
-        LOG.error(hostname + ': ' + ldap_conn.result['description'])
-        raise BloodyError(ldap_conn.result['description'])
+        LOG.error(hostname + ": " + ldap_conn.result["description"])
+        raise BloodyError(ldap_conn.result["description"])
 
-    # if re.search('[a-zA-Z]', cnf.host):
-    #     dc_host = cnf.host
-    #     dc_ip = None
-    # else:
-    #     dc_host = None
-    #     dc_ip = cnf.host
-    # options = types.SimpleNamespace(
-    #     hashes=f'{cnf.lmhash}:{cnf.nthash}' if cnf.nthash else None,
-    #     aesKey=None, k=cnf.kerberos, kdc_host=None,
-    #     dc_host=dc_host, dc_ip=dc_ip,
-    #     computer_name=hostname, computer_pass=password,
-    #     method='LDAPS' if cnf.scheme.lower() == 'ldaps' else 'SAMR',
-    #     port=None, domain_netbios=None,
-    #     no_add=None, delete=None, baseDN=None,
-    #     computer_group=ou)
-    # ADDCOMPUTER(cnf.username, cnf.password, cnf.domain, options).run()
 
 @register_module
 def delObject(conn, identity):
@@ -175,27 +188,11 @@ def changePassword(conn, identity, new_pass):
     ldap_conn = conn.getLdapConnection()
     target_dn = resolvDN(ldap_conn, identity)
 
-    # If LDAPS is not supported use SAMR
-    # if conn.conf.scheme == "ldaps":
     modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-    if ldap_conn.result['result'] != 0:
+    if ldap_conn.result["result"] != 0:
         raise ResultError(ldap_conn.result)
-    # else:
-    #     # Check if identity is sAMAccountName
-    #     sAMAccountName = identity
-    #     for marker in ["dc=", "s-1", "{"]:
-    #         if marker in identity.lower():
-    #             ldap_filter = '(objectClass=*)'
-    #             ldap_conn.search(target_dn, ldap_filter, search_scope=ldap3.BASE, attributes=['SAMAccountName'])
-    #             try:
-    #                 sAMAccountName = ldap_conn.response[0]['attributes']['sAMAccountName']
-    #             except IndexError:
-    #                 raise NoResultError(target_dn, ldap_filter)
-    #             break
 
-    #     rpcChangePassword(conn, sAMAccountName, new_pass)
-    
-    LOG.info('[+] Password changed successfully!')
+    LOG.info("[+] Password changed successfully!")
 
 
 @register_module
@@ -210,7 +207,9 @@ def addObjectToGroup(conn, member, group):
     LOG.debug(f"[*] {member} found at {member_dn}")
     group_dn = resolvDN(ldap_conn, group)
     LOG.debug(f"[*] {group} found at {group_dn}")
-    addMembersToGroups.ad_add_members_to_groups(ldap_conn, member_dn, group_dn, raise_error=True)
+    addMembersToGroups.ad_add_members_to_groups(
+        ldap_conn, member_dn, group_dn, raise_error=True
+    )
     LOG.info(f"[+] {member_dn} added to {group_dn}")
 
 
@@ -228,10 +227,13 @@ def addForeignObjectToGroup(conn, user_sid, group):
     group_dn = resolvDN(ldap_conn, group)
     LOG.debug(f"[*] {group} found at {group_dn}")
     try:
-        addMembersToGroups.ad_add_members_to_groups(ldap_conn, magic_user_dn, group_dn, raise_error=True)
+        addMembersToGroups.ad_add_members_to_groups(
+            ldap_conn, magic_user_dn, group_dn, raise_error=True
+        )
         LOG.info(f"[+] {user_sid} added to {group_dn}")
     except ldap3.core.exceptions.LDAPEntryAlreadyExistsResult:
         LOG.warning(f"[!] {user_sid} already exists in {group_dn}")
+
 
 @register_module
 def delObjectFromGroup(conn, member, group):
@@ -244,45 +246,59 @@ def delObjectFromGroup(conn, member, group):
     ldap_conn = conn.getLdapConnection()
     member_dn = resolvDN(ldap_conn, member)
     group_dn = resolvDN(ldap_conn, group)
-    removeMembersFromGroups.ad_remove_members_from_groups(ldap_conn, member_dn, group_dn, True, raise_error=True)
+    removeMembersFromGroups.ad_remove_members_from_groups(
+        ldap_conn, member_dn, group_dn, True, raise_error=True
+    )
     LOG.info(f"[-] {member} removed from {group_dn}")
 
 
 @register_module
-def getChildObjects(conn, parent_obj, object_type='*'):
+def getChildObjects(conn, parent_obj, object_type="*"):
     """
     List the child objects of an object
     Args:
         base_obj: DN of the targeted parent object
         object_type: the type of object to fetch (user/computer or * to have them all)
     """
-    ldap_conn = conn.getLdapConnection()
-    ldap_conn.search(parent_obj, f'(objectClass={object_type})')
-    res = [entry['dn'] for entry in ldap_conn.response if entry['type'] == 'searchResEntry']
-    for child in res:
-        LOG.info(child)
+    res = utils.search(
+        conn,
+        parent_obj,
+        f"(objectClass={object_type})",
+        search_scope=ldap3.LEVEL,
+        attr="",
+    )
+    res = [entry["dn"] for entry in res]
+    print(json.dumps(res, indent=4, sort_keys=True))
     return res
 
+
 @register_module
-def search(conn, search_base, ldap_filter, attr='*'):
+def search(conn, search_base, ldap_filter, attr="*"):
     """
-    Search in LDAP database 
+    Search in LDAP database
     Args:
         search_base: DN of the parent object
         ldap_filter: Filter to apply to the LDAP search (see LDAP filter syntax)
         attr: attributes to fetch (default is '*')
     """
-    ldap_conn = conn.getLdapConnection()
-    ldap_conn.search(search_base, ldap_filter, search_scope=ldap3.SUBTREE, attributes=attr.split(','))
-    print(ldap_conn.response_to_json())
+    utils.search(
+        conn,
+        search_base,
+        ldap_filter,
+        search_scope=ldap3.SUBTREE,
+        attr=attr.split(","),
+    )
+    print(json.loads(conn.getLdapConnection().response_to_json()))
 
 
 @register_module
-def setShadowCredentials(conn, identity, enable="True", outfilePath=None, deviceID=None):
+def setShadowCredentials(
+    conn, identity, enable="True", outfilePath=None, deviceID=None
+):
     """
     Add or delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
     Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)        
+        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         enable: True to add Shadow Credentials for the user or False to remove it (default is True)
         outfilePath: file path for the generated certificate (default is current path)
         deviceID: DeviceID of the shadow credentials to remove from the target object (default is all)
@@ -302,9 +318,24 @@ def setGenericAll(conn, identity, target, enable="True"):
         target:  sAMAccountName, GPO name, DN, GUID or SID
         enable: True to add GenericAll for the user or False to remove it (default is True)
     """
-    modifySecDesc(conn=conn, identity=identity, target=target, enable=enable, control_flag=dtypes.DACL_SECURITY_INFORMATION)
-    if enable == "True":
-        LOG.info(f'[+] {identity} can now write the attributes of {target}')
+    enable = enable == "True"
+    ldap_attribute = "nTSecurityDescriptor"
+    control_flag = dtypes.DACL_SECURITY_INFORMATION
+    access_mask = ACCESS_FLAGS["FULL_CONTROL"]
+    new_sd, old_raw_sd = getSD(conn, target)
+    user_sid = getObjectSID(conn, identity)
+
+    if enable:
+        isChanged = addRight(new_sd, user_sid, access_mask)
+        log = f"[+] {identity} has now GenericAll on {target}"
+    else:
+        isChanged = delRight(new_sd, user_sid, access_mask)
+        log = f"[-] {identity} doesn't have GenericAll on {target} anymore"
+
+    setAttr(conn, target, ldap_attribute, [new_sd.getData()], control_flag)
+
+    LOG.info(log)
+    return old_raw_sd if isChanged else None
 
 
 @register_module
@@ -315,8 +346,19 @@ def setOwner(conn, identity, target):
         identity: sAMAccountName, DN, GUID or SID of your user (You must be Domain Admins to set another user)
         target: sAMAccountName, DN, GUID or SID of the targeted object (You must have WriteOwner permission on it)
     """
-    old_sid = modifySecDesc(conn, identity=identity, target=target, control_flag=dtypes.OWNER_SECURITY_INFORMATION)
-    LOG.info(f'[+] Old owner {old_sid} is now replaced by {identity} on {target}')
+    ldap_attribute = "nTSecurityDescriptor"
+    new_sd, _ = getSD(conn, target, ldap_attribute, dtypes.OWNER_SECURITY_INFORMATION)
+    new_sid = format_sid(getObjectSID(conn, identity))
+
+    old_sid = new_sd["OwnerSid"].formatCanonical()
+    if old_sid == new_sid:
+        LOG.warning(f"[!] {old_sid} is already the owner, no modification will be made")
+        old_sid = None
+    else:
+        new_sd["OwnerSid"].fromCanonical(format_sid(new_sid))
+        setAttr(conn, target, ldap_attribute, new_sd.getData())
+        LOG.info(f"[+] Old owner {old_sid} is now replaced by {identity} on {target}")
+
     return old_sid
 
 
@@ -329,28 +371,58 @@ def setRbcd(conn, spn, target, enable="True"):
         target: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
         enable: True to add Rbcd and False to remove it (default is True)
     """
-    attr = 'msDS-AllowedToActOnBehalfOfOtherIdentity'
-    modifySecDesc(conn=conn, identity=spn, target=target, ldap_attribute=attr, access_mask=ACCESS_FLAGS['ADS_RIGHT_DS_CONTROL_ACCESS'], enable=enable)
-    LOG.debug(f"[+] Attribute {attr} correctly set")
-    LOG.debug('[+] Delegation rights modified successfully!')
-    if enable == "True":
-        LOG.info(f'[+] {spn} can now impersonate users on {target} via S4U2Proxy')
+    enable = enable == "True"
+    ldap_attribute = "msDS-AllowedToActOnBehalfOfOtherIdentity"
+    control_flag = 0
+    access_mask = ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    new_sd, old_raw_sd = getSD(conn, target, ldap_attribute, control_flag)
+    spn_sid = getObjectSID(conn, spn)
+
+    if enable:
+        isChanged = addRight(new_sd, spn_sid, access_mask)
+        log = f"[+] {spn} can now impersonate users on {target} via S4U2Proxy"
+    else:
+        isChanged = delRight(new_sd, spn_sid, access_mask)
+        log = f"[-] {spn} can't impersonate users on {target} anymore"
+
+    attr_values = []
+    if len(new_sd["Dacl"].aces) > 0:
+        attr_values.append(new_sd.getData())
+    setAttr(conn, target, ldap_attribute, attr_values, control_flag)
+
+    LOG.info(log)
+    return old_raw_sd if isChanged else None
 
 
 @register_module
-def setDCSync(conn, identity, enable='True'):
+def setDCSync(conn, identity, enable="True"):
     """
     Set the right to perform DCSync with the user provided (You must have write permission on the domain LDAP object)
     Args:
         identity: sAMAccountName, DN, GUID or SID of the user
         enable: True to add DCSync and False to remove it (default is True)
     """
-    modifySecDesc(conn=conn, identity=identity, target=getDefaultNamingContext(conn.getLdapConnection()),
-    ldap_filter='(objectCategory=domain)', enable=enable, control_flag=dtypes.DACL_SECURITY_INFORMATION)
-    if enable == 'True':
-        LOG.info(f'[+] {identity} can now DCSync')
+    enable = enable == "True"
+    ldap_attribute = "nTSecurityDescriptor"
+    control_flag = dtypes.DACL_SECURITY_INFORMATION
+    access_mask = ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    domain_dn = getDefaultNamingContext(conn.getLdapConnection())
+    new_sd, old_raw_sd = getSD(conn, domain_dn)
+    user_sid = getObjectSID(conn, identity)
 
-        
+    if enable:
+        isChanged = addRight(new_sd, user_sid, access_mask)
+        log = f"[+] {identity} is now able DCSync"
+    else:
+        isChanged = delRight(new_sd, user_sid, access_mask)
+        log = f"[-] {identity} can't DCSync anymore"
+
+    setAttr(conn, domain_dn, ldap_attribute, new_sd.getData(), control_flag)
+
+    LOG.info(log)
+    return old_raw_sd if isChanged else None
+
+
 @register_module
 def setUserAccountControl(conn, identity, flags, enable="True"):
     """
@@ -361,15 +433,20 @@ def setUserAccountControl(conn, identity, flags, enable="True"):
         enable: True to add the flags or False to delete them (default is True)
     """
     enable = enable == "True"
-    flags = int(flags,16)
-    
-    response = getObjAttr(conn, identity, 'userAccountControl')
-    LOG.debug("[*] Original userAccountControl: "+str(response['attributes']['userAccountControl']))
-    rawAccountControl = int(response['raw_attributes']['userAccountControl'][0].decode())
+    flags = int(flags, 16)
+
+    response = utils.search(conn, identity, attr="userAccountControl")[0]
+    LOG.debug(
+        "[*] Original userAccountControl: "
+        + str(response["attributes"]["userAccountControl"])
+    )
+    rawAccountControl = int(
+        response["raw_attributes"]["userAccountControl"][0].decode()
+    )
 
     if enable:
         rawAccountControl = rawAccountControl | flags
     else:
         rawAccountControl = rawAccountControl & ~flags
 
-    setAttribute(conn, identity, 'userAccountControl', str(rawAccountControl))
+    setAttribute(conn, identity, "userAccountControl", str(rawAccountControl))
