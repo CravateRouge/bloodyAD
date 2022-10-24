@@ -84,8 +84,9 @@ def addUser(conn, sAMAccountName, password, ou=None):
     By default the user object is put in the OU Users
     This can be changed with the ou parameter
     Args:
-        identity: sAMAccountName, DN, GUID or SID of the target
+        identity: sAMAccountName of the target
         password: the password that will be set for the user account
+        ou: Optional parameters - Where to put the user object in the LDAP directory
     """
     ldap_conn = conn.getLdapConnection()
 
