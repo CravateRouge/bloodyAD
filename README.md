@@ -65,14 +65,13 @@ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac
 List of all available functions:
 
 ```ps1
-[bloodyAD]$ bloodyAD -h
-usage: bloodyAD [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
-                   {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl}
+usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
+                   {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,search,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl,add,get,remove}
                    ...
 
 AD Privesc Swiss Army Knife
 
-Main options:
+options:
   -h, --help            show this help message and exit
   -d DOMAIN, --domain DOMAIN
                         Domain used for NTLM authentication
@@ -87,8 +86,10 @@ Main options:
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
 
 Commands:
-  {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl}
-                        Function to call
+  {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,search,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl,add,get,remove}
+    add                 [ADD] function category
+    get                 [GET] function category
+    remove              [REMOVE] function category
 ```
 
 Help text to use a specific function:
@@ -152,4 +153,18 @@ bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttri
 
 # Read quota for adding computer objects to domain
 bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' ms-DS-MachineAccountQuota
+
+# Add a new DNS entry
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 add domainDNSRecord my_machine_name 192.168.10.48
+
+# Remove a DNS entry
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 remove domainDNSRecord my_machine_name 192.168.10.48
+
+# Get AD DNS records
+bloodyAD -u stan.dard -p Password123! -d bloody.local --hos 192.168.10.2 get domainDNSRecord
+
 ```
+
+## Acknowledgements
+- Thanks to [@PowerShellMafia](https://github.com/PowerShellMafia) team ([PowerView.ps1](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1)) and their work on AD which inspired this tool.
+- Thanks to [@dirkjanm](https://github.com/dirkjanm) ([adidnsdump.py](https://github.com/dirkjanm/adidnsdump)) and ([@Kevin-Robertson](https://github.com/Kevin-Robertson))([Invoke-DNSUpdate.ps1](https://github.com/Kevin-Robertson/Powermad/blob/master/Invoke-DNSUpdate.ps1)) for their work on AD DNS which inspired DNS functionnalities.

@@ -108,7 +108,6 @@ def addUser(conn, sAMAccountName, password, ou=None):
     if ldap_conn.result["description"] == "success":
         LOG.info(f"[+] {sAMAccountName} has been successfully added")
     else:
-        LOG.error(sAMAccountName + ": " + ldap_conn.result["description"])
         raise BloodyError(ldap_conn.result["description"])
 
 
@@ -159,7 +158,6 @@ def addComputer(conn, hostname, password, ou=None):
     if ldap_conn.result["description"] == "success":
         LOG.info(f"[+] {hostname} has been successfully added")
     else:
-        LOG.error(hostname + ": " + ldap_conn.result["description"])
         raise BloodyError(ldap_conn.result["description"])
 
 

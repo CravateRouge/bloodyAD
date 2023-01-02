@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="bloodyAD",
-    version="0.1.8",
+    version="0.1.9",
     description="AD Privesc Swiss Army Knife",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -15,7 +15,7 @@ setup(
     author_email="baptiste.crepin@ntymail.com",
     url="https://github.com/CravateRouge/bloodyAD",
     download_url=(
-        "https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.8.tar.gz"
+        "https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.1.9.tar.gz"
     ),
     packages=["bloodyAD"],
     license="MIT",
@@ -30,12 +30,10 @@ setup(
     classifiers=[
         "Intended Audience :: Information Technology",
         "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     entry_points={"console_scripts": ["bloodyAD = bloodyAD.main:main"]},
 )

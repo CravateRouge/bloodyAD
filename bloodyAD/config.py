@@ -11,6 +11,7 @@ from bloodyAD.formatters import (
     formatSD,
     formatSchemaVersion,
     formatAccountControl,
+    formatDnsRecord,
 )
 from bloodyAD import formatters
 
@@ -122,6 +123,7 @@ class ConnectionHandler:
                 "objectVersion": formatSchemaVersion,
                 "userAccountControl": formatAccountControl,
                 "msDS-ManagedPassword": formatGMSApass,
+                "dnsRecord": formatDnsRecord,
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True}
