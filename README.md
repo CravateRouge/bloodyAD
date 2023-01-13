@@ -166,5 +166,7 @@ bloodyAD -u stan.dard -p Password123! -d bloody.local --hos 192.168.10.2 get dom
 ```
 
 ## Acknowledgements
+- Thanks to [impacket](https://github.com/fortra/impacket) contributors. [Structures](https://github.com/fortra/impacket/blob/master/impacket/structure.py) and several [LDAP attacks](https://github.com/fortra/impacket/blob/master/impacket/examples/ntlmrelayx/attacks/ldapattack.py) are based on their work.
 - Thanks to [@PowerShellMafia](https://github.com/PowerShellMafia) team ([PowerView.ps1](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1)) and their work on AD which inspired this tool.
 - Thanks to [@dirkjanm](https://github.com/dirkjanm) ([adidnsdump.py](https://github.com/dirkjanm/adidnsdump)) and ([@Kevin-Robertson](https://github.com/Kevin-Robertson))([Invoke-DNSUpdate.ps1](https://github.com/Kevin-Robertson/Powermad/blob/master/Invoke-DNSUpdate.ps1)) for their work on AD DNS which inspired DNS functionnalities.
+- Thanks to [@p0dalirius](https://github.com/p0dalirius/) and his [pydsinternals](https://github.com/p0dalirius/pydsinternals) module which helped to build the shadow credential attack

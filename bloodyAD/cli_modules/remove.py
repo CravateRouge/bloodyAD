@@ -1,7 +1,7 @@
 from typing import Literal
 from bloodyAD.utils import LOG, getDefaultNamingContext, search
 from bloodyAD.exceptions import BloodyError
-from bloodyAD.formatters import dnsRecord
+from bloodyAD.formatters.dns import dnsRecord
 from ldap3 import MODIFY_DELETE
 
 

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-import sys
-import argparse
+from bloodyAD import cli_modules
 from bloodyAD import functions, ConnectionHandler
+import sys, argparse
 
 # For dynamic argparse
-from pkgutil import iter_modules
-import bloodyAD.cli_modules
 from inspect import getmembers, isfunction, signature
+from pkgutil import iter_modules
 
 
 def main():
@@ -48,7 +47,7 @@ def main():
         subparser.set_defaults(func=f)
 
     # Iterates all submodules in module package and creates one parser per submodule
-    for importer, submodname, ispkg in iter_modules(bloodyAD.cli_modules.__path__):
+    for importer, submodname, ispkg in iter_modules(cli_modules.__path__):
         subparser = subparsers.add_parser(
             submodname, help=f"[{submodname.upper()}] function category"
         )

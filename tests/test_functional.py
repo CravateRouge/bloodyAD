@@ -1,4 +1,4 @@
-import unittest, subprocess, pathlib, json, hashlib, os, re
+import unittest, subprocess, pathlib, json, hashlib, os, re, binascii
 
 
 class TestModules(unittest.TestCase):
@@ -153,7 +153,7 @@ class TestModules(unittest.TestCase):
             self.user,
             ["setShadowCredentials", slave["username"], "True", outfile2],
         )
-        id_shado1 = re.search("DeviceID: (.+)", out_shado1).group(1)
+        id_shado1 = re.search("sha256 of RSA key: (.+)", out_shado1).group(1)
         self.pkinit(slave["username"], outfile1)
         self.launchBloody(
             self.user,
@@ -310,6 +310,17 @@ class TestModules(unittest.TestCase):
                 '["TOTO/my.local.domain","TATA/imaginary.unicorn"]',
             ],
         )
+
+    def test_05ComputerRbcdGetSetAttribute(self):
+        managedPassword_raw = "01000000240200001000120114021c024dafdec827d690c71f64bd4d88a8351d23bdfa8eca206fc57d63450908c698f46a4902523d11614839b95e522c59bc78ae43ee869c25678052f4eca85010842b9c0e2e3c1d462cd839eaa83709e01452171218577e68cad4de9576c4a94b47da96f6a56c15bfa1a0a02769e6663c6bef47601d3079e3514d0a01e642a33c9bf4d5266e355d4511f421359d767355b8557363653d3adfe7b6950c1e443171c8b1b55249421bc1379e94abefcdd955ed2f1d6689f1b1095ef6e73fdbc853c4fe9c5dd3e0dc5ff51989ed2770d06b28f8cd2b92a61721e002b636e1eef1a53488b168af5b97081e3b75a4393a4b2ff614e3ae5ebeddde044bad2c5afe65b257f63a0000d22a8a7805c89cf00f66f3751c5167fa9066161ed146cb100465b56b5cb8719fc3b4ff5c0dc4f552824562eb7de0564bf1e2a2f542ed69a0de456dfdffcad0127ba1c3e9466ea8947737271cac6390167a590c2b6de8e72fe9d2b7d65a39f7419d29f8f248e988cc58a2451df60fa3d585c8828ff873fa19b07efea628a42a53b3e8cc8796035976760456d464a2ea817e14afd04a1e8ec0ec50df80381dbc1e3385297b0034f3a883b5ca5e515d21241b4e2c00bcf62c05ca52a58494fec4f0c7a06ebcfd865879a0bc57567fd3035d8207b2227c8c42fe5550dc96605726cb9c7c8acdfb638e57402e741d563aea4f7ff702416287a5903f379ca0c4eaa37c0000143b80910310000014ddafde02100000"
+        managedPassword_nthash = "95f2a1e85bae294a9a3d8b32dffee725"
+
+        managedPassword_raw = binascii.unhexlify(managedPassword_raw.encode())
+        from bloodyAD.formatters.cryptography import MSDS_MANAGEDPASSWORD_BLOB
+
+        managedPassword_blob = MSDS_MANAGEDPASSWORD_BLOB(managedPassword_raw)
+        self.assertEqual(managedPassword_blob.getData(), managedPassword_raw)
+        self.assertEqual(managedPassword_blob.toNtHash(), managedPassword_nthash)
 
     def createUser(self, creds, usr, pwd, ou=None):
         args = ["addUser", usr, pwd]

@@ -1,15 +1,3 @@
-import ldap3
-import json
-from functools import wraps
-
-from ldap3.extend.microsoft import (
-    addMembersToGroups,
-    modifyPassword,
-    removeMembersFromGroups,
-)
-from ldap3.protocol.formatters.formatters import format_sid
-from impacket.dcerpc.v5 import dtypes
-
 from bloodyAD.exceptions import BloodyError, ResultError
 from bloodyAD import utils
 from bloodyAD.utils import (
@@ -21,7 +9,16 @@ from bloodyAD.utils import (
 from bloodyAD.utils import getSD, addRight, delRight
 from bloodyAD.utils import addShadowCredentials, delShadowCredentials
 from bloodyAD.utils import LOG
-from bloodyAD.formatters import ACCESS_FLAGS
+from bloodyAD.formatters import accesscontrol, formatters
+import ldap3
+import json
+from functools import wraps
+from ldap3.extend.microsoft import (
+    addMembersToGroups,
+    modifyPassword,
+    removeMembersFromGroups,
+)
+from ldap3.protocol.formatters.formatters import format_sid
 
 
 functions = []
@@ -47,10 +44,11 @@ def getObjectAttributes(conn, identity, attr="*", fetchSD="False"):
         fetchSD: If True, fetch security descriptor permissions (default is False)
     """
     fetchSD = fetchSD == "True"
-    control_flag = dtypes.OWNER_SECURITY_INFORMATION
+    control_flag = accesscontrol.OWNER_SECURITY_INFORMATION
     if fetchSD:
         control_flag += (
-            dtypes.GROUP_SECURITY_INFORMATION + dtypes.DACL_SECURITY_INFORMATION
+            accesscontrol.GROUP_SECURITY_INFORMATION
+            + accesscontrol.DACL_SECURITY_INFORMATION
         )
     utils.search(conn, identity, attr=attr, control_flag=control_flag)
     print(
@@ -292,7 +290,7 @@ def search(conn, search_base, ldap_filter, attr="*"):
 
 @register_module
 def setShadowCredentials(
-    conn, identity, enable="True", outfilePath=None, deviceID=None
+    conn, identity, enable="True", outfilePath=None, rsakey_sha256=None
 ):
     """
     Add or delete attribute allowing to authenticate as the user provided using a crafted certificate (Shadow Credentials)
@@ -300,12 +298,12 @@ def setShadowCredentials(
         identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
         enable: True to add Shadow Credentials for the user or False to remove it (default is True)
         outfilePath: file path for the generated certificate (default is current path)
-        deviceID: DeviceID of the shadow credentials to remove from the target object (default is all)
+        rsakey_sha256: rsakey_sha256 of the shadow credentials to remove from the target object (default is all)
     """
     if enable == "True":
         addShadowCredentials(conn, identity, outfilePath)
     else:
-        delShadowCredentials(conn, identity, deviceID)
+        delShadowCredentials(conn, identity, rsakey_sha256)
 
 
 @register_module
@@ -319,8 +317,8 @@ def setGenericAll(conn, identity, target, enable="True"):
     """
     enable = enable == "True"
     ldap_attribute = "nTSecurityDescriptor"
-    control_flag = dtypes.DACL_SECURITY_INFORMATION
-    access_mask = ACCESS_FLAGS["FULL_CONTROL"]
+    control_flag = accesscontrol.DACL_SECURITY_INFORMATION
+    access_mask = accesscontrol.ACCESS_FLAGS["FULL_CONTROL"]
     new_sd, old_raw_sd = getSD(conn, target)
     user_sid = getObjectSID(conn, identity)
 
@@ -346,7 +344,9 @@ def setOwner(conn, identity, target):
         target: sAMAccountName, DN, GUID or SID of the targeted object (You must have WriteOwner permission on it)
     """
     ldap_attribute = "nTSecurityDescriptor"
-    new_sd, _ = getSD(conn, target, ldap_attribute, dtypes.OWNER_SECURITY_INFORMATION)
+    new_sd, _ = getSD(
+        conn, target, ldap_attribute, accesscontrol.OWNER_SECURITY_INFORMATION
+    )
     new_sid = format_sid(getObjectSID(conn, identity))
 
     old_sid = new_sd["OwnerSid"].formatCanonical()
@@ -373,7 +373,7 @@ def setRbcd(conn, spn, target, enable="True"):
     enable = enable == "True"
     ldap_attribute = "msDS-AllowedToActOnBehalfOfOtherIdentity"
     control_flag = 0
-    access_mask = ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     new_sd, old_raw_sd = getSD(conn, target, ldap_attribute, control_flag)
     spn_sid = getObjectSID(conn, spn)
 
@@ -403,8 +403,8 @@ def setDCSync(conn, identity, enable="True"):
     """
     enable = enable == "True"
     ldap_attribute = "nTSecurityDescriptor"
-    control_flag = dtypes.DACL_SECURITY_INFORMATION
-    access_mask = ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    control_flag = accesscontrol.DACL_SECURITY_INFORMATION
+    access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     domain_dn = getDefaultNamingContext(conn.getLdapConnection())
     new_sd, old_raw_sd = getSD(conn, domain_dn)
     user_sid = getObjectSID(conn, identity)

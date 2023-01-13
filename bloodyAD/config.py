@@ -1,19 +1,17 @@
 from bloodyAD import patch
-import ldap3
-import ssl
-from impacket.dcerpc.v5 import transport, samr
-from impacket.dcerpc.v5 import rpcrt
-from dataclasses import dataclass
-
-from bloodyAD.formatters import (
+from bloodyAD.formatters import formatters
+from bloodyAD.formatters.formatters import (
     formatFunctionalLevel,
     formatGMSApass,
     formatSD,
     formatSchemaVersion,
     formatAccountControl,
     formatDnsRecord,
+    formatKeyCredentialLink,
 )
-from bloodyAD import formatters
+import ssl
+from dataclasses import dataclass
+import ldap3
 
 
 @dataclass
@@ -77,34 +75,7 @@ class ConnectionHandler:
             cnf = config
 
         self.conf = cnf
-        self.samr = None
         self.ldap = None
-
-    def getSamrConnection(self):
-        if not self.samr:
-            self.samr = self._connectSamr()
-        return self.samr
-
-    def _connectSamr(self):
-        cnf = self.conf
-        rpctransport = transport.SMBTransport(cnf.host, filename=r"\samr")
-
-        if cnf.nthash:
-            rpctransport.set_credentials(
-                cnf.username,
-                cnf.password,
-                cnf.domain,
-                lmhash=cnf.lmhash,
-                nthash=cnf.nthash,
-            )
-        else:
-            rpctransport.set_credentials(cnf.username, cnf.password, cnf.domain)
-
-        dce = rpctransport.get_dce_rpc()
-        dce.set_auth_level(rpcrt.RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
-        dce.connect()
-        dce.bind(samr.MSRPC_UUID_SAMR)
-        return dce
 
     def getLdapConnection(self):
         if not self.ldap:
@@ -124,6 +95,7 @@ class ConnectionHandler:
                 "userAccountControl": formatAccountControl,
                 "msDS-ManagedPassword": formatGMSApass,
                 "dnsRecord": formatDnsRecord,
+                "msDS-KeyCredentialLink": formatKeyCredentialLink,
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True}
@@ -172,17 +144,11 @@ class ConnectionHandler:
         else:
             c.bind()
 
-        formatters.ldap_conn = c
+        formatters.helpers.ldap_conn = c
         return c
 
     def close(self):
-        self._closeSamr()
         self._closeLdap()
-
-    def _closeSamr(self):
-        if self.samr:
-            self.samr.disconnect()
-            self.samr = None
 
     def _closeLdap(self):
         if self.ldap:
@@ -193,4 +159,3 @@ class ConnectionHandler:
         self.conf.username = username
         self.conf.password = password
         self._closeLdap()
-        self._closeSamr()

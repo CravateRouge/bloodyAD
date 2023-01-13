@@ -880,7 +880,7 @@ setattr(NtlmClient, "_kxkey", _kxkey)
 
 
 def _sealkey(self):
-    from Cryptodome.Cipher import ARC4
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 
     client_sealing_key = hashlib.new(
         "MD5",
@@ -892,8 +892,12 @@ def _sealkey(self):
         self.exported_session_key
         + b"session key to server-to-client sealing key magic constant\x00",
     ).digest()
-    self.client_handle = ARC4.new(client_sealing_key)
-    self.server_handle = ARC4.new(server_sealing_key)
+    self.client_handle = Cipher(
+        algorithms.ARC4(client_sealing_key), mode=None
+    ).encryptor()
+    self.server_handle = Cipher(
+        algorithms.ARC4(server_sealing_key), mode=None
+    ).decryptor()
 
 
 setattr(NtlmClient, "_sealkey", _sealkey)
@@ -934,7 +938,7 @@ setattr(NtlmClient, "sign", sign)
 def seal(self, message):
     payload = self.sign(
         message, pack("<I", self.sequence_number)
-    ) + self.client_handle.encrypt(message)
+    ) + self.client_handle.update(message)
     self.sequence_number += 1
     return payload
 
@@ -943,7 +947,7 @@ setattr(NtlmClient, "seal", seal)
 
 
 def unseal(self, sealed_message):
-    message = self.server_handle.decrypt(sealed_message[16:])
+    message = self.server_handle.update(sealed_message[16:])
     calculated_signature = self.sign(message, sealed_message[12:16], SERVER)
     if calculated_signature != sealed_message[:16]:
         raise LDAPSignatureVerificationFailedError(
