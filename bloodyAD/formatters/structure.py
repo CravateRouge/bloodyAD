@@ -8,7 +8,13 @@
 #
 
 from struct import pack, unpack, calcsize
-from six import b, PY3
+
+
+def b(data):
+    if type(data) == str:
+        return data.encode("latin-1")
+    else:
+        return bytes(data)
 
 
 class Structure:
@@ -383,10 +389,7 @@ class Structure:
                 raise Exception(
                     "%s 'z' field is not NUL terminated: %r" % (field, data)
                 )
-            if PY3:
-                return data[:-1].decode("latin-1")
-            else:
-                return data[:-1]
+            return data[:-1].decode("latin-1")
 
         # unicode specifier
         if format == "u":
