@@ -60,7 +60,7 @@ Simple usage:
 bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword john.doe 'Password123!'
 ```
 
-**Note:** You can find more examples on <https://cravaterouge.github.io/>
+**Note:** You can find more examples on <https://cravaterouge.github.io/> and in the documentation folder of this project
 
 List of all available functions:
 
@@ -161,7 +161,7 @@ bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 add do
 bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 remove domainDNSRecord my_machine_name 192.168.10.48
 
 # Get AD DNS records
-bloodyAD -u stan.dard -p Password123! -d bloody.local --hos 192.168.10.2 get domainDNSRecord
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 get domainDNSRecord
 
 ```
 
