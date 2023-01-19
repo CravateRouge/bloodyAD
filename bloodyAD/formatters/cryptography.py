@@ -1,4 +1,5 @@
 from bloodyAD.formatters.structure import Structure
+from bloodyAD import md4
 import hashlib, binascii
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -138,4 +139,4 @@ class MSDS_MANAGEDPASSWORD_BLOB(Structure):
     )
 
     def toNtHash(self):
-        return hashlib.new("md4", self["CurrentPassword"]).hexdigest()
+        return md4.MD4(self["CurrentPassword"]).hexdigest()

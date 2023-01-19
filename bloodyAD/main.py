@@ -71,7 +71,6 @@ def main():
                 function.__annotations__.keys(),
                 function.__annotations__.values(),
                 params_doc,
-                strict=True,
             ):
                 parser_args = {}
 
@@ -94,7 +93,7 @@ def main():
                     parser_args["default"] = param_signature.default
 
                 # If param_type is not a string describing a type it's a literal with a restricted set of values
-                if param_value.__name__ == "Literal":
+                if "Literal" in str(param_value):
                     parser_args["choices"] = param_value.__args__
                     parser_args["type"] = type(param_value.__args__[0])
                 else:

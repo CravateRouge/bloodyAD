@@ -1,4 +1,5 @@
 import unittest, subprocess, pathlib, json, hashlib, os, re, binascii
+from bloodyAD import md4
 
 
 class TestModules(unittest.TestCase):
@@ -34,7 +35,7 @@ class TestModules(unittest.TestCase):
 
         cleartext = username_pass + [self.admin["password"]]
         ntlm = username_pass + [
-            f":{hashlib.new('md4',self.admin['password'].encode('utf-16le')).hexdigest()}"
+            f":{md4.MD4(self.admin['password'].encode('utf-16le')).hexdigest()}"
         ]
 
         self.launchProcess(
