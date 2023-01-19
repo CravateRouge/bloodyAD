@@ -261,10 +261,10 @@ def getChildObjects(conn, parent_obj, object_type="*"):
         conn,
         parent_obj,
         f"(objectClass={object_type})",
-        search_scope=ldap3.LEVEL,
+        search_scope=ldap3.SUBTREE,
         attr="",
     )
-    res = [entry["dn"] for entry in res]
+    res = [entry["dn"] for entry in res if "dn" in entry]
     print(json.dumps(res, indent=4, sort_keys=True))
     return res
 
@@ -285,7 +285,8 @@ def search(conn, search_base, ldap_filter, attr="*"):
         search_scope=ldap3.SUBTREE,
         attr=attr.split(","),
     )
-    print(json.loads(conn.getLdapConnection().response_to_json()))
+    res = json.loads(conn.getLdapConnection().response_to_json())
+    print(json.dumps(res, indent=4, sort_keys=True))
 
 
 @register_module
