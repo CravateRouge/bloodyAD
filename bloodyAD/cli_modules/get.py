@@ -1,7 +1,97 @@
-from bloodyAD.utils import LOG, getDefaultNamingContext, search
+from bloodyAD import formatters
+from bloodyAD.utils import LOG, getDefaultNamingContext, search, getGroupMembership, getOrganizationalUnits, getObjectSID
 import ldap3
 from ldap3.core.exceptions import LDAPNoSuchObjectResult
+from ldap3.protocol.formatters.formatters import format_sid
+import json
+import base64
 
+
+def object(
+    conn,
+    cn: str,
+    attr: str = "*",
+    fetchSD: bool = False
+):
+    """
+    Fetch LDAP attributes for the cn provided
+
+    :param cn: common name of the object for which the attributes will be fetched
+    :param attr: attribute name to fetch, default to fetch all the attributes
+    :param fetchSD: If True, security descriptor of the object will be fetched and parsed, otherwise this attribute is filtered out (default to False)
+    """
+    control_flag = formatters.accesscontrol.OWNER_SECURITY_INFORMATION
+    if fetchSD:
+        control_flag += (
+            formatters.accesscontrol.GROUP_SECURITY_INFORMATION +
+            formatters.accesscontrol.DACL_SECURITY_INFORMATION
+        )
+    data = search(conn, cn, attr=attr, control_flag=control_flag)
+    print(json.dumps(data[0]["attributes"], indent=4, sort_keys=True))
+
+
+def membership(
+    conn,
+    identity: str,
+    recurse: bool = True
+):
+    """
+    Fetch all the groups a user or group belongs to, recursively
+
+    :param identity: cn, sid, guid or samAccountName of the target identity
+    :param recurse: list groups recursively
+    """
+    groups = getGroupMembership(conn, identity, recurse)
+    print(json.dumps(sorted(list(groups)), indent=4, sort_keys=True))
+
+
+def writableOU(
+    conn, 
+    identity: str,
+    page_size: int = 200
+):
+    """
+    Return all the Organizational Units that can be used by the identity provided to create computer
+
+    :param identity: cn, sid, guid or samAccountName of the target identity
+    :param page_size: number of OUs fetched with each request (default 200)
+    """
+
+    # Fetch group membership
+    # TODO: add implicit groups such as Authenticated Users
+    groups = getGroupMembership(conn, identity, recurse=True)
+    groups_sid = [format_sid(getObjectSID(conn, group)) for group in groups]
+
+    formatters.disable_nt_security_descriptor_parsing = True
+
+    # Walk the OU hierarchy
+    attr = ["ntSecurityDescriptor", "distinguishedName"]
+    for ou in getOrganizationalUnits(conn, attributes=attr, page_size=page_size):
+
+        sd_b64 = ou["attributes"]["nTSecurityDescriptor"]["encoded"]
+        sd_bytes = base64.b64decode(sd_b64)
+        sd = formatters.ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
+
+        ownerSid = sd["OwnerSid"].formatCanonical()
+        if ownerSid in groups_sid:
+            print(f"owner of {ou['attributes']['distinguishedName']}")
+            continue
+
+        for ace in sd["Dacl"]["Data"]:
+            aceSid = ace["Ace"]["Sid"].formatCanonical()
+            if aceSid in groups_sid:
+                aceType = ace["TypeName"]
+                aceMask = formatters.accesscontrol.decodeAccessMask(ace["Ace"]["Mask"])
+                # TODO: Add other kind of access such as create_child
+                if aceType == 'ACCESS_ALLOWED_ACE':
+                    if 'FULL_CONTROL' in aceMask:
+
+                        print(f"full control on {ou['attributes']['distinguishedName']}")
+
+
+    # TODO: do the same with the container that are not OUs
+    formatters.disable_nt_security_descriptor_parsing = False
+    
 
 def domainDNSRecord(
     conn,

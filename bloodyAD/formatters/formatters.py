@@ -6,6 +6,7 @@ from bloodyAD.formatters import (
     ldaptypes,
     helpers,
 )
+from bloodyAD import formatters
 import base64
 
 
@@ -19,6 +20,9 @@ def formatAccountControl(userAccountControl):
 
 
 def formatSD(sd_bytes):
+    if formatters.disable_nt_security_descriptor_parsing:
+        return sd_bytes
+
     sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
     pretty_sd = {}
     if sd["OffsetOwner"] != 0:

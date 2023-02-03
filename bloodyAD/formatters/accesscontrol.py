@@ -1,6 +1,7 @@
 from bloodyAD.formatters.structure import Structure
 from bloodyAD.formatters import ldaptypes, helpers
 import uuid
+from functools import lru_cache
 
 
 # 2.4.7 SECURITY_INFORMATION
@@ -83,6 +84,13 @@ ACCOUNT_FLAGS = {
 }
 
 
+# https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+WELLKNOWN_DOMAIN_RID = {
+        513: "Domain Users"
+}
+
+
+@lru_cache
 def decodeAccessMask(mask):
     tmp_mask = [(key, val) for key, val in ACCESS_FLAGS.items() if mask.hasPriv(val)]
     pretty_mask = []
