@@ -19,7 +19,7 @@ DNS_RECORD_TYPE = {
 }
 
 
-class dnsRecord(Structure):
+class Record(Structure):
     """
     dnsRecord - [MS-DNSP] section 2.3.2.2
     """

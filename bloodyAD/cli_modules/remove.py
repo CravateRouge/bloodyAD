@@ -1,11 +1,11 @@
 from typing import Literal
 from bloodyAD.utils import LOG, getDefaultNamingContext, search
 from bloodyAD.exceptions import BloodyError
-from bloodyAD.formatters.dns import dnsRecord
+from bloodyAD.formatters import dns
 from ldap3 import MODIFY_DELETE
 
 
-def domainDNSRecord(
+def dnsRecord(
     conn,
     name: str,
     data: str,
@@ -58,8 +58,8 @@ def domainDNSRecord(
     for raw_record in search(conn, record_dn, attr="dnsRecord")[0]["raw_attributes"][
         "dnsRecord"
     ]:
-        record = dnsRecord(raw_record)
-        tmp_record = dnsRecord()
+        record = dns.Record(raw_record)
+        tmp_record = dns.Record()
 
         if not ttl:
             ttl = record["TtlSeconds"]

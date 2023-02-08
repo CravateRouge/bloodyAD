@@ -54,10 +54,7 @@ def formatSchemaVersion(objectVersion):
 
 
 def formatGMSApass(managedPassword):
-    return (
-        "aad3b435b51404eeaad3b435b51404ee:"
-        + cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword).toNtHash()
-    )
+    return "aad3b435b51404eeaad3b435b51404ee:" + cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword).toNtHash()
 
 
 def formatDnsRecord(dns_record):

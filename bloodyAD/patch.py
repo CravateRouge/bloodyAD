@@ -982,3 +982,41 @@ def ntowf_v2(self):
 
 
 NtlmClient.ntowf_v2 = ntowf_v2
+
+from ldap3.core.exceptions import LDAPOperationResult
+from bloodyAD.formatters.winerror import WINERROR
+import re
+
+
+def __init__(
+    self,
+    result=None,
+    description=None,
+    dn=None,
+    message=None,
+    response_type=None,
+    response=None,
+):
+    self.result = result
+    self.description = description
+    self.dn = dn
+    self.type = response_type
+    self.response = response
+
+    if message:
+        try:
+            match = re.search("data ([0-9A-Fa-f]+)", message)
+            if match:
+                error_code = int(match.group(1), base=16)
+                extended_error = WINERROR[error_code]
+                self.message = extended_error["code"] + ": " + extended_error["message"]
+            else:
+                self.message = message
+        except:
+            self.message = message
+
+    else:
+        self.message = message
+
+
+LDAPOperationResult.__init__ = __init__

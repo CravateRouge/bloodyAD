@@ -9,7 +9,7 @@ from bloodyAD.utils import (
 from bloodyAD.utils import getSD, addRight, delRight
 from bloodyAD.utils import addShadowCredentials, delShadowCredentials
 from bloodyAD.utils import LOG
-from bloodyAD.formatters import accesscontrol, formatters
+from bloodyAD.formatters import accesscontrol
 import ldap3
 import json
 from functools import wraps
@@ -46,10 +46,7 @@ def getObjectAttributes(conn, identity, attr="*", fetchSD="False"):
     fetchSD = fetchSD == "True"
     control_flag = accesscontrol.OWNER_SECURITY_INFORMATION
     if fetchSD:
-        control_flag += (
-            accesscontrol.GROUP_SECURITY_INFORMATION
-            + accesscontrol.DACL_SECURITY_INFORMATION
-        )
+        control_flag += accesscontrol.GROUP_SECURITY_INFORMATION + accesscontrol.DACL_SECURITY_INFORMATION
     utils.search(conn, identity, attr=attr, control_flag=control_flag)
     print(
         json.dumps(
@@ -368,7 +365,7 @@ def setRbcd(conn, spn, target, enable="True"):
     Set Resource Based Constraint Delegation (RBCD) on the target to the SPN provided
     Args:
         spn: sAMAccountName, DN, GUID or SID of the SPN
-        target: sAMAccountName, DN, GUID or SID of the target (You must have DACL write on it)
+        target: sAMAccountName, DN, GUID or SID of the target (You must have msDS-AllowedToActOnBehalfOfOtherIdentity write right on it)
         enable: True to add Rbcd and False to remove it (default is True)
     """
     enable = enable == "True"

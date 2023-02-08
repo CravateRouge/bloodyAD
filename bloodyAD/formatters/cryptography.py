@@ -1,6 +1,6 @@
 from bloodyAD.formatters.structure import Structure
 from bloodyAD import md4
-import hashlib, binascii
+import hashlib
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 

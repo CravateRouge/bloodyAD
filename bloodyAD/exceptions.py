@@ -11,16 +11,9 @@ class ResultError(LDAPError):
         self.result = result
 
         if self.result["result"] == 50:
-            self.message = (
-                "[-] Could not modify object, the server reports insufficient rights: "
-                + self.result["message"]
-            )
+            self.message = "[-] Could not modify object, the server reports insufficient rights: " + self.result["message"]
         elif self.result["result"] == 19:
-            self.message = (
-                "[-] Could not modify object, the server reports a constrained"
-                " violation: "
-                + self.result["message"]
-            )
+            self.message = "[-] Could not modify object, the server reports a constrained violation: " + self.result["message"]
         else:
             self.message = "[-] The server returned an error: " + self.result["message"]
 
