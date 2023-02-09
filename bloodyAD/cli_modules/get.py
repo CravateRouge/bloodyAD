@@ -27,7 +27,9 @@ def object(
             formatters.accesscontrol.DACL_SECURITY_INFORMATION
         )
     data = search(conn, cn, attr=attr, control_flag=control_flag)
-    print(json.dumps(data[0]["attributes"], indent=4, sort_keys=True))
+    data_json = json.dumps(data[0]["attributes"], indent=4, sort_keys=True)
+    LOG.info(data_json)
+    return data_json
 
 
 def membership(
@@ -42,7 +44,9 @@ def membership(
     :param recurse: list groups recursively
     """
     groups = getGroupMembership(conn, identity, recurse)
-    print(json.dumps(sorted(list(groups)), indent=4, sort_keys=True))
+    groups_json = json.dumps(sorted(list(groups)), indent=4, sort_keys=True)
+    LOG.info(groups_json)
+    return groups_json
 
 
 def writableOU(
@@ -58,14 +62,17 @@ def writableOU(
     """
 
     # Fetch group membership
-    # TODO: add implicit groups such as Authenticated Users
     groups = getGroupMembership(conn, identity, recurse=True)
     groups_sid = [format_sid(getObjectSID(conn, group)) for group in groups]
+    groups_sid.append("S-1-5-11")
+    groups_sid.append("S-1-1-0")
 
     formatters.disable_nt_security_descriptor_parsing = True
 
     # Walk the OU hierarchy
     attr = ["ntSecurityDescriptor", "distinguishedName"]
+    vulnerable_ous = set()
+    interesting_perms = ["FULL_CONTROL", "GENERIC_ALL", "GENERIC_WRITE", "ADS_RIGHT_DS_CREATE_CHILD"]
     for ou in getOrganizationalUnits(conn, attributes=attr, page_size=page_size):
 
         sd_b64 = ou["attributes"]["nTSecurityDescriptor"]["encoded"]
@@ -74,23 +81,24 @@ def writableOU(
 
         ownerSid = sd["OwnerSid"].formatCanonical()
         if ownerSid in groups_sid:
-            print(f"owner of {ou['attributes']['distinguishedName']}")
+            LOG.info(f"owner of {ou['attributes']['distinguishedName']}")
             continue
 
         for ace in sd["Dacl"]["Data"]:
             aceSid = ace["Ace"]["Sid"].formatCanonical()
             if aceSid in groups_sid:
                 aceType = ace["TypeName"]
-                aceMask = formatters.accesscontrol.decodeAccessMask(ace["Ace"]["Mask"])
-                # TODO: Add other kind of access such as create_child
                 if aceType == 'ACCESS_ALLOWED_ACE':
-                    if 'FULL_CONTROL' in aceMask:
-
-                        print(f"full control on {ou['attributes']['distinguishedName']}")
+                    aceMask = formatters.accesscontrol.decodeAccessMask(ace["Ace"]["Mask"])
+                    for perm in aceMask:
+                        if perm in interesting_perms:
+                            LOG.info(f"{perm} on {ou['attributes']['distinguishedName']}")
 
 
     # TODO: do the same with the container that are not OUs
     formatters.disable_nt_security_descriptor_parsing = False
+    return vulnerable_ous
+
     
 
 def domainDNSRecord(

@@ -120,6 +120,7 @@ def getGroupMembership(conn, identity, recurse):
     # We fetch primaryGroupID, since this group is not reflected in memberOf
     # Additionally we get objectSid to have the domain sid it is helpfuf
     # to resolv the primary group RID to a DN
+    # Finally we had the special identity groups: Authenticated Users and Everyone
     data = search(conn, identity, attr=["objectSid", "memberOf", "primaryGroupID"])
     data = data[0]["attributes"]
     groups = data["memberOf"]
@@ -197,6 +198,7 @@ def getOrganizationalUnits(conn, attributes=["*"], page_size=2):
             yield ou
 
 
+@lru_cache
 def getObjectSID(conn, identity):
     """
     Get the SID for the given identity
