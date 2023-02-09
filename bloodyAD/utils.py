@@ -318,7 +318,7 @@ def addShadowCredentials(conn, identity, outfilePath=None):
     LOG.debug("Generating certificate")
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = issuer = x509.Name(
+    issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
         ]

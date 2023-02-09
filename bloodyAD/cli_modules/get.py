@@ -101,7 +101,7 @@ def writableOU(
 
     
 
-def domainDNSRecord(
+def dnsRecord(
     conn,
     zone: str = None,
     include_tombstoned: bool = False,
@@ -198,12 +198,7 @@ def domainDNSRecord(
                             record["Type"],
                         ]
                     else:
-                        LOG.warn(
-                            "[!] Record type: "
-                            + record["Type"]
-                            + " not supported yet! Raise an issue if you think it"
-                            " matters"
-                        )
+                        LOG.warn("[!] Record type: " + record["Type"] + " not supported yet! Raise an issue if you think it matters")
                         continue
 
                 except KeyError:

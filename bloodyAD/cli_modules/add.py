@@ -1,7 +1,7 @@
 from typing import Literal
 from bloodyAD.utils import LOG, getDefaultNamingContext, search
 from bloodyAD.exceptions import BloodyError
-from bloodyAD.formatters.dns import dnsRecord
+from bloodyAD.formatters import dns
 from ldap3.core.exceptions import (
     LDAPEntryAlreadyExistsResult,
     LDAPAttributeOrValueExistsResult,
@@ -9,7 +9,7 @@ from ldap3.core.exceptions import (
 from ldap3 import MODIFY_ADD
 
 # Credits to Kevin Robertson and his script Invoke-DNSUpdate.ps1 from the Powermad framework
-def domainDNSRecord(
+def dnsRecord(
     conn,
     name: str,
     data: str,
@@ -70,7 +70,7 @@ def domainDNSRecord(
             serial = dns_record["Data"]["SerialNo"]
             break
 
-    dns_record = dnsRecord()
+    dns_record = dns.Record()
     dns_record.fromDict(
         data, dnstype, ttl, rank, serial, preference, port, priority, weight
     )

@@ -1,4 +1,3 @@
-from bloodyAD.formatters.structure import Structure
 from bloodyAD.formatters import ldaptypes, helpers
 import uuid
 from functools import lru_cache

@@ -1,4 +1,3 @@
-from bloodyAD.formatters.structure import Structure
 import binascii
 
 

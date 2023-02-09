@@ -1,4 +1,4 @@
-import unittest, subprocess, pathlib, json, hashlib, os, re, binascii
+import unittest, subprocess, pathlib, json, os, re, binascii
 from bloodyAD import md4
 
 
