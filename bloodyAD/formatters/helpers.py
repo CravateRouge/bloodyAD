@@ -1,4 +1,5 @@
 import uuid
+from functools import lru_cache
 
 ldap_conn = None
 
@@ -17,6 +18,7 @@ def ldap_search(base_dn, filter, attr):
     return ldap_conn.entries[0][attr].value
 
 
+@lru_cache
 def resolveSid(sid):
     r = ldap_search(
         "CN=WellKnown Security"
