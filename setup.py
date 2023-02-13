@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="bloodyAD",
-    version="0.2.5",
+    version="0.2.6",
     description="AD Privesc Swiss Army Knife",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -15,12 +15,13 @@ setup(
     author_email="baptiste.crepin@ntymail.com",
     url="https://github.com/CravateRouge/bloodyAD",
     download_url=(
-        "https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.2.5.tar.gz"
+        "https://github.com/CravateRouge/bloodyAD/archive/refs/tags/v0.2.6.tar.gz"
     ),
     license="MIT",
     install_requires=[
         "cryptography>=37.0.2",
         "ldap3>=2.9.1",
+        "winacl>=0.1.6",
         'gssapi>=1.8.1 ; platform_system=="Linux" or platform_system=="Darwin"',
         'winkerberos>=0.9.0; platform_system=="Windows"',
     ],

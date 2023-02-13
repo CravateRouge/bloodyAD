@@ -62,7 +62,7 @@ class TestModules(unittest.TestCase):
                     ).split(" ")
                 )
 
-    def test_02SearchAndGetChild(self):
+    def test_02SearchAndGetChildAndGetWritableOU(self):
         self.launchBloody(
             self.user,
             ["getChildObjects", "OU=Domain Controllers,DC=bloody,DC=local"],
@@ -76,6 +76,10 @@ class TestModules(unittest.TestCase):
                 "description",
             ],
         )
+        self.launchBloody(
+            self.user,
+            ["get", "writableOU", "Administrator"],
+        )
 
     def test_03UacOwnerGenericShadowGroupPasswordDCSync(self):
         slave = {"username": "slave", "password": "Password123!"}
@@ -85,9 +89,9 @@ class TestModules(unittest.TestCase):
         self.launchBloody(
             slave,
             [
-                "getObjectAttributes",
+                "get", "object",
                 f"CN={slave['username']},{ou}",
-                "distinguishedName",
+                "--attr", "distinguishedName",
             ],
         )
 
@@ -184,7 +188,7 @@ class TestModules(unittest.TestCase):
 
         # Password
         self.launchBloody(
-            self.user, ["changePassword", slave["username"], "Password124!"]
+            slave, ["set" ,"password", slave["username"], "Password124!", "--oldpass", slave["password"]]
         )
         self.launchBloody(
             self.user, ["changePassword", slave["username"], slave["password"]]
@@ -270,10 +274,10 @@ class TestModules(unittest.TestCase):
             self.launchBloody(
                 self.user,
                 [
-                    "getObjectAttributes",
+                    "get", "object",
                     hostname + "$",
-                    "msDS-AllowedToActOnBehalfOfOtherIdentity",
-                    "True",
+                    "--resolve-sd",
+                    "--attr", "msDS-AllowedToActOnBehalfOfOtherIdentity",
                 ],
             ),
             hostname3 + "$",
@@ -322,7 +326,36 @@ class TestModules(unittest.TestCase):
         managedPassword_blob = MSDS_MANAGEDPASSWORD_BLOB(managedPassword_raw)
         self.assertEqual(managedPassword_blob.getData(), managedPassword_raw)
         self.assertEqual(managedPassword_blob.toNtHash(), managedPassword_nthash)
-
+    
+    def test_06AddRemoveGetDnsRecord(self):
+        self.launchBloody(
+            self.user,
+            [
+                "add", "dnsRecord",
+                "test.domain", "8.8.8.8",
+                "--dnstype", "A",
+                "--ttl", "50",
+            ],
+        )
+        self.assertRegex(
+            self.launchBloody(
+                self.user,
+                [
+                    "get", "dnsRecord",
+                    "--zone", "bloody.local",
+                    "--no-legacy", "--no-forest"
+                ],
+            ),
+            "test.domain"
+        )
+        self.launchBloody(
+            self.user,
+            [
+                "remove", "dnsRecord",
+                "test.domain", "8.8.8.8",
+                "--ttl", "50"
+            ],
+        )
     def createUser(self, creds, usr, pwd, ou=None):
         args = ["addUser", usr, pwd]
         if ou:

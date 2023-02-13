@@ -10,6 +10,7 @@ from bloodyAD.utils import getSD, addRight, delRight
 from bloodyAD.utils import addShadowCredentials, delShadowCredentials
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol
+from bloodyAD.cli_modules import get, set
 import ldap3
 import json
 from functools import wraps
@@ -35,28 +36,18 @@ def register_module(f):
 
 
 @register_module
-def getObjectAttributes(conn, identity, attr="*", fetchSD="False"):
+def getObjectAttributes(conn, target, attr="*", resolve_sd="False", raw="False"):
     """
-    Fetch LDAP attributes for the identity (group or user) provided
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target
-        attr: attributes to fetch separated with ',' (default fetch all attributes)
-        fetchSD: If True, fetch security descriptor permissions (default is False)
+    Retrieves LDAP attributes for the target object provided
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param attr: name of the attribute to retrieve, retrieves all the attributes by default
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved !!resolving can take some time!!
+    :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     """
-    fetchSD = fetchSD == "True"
-    control_flag = accesscontrol.OWNER_SECURITY_INFORMATION
-    if fetchSD:
-        control_flag += accesscontrol.GROUP_SECURITY_INFORMATION + accesscontrol.DACL_SECURITY_INFORMATION
-    utils.search(conn, identity, attr=attr, control_flag=control_flag)
-    print(
-        json.dumps(
-            json.loads(conn.getLdapConnection().response_to_json())["entries"][0][
-                "attributes"
-            ],
-            indent=4,
-            sort_keys=True,
-        )
-    )
+    resolve_sd = resolve_sd == "True"
+    raw = raw == "True"
+    get.object(conn, target, attr, resolve_sd, raw)
 
 
 @register_module
@@ -172,21 +163,15 @@ def delObject(conn, identity):
 
 
 @register_module
-def changePassword(conn, identity, new_pass):
+def changePassword(conn, target, new_pass, old_pass=None):
     """
-    Change the target password without knowing the old one using LDAPS or RPC
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        new_pass: new password for the target
+    Change password of a user/computer
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param new_pass: new password for the target
+    :param old_pass: old password of the target (mandatory if you don't have change password permission on the target with your account)
     """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
-
-    modifyPassword.ad_modify_password(ldap_conn, target_dn, new_pass, old_password=None)
-    if ldap_conn.result["result"] != 0:
-        raise ResultError(ldap_conn.result)
-
-    LOG.info("[+] Password changed successfully!")
+    set.password(conn, target, new_pass, old_pass)
 
 
 @register_module

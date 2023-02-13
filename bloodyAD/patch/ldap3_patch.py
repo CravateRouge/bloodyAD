@@ -220,6 +220,124 @@ def __init__(
 
 Connection.__init__ = __init__
 
+def bind(self,
+             read_server_info=True,
+             controls=None):
+        """Bind to ldap Server with the authentication method and the user defined in the connection
+        :param read_server_info: reads info from server
+        :param controls: LDAP controls to send along with the bind operation
+        :type controls: list of tuple
+        :return: bool
+        """
+        if log_enabled(BASIC):
+            log(BASIC, 'start BIND operation via <%s>', self)
+        self.last_error = None
+        with self.connection_lock:
+            if self.lazy and not self._executing_deferred:
+                if self.strategy.pooled:
+                    self.strategy.validate_bind(controls)
+                self._deferred_bind = True
+                self._bind_controls = controls
+                self.bound = True
+                if log_enabled(BASIC):
+                    log(BASIC, 'deferring bind for <%s>', self)
+            else:
+                self._deferred_bind = False
+                self._bind_controls = None
+                if self.closed:  # try to open connection if closed
+                    self.open(read_server_info=False)
+                if self.authentication == ANONYMOUS:
+                    if log_enabled(PROTOCOL):
+                        log(PROTOCOL, 'performing anonymous BIND for <%s>', self)
+                    if not self.strategy.pooled:
+                        request = bind_operation(self.version, self.authentication, self.user, '', auto_encode=self.auto_encode)
+                        if log_enabled(PROTOCOL):
+                            log(PROTOCOL, 'anonymous BIND request <%s> sent via <%s>', bind_request_to_dict(request), self)
+                        response = self.post_send_single_response(self.send('bindRequest', request, controls))
+                    else:
+                        response = self.strategy.validate_bind(controls)  # only for REUSABLE
+                elif self.authentication == SIMPLE:
+                    if log_enabled(PROTOCOL):
+                        log(PROTOCOL, 'performing simple BIND for <%s>', self)
+                    if not self.strategy.pooled:
+                        request = bind_operation(self.version, self.authentication, self.user, self.password, auto_encode=self.auto_encode)
+                        if log_enabled(PROTOCOL):
+                            log(PROTOCOL, 'simple BIND request <%s> sent via <%s>', bind_request_to_dict(request), self)
+                        response = self.post_send_single_response(self.send('bindRequest', request, controls))
+                    else:
+                        response = self.strategy.validate_bind(controls)  # only for REUSABLE
+                elif self.authentication == SASL:
+                    if self.sasl_mechanism in SASL_AVAILABLE_MECHANISMS:
+                        if log_enabled(PROTOCOL):
+                            log(PROTOCOL, 'performing SASL BIND for <%s>', self)
+                        if not self.strategy.pooled:
+                            response = self.do_sasl_bind(controls)
+                        else:
+                            response = self.strategy.validate_bind(controls)  # only for REUSABLE
+                    else:
+                        self.last_error = 'requested SASL mechanism not supported'
+                        if log_enabled(ERROR):
+                            log(ERROR, '%s for <%s>', self.last_error, self)
+                        raise LDAPSASLMechanismNotSupportedError(self.last_error)
+                elif self.authentication == NTLM:
+                    if self.user and self.password is not None and len(self.user.split('\\')) == 2:
+                        if log_enabled(PROTOCOL):
+                            log(PROTOCOL, 'performing NTLM BIND for <%s>', self)
+                        if not self.strategy.pooled:
+                            response = self.do_ntlm_bind(controls)
+                        else:
+                            response = self.strategy.validate_bind(controls)  # only for REUSABLE
+                    else:  # user or password missing
+                        self.last_error = 'NTLM needs domain\\username and a password'
+                        if log_enabled(ERROR):
+                            log(ERROR, '%s for <%s>', self.last_error, self)
+                        raise LDAPUnknownAuthenticationMethodError(self.last_error)
+                else:
+                    self.last_error = 'unknown authentication method'
+                    if log_enabled(ERROR):
+                        log(ERROR, '%s for <%s>', self.last_error, self)
+                    raise LDAPUnknownAuthenticationMethodError(self.last_error)
+
+                if not self.strategy.sync and not self.strategy.pooled and self.authentication not in (SASL, NTLM):  # get response if asynchronous except for SASL and NTLM that return the bind result even for asynchronous strategy
+                    _, result = self.get_response(response)
+                    if log_enabled(PROTOCOL):
+                        log(PROTOCOL, 'async BIND response id <%s> received via <%s>', result, self)
+                elif self.strategy.sync:
+                    result = self.result
+                    if log_enabled(PROTOCOL):
+                        log(PROTOCOL, 'BIND response <%s> received via <%s>', result, self)
+                elif self.strategy.pooled or self.authentication in (SASL, NTLM):  # asynchronous SASL and NTLM or reusable strtegy get the bind result synchronously
+                    result = response
+                else:
+                    self.last_error = 'unknown authentication method'
+                    if log_enabled(ERROR):
+                        log(ERROR, '%s for <%s>', self.last_error, self)
+                    raise LDAPUnknownAuthenticationMethodError(self.last_error)
+
+                if result is None:
+                    # self.bound = True if self.strategy_type == REUSABLE else False
+                    self.bound = False
+                elif result is True:
+                    self.bound = True
+                elif result is False:
+                    self.bound = False
+                else:
+                    self.bound = True if result['result'] == RESULT_SUCCESS else False
+                    if not self.bound and result and result['description'] and not self.last_error:
+                        self.last_error = result['description']
+
+                if read_server_info and self.bound:
+                    self.refresh_server_info()
+            self._entries = []
+
+            if log_enabled(BASIC):
+                log(BASIC, 'done BIND operation, result <%s>', self.bound)
+
+            return self._prepare_return_value(self.bound, self.result)
+
+
+Connection.bind = bind
+
 
 def do_ntlm_bind(self, controls):
     if log_enabled(BASIC):

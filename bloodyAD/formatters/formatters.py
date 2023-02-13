@@ -1,3 +1,4 @@
+import bloodyAD.patch.winacl_patch
 from bloodyAD.formatters import (
     accesscontrol,
     common,
@@ -8,7 +9,9 @@ from bloodyAD.formatters import (
 )
 from bloodyAD import formatters
 import base64
+from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
+RESOLVING = False
 
 def formatAccountControl(userAccountControl):
     userAccountControl = int(userAccountControl.decode())
@@ -20,8 +23,8 @@ def formatAccountControl(userAccountControl):
 
 
 def formatSD(sd_bytes):
-    if formatters.disable_nt_security_descriptor_parsing:
-        return sd_bytes
+    if not RESOLVING:
+        return SECURITY_DESCRIPTOR.from_bytes(sd_bytes).to_sddl()
 
     sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
     pretty_sd = {}
@@ -58,11 +61,13 @@ def formatSchemaVersion(objectVersion):
 
 
 def formatGMSApass(managedPassword):
-    return "aad3b435b51404eeaad3b435b51404ee:" + cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword).toNtHash()
+    gmsa_blob = cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword)
+    ntlm_hash = "aad3b435b51404eeaad3b435b51404ee:" + gmsa_blob.toNtHash()
+    return  f"NTLM {ntlm_hash} B64ENCODED {base64.b64encode(gmsa_blob['CurrentPassword'])}"
 
 
 def formatDnsRecord(dns_record):
-    return dns.dnsRecord(dns_record).toDict()
+    return dns.Record(dns_record).toDict()
 
 
 def formatKeyCredentialLink(key_dnbinary):

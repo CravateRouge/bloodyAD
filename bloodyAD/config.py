@@ -1,4 +1,4 @@
-from bloodyAD import patch
+from bloodyAD.patch import ldap3_patch
 from bloodyAD.formatters import formatters
 from bloodyAD.formatters.formatters import (
     formatFunctionalLevel,

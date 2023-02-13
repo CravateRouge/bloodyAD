@@ -1,105 +1,11 @@
-from bloodyAD import formatters
-from bloodyAD.utils import LOG, getDefaultNamingContext, search, getGroupMembership, getOrganizationalUnits, getObjectSID
+from bloodyAD.formatters import formatters, ldaptypes, accesscontrol
+from bloodyAD.utils import LOG, getDefaultNamingContext, search, getOrganizationalUnits, getObjectSID, resolvDN
+import json, logging
+from functools import lru_cache
 import ldap3
 from ldap3.core.exceptions import LDAPNoSuchObjectResult
 from ldap3.protocol.formatters.formatters import format_sid
-import json
-import base64
 
-
-def object(
-    conn,
-    cn: str,
-    attr: str = "*",
-    fetchSD: bool = False
-):
-    """
-    Fetch LDAP attributes for the cn provided
-
-    :param cn: common name of the object for which the attributes will be fetched
-    :param attr: attribute name to fetch, default to fetch all the attributes
-    :param fetchSD: If True, security descriptor of the object will be fetched and parsed, otherwise this attribute is filtered out (default to False)
-    """
-    control_flag = formatters.accesscontrol.OWNER_SECURITY_INFORMATION
-    if fetchSD:
-        control_flag += (
-            formatters.accesscontrol.GROUP_SECURITY_INFORMATION +
-            formatters.accesscontrol.DACL_SECURITY_INFORMATION
-        )
-    data = search(conn, cn, attr=attr, control_flag=control_flag)
-    data_json = json.dumps(data[0]["attributes"], indent=4, sort_keys=True)
-    LOG.info(data_json)
-    return data_json
-
-
-def membership(
-    conn,
-    identity: str,
-    recurse: bool = True
-):
-    """
-    Fetch all the groups a user or group belongs to, recursively
-
-    :param identity: cn, sid, guid or samAccountName of the target identity
-    :param recurse: list groups recursively
-    """
-    groups = getGroupMembership(conn, identity, recurse)
-    groups_json = json.dumps(sorted(list(groups)), indent=4, sort_keys=True)
-    LOG.info(groups_json)
-    return groups_json
-
-
-def writableOU(
-    conn, 
-    identity: str,
-    page_size: int = 200
-):
-    """
-    Return all the Organizational Units that can be used by the identity provided to create computer
-
-    :param identity: cn, sid, guid or samAccountName of the target identity
-    :param page_size: number of OUs fetched with each request (default 200)
-    """
-
-    # Fetch group membership
-    groups = getGroupMembership(conn, identity, recurse=True)
-    groups_sid = [format_sid(getObjectSID(conn, group)) for group in groups]
-    groups_sid.append("S-1-5-11")
-    groups_sid.append("S-1-1-0")
-
-    formatters.disable_nt_security_descriptor_parsing = True
-
-    # Walk the OU hierarchy
-    attr = ["ntSecurityDescriptor", "distinguishedName"]
-    vulnerable_ous = set()
-    interesting_perms = ["FULL_CONTROL", "GENERIC_ALL", "GENERIC_WRITE", "ADS_RIGHT_DS_CREATE_CHILD"]
-    for ou in getOrganizationalUnits(conn, attributes=attr, page_size=page_size):
-
-        sd_b64 = ou["attributes"]["nTSecurityDescriptor"]["encoded"]
-        sd_bytes = base64.b64decode(sd_b64)
-        sd = formatters.ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
-
-        ownerSid = sd["OwnerSid"].formatCanonical()
-        if ownerSid in groups_sid:
-            LOG.info(f"owner of {ou['attributes']['distinguishedName']}")
-            continue
-
-        for ace in sd["Dacl"]["Data"]:
-            aceSid = ace["Ace"]["Sid"].formatCanonical()
-            if aceSid in groups_sid:
-                aceType = ace["TypeName"]
-                if aceType == 'ACCESS_ALLOWED_ACE':
-                    aceMask = formatters.accesscontrol.decodeAccessMask(ace["Ace"]["Mask"])
-                    for perm in aceMask:
-                        if perm in interesting_perms:
-                            LOG.info(f"{perm} on {ou['attributes']['distinguishedName']}")
-
-
-    # TODO: do the same with the container that are not OUs
-    formatters.disable_nt_security_descriptor_parsing = False
-    return vulnerable_ous
-
-    
 
 def dnsRecord(
     conn,
@@ -111,7 +17,7 @@ def dnsRecord(
     no_domain: bool = False,
 ):
     """
-    Prints DNS records of the Active Directory readable by the user
+    Retrieves DNS records of the Active Directory readable by the user
 
     :param zone: if set, prints only records in this zone
     :param include_tombstoned: if set, includes tombstoned records
@@ -142,6 +48,7 @@ def dnsRecord(
         containers.append(container)
 
     printable_entries = ""
+    record_list = []
     for container_dn in containers:
         res = None
         try:
@@ -208,5 +115,134 @@ def dnsRecord(
                 for data in record_data:
                     printable_entries += f" :-> {data}"
                 printable_entries += "\n"
+                record_list.append([hostname, record_data])
 
     LOG.info(printable_entries)
+    return record_list
+
+
+@lru_cache
+def membership(
+    conn,
+    target: str,
+    no_recurse: bool = False
+):
+    """
+    Retrieves all groups an object belongs to
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param no_recurse: list groups recursively
+    """
+    # We fetch primaryGroupID, since this group is not reflected in memberOf
+    # Additionally we get objectSid to have the domain sid it is helpfuf
+    # to resolv the primary group RID to a DN
+    # Finally we had the special identity groups: Authenticated Users and Everyone
+
+    data = search(conn, target, attr=["objectSid", "memberOf", "primaryGroupID"])
+    data = data[0]["attributes"]
+    groups = data["memberOf"]
+
+    if data["primaryGroupID"]:
+        domain_sid = "-".join(data["objectSid"].split("-")[:-1])
+        primary_group_sid = domain_sid + "-" + str(data["primaryGroupID"])
+        ldap_conn = conn.getLdapConnection()
+        primary_group_dn = resolvDN(ldap_conn, primary_group_sid)
+        groups.append(primary_group_dn)
+
+    found_groups = set(groups)
+    if not no_recurse:
+        for group in groups:
+            new_group = membership(conn, group, no_recurse)
+            found_groups.update(new_group)
+
+    groups_json = json.dumps(sorted(list(found_groups)), indent=4, sort_keys=True)
+    LOG.info(groups_json)
+
+    return found_groups
+
+
+def object(
+    conn,
+    target: str,
+    attr: str = "*",
+    resolve_sd: bool = False,
+    raw: bool = False
+):
+    """
+    Retrieves LDAP attributes for the target object provided
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param attr: name of the attribute to retrieve, retrieves all the attributes by default
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved !!resolving can take some time!!
+    :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
+    """
+
+    old_resolving = formatters.RESOLVING
+    if resolve_sd:
+        formatters.RESOLVING = True
+    
+    object_res = search(conn, target, attr=attr)
+    formatters.RESOLVING = old_resolving
+
+    if raw:
+        object_attributes = object_res[0]["raw_attributes"]
+    else:
+        # We call response_to_json because it automatically converts
+        # non printable objects into JSON
+        object_json = conn.getLdapConnection().response_to_json()
+        # And then we remove the "entries" container unnecessary for one object/entry
+        object_attributes = json.loads(object_json)["entries"][0]["attributes"]
+        
+    printable_object = json.dumps(object_attributes, indent=4, sort_keys=True)
+    LOG.info(printable_object)
+
+    return object_attributes
+
+
+def writableOU(
+    conn, 
+    target: str,
+    page_size: int = 1000
+):
+    """
+    Retrieves Organizational Units writable by target
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param page_size: number of OUs to fetch in each request
+    """
+
+    # Fetch group membership
+    LOG.setLevel(logging.WARNING)
+    groups = membership(conn, target)
+    LOG.setLevel(logging.INFO)
+
+    groups_sid = [format_sid(getObjectSID(conn, group)) for group in groups]
+    groups_sid.append("S-1-5-11")
+    groups_sid.append("S-1-1-0")
+
+    # Walk the OU hierarchy
+    attr = ["ntSecurityDescriptor", "distinguishedName"]
+    vulnerable_ous = set()
+    interesting_perms = ["FULL_CONTROL", "GENERIC_ALL", "GENERIC_WRITE", "ADS_RIGHT_DS_CREATE_CHILD"]
+    for ou in getOrganizationalUnits(conn, attributes=attr, page_size=page_size):
+
+        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=ou["raw_attributes"]["nTSecurityDescriptor"][0])
+
+        ownerSid = sd["OwnerSid"].formatCanonical()
+        if ownerSid in groups_sid:
+            LOG.info(f"owner of {ou['attributes']['distinguishedName']}")
+            vulnerable_ous.update(ou['attributes']['distinguishedName'])
+            continue
+
+        for ace in sd["Dacl"]["Data"]:
+            aceSid = ace["Ace"]["Sid"].formatCanonical()
+            if aceSid in groups_sid:
+                aceType = ace["TypeName"]
+                if aceType == 'ACCESS_ALLOWED_ACE':
+                    aceMask = accesscontrol.decodeAccessMask(ace["Ace"]["Mask"])
+                    for perm in aceMask:
+                        if perm in interesting_perms:
+                            LOG.info(f"{perm} on {ou['attributes']['distinguishedName']}")
+                            vulnerable_ous.update(ou['attributes']['distinguishedName'])
+
+    return vulnerable_ous

@@ -19,7 +19,7 @@ def dnsRecord(
     forest: bool = False,
 ):
     """
-    This function removes a DNS record of an AD environment.
+    Removes a DNS record of an AD environment.
 
     :param name: name of the dnsNode object (hostname) which contains the record
     :param data: DNS record data

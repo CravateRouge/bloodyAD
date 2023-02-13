@@ -2,19 +2,19 @@ from bloodyAD.formatters import ldaptypes, accesscontrol, cryptography, common
 from bloodyAD import formatters
 from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
 import random, string, logging, json, sys, datetime, binascii
+from functools import lru_cache
 import ldap3
 from ldap3.protocol.formatters.formatters import format_sid
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from functools import lru_cache
 
 
 LOG = logging.getLogger("bloodyAD")
 LOG.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
+handler.setLevel(logging.DEBUG)
 LOG.addHandler(handler)
 
 
@@ -66,7 +66,11 @@ def search(
     ldap_filter="(objectClass=*)",
     search_scope=ldap3.BASE,
     attr=["*"],
-    control_flag=accesscontrol.OWNER_SECURITY_INFORMATION,
+    control_flag= (
+        accesscontrol.OWNER_SECURITY_INFORMATION +
+        accesscontrol.GROUP_SECURITY_INFORMATION +
+        accesscontrol.DACL_SECURITY_INFORMATION
+    )
 ):
     ldap_conn = conn.getLdapConnection()
     base_dn = resolvDN(ldap_conn, base)
@@ -83,8 +87,7 @@ def search(
     if len(ldap_conn.entries) < 1:
         raise NoResultError(base_dn, ldap_filter)
 
-    results = ldap_conn.response_to_json()
-    return json.loads(results)["entries"]
+    return ldap_conn.response
 
 
 def setAttr(
@@ -112,44 +115,7 @@ def getDefaultNamingContext(conn):
     return naming_context
 
 
-@lru_cache
-def getGroupMembership(conn, identity, recurse):
-    """
-    Find the groups that an identity belongs to
-    """
-    # We fetch primaryGroupID, since this group is not reflected in memberOf
-    # Additionally we get objectSid to have the domain sid it is helpfuf
-    # to resolv the primary group RID to a DN
-    # Finally we had the special identity groups: Authenticated Users and Everyone
-    data = search(conn, identity, attr=["objectSid", "memberOf", "primaryGroupID"])
-    data = data[0]["attributes"]
-    groups = data["memberOf"]
-
-    if data["primaryGroupID"]:
-        domain_sid = "-".join(data["objectSid"].split("-")[:-1])
-        primary_group_sid = domain_sid + "-" + str(data["primaryGroupID"])
-        primary_group_dn = getDNFromSID(conn, primary_group_sid)
-        groups.append(primary_group_dn)
-
-    found_groups = set(groups)
-    if recurse:
-        for group in groups:
-            new_group = getGroupMembership(conn, group, recurse)
-            found_groups.update(new_group)
-
-    return found_groups
-
-
-@lru_cache
-def getDNFromSID(conn, sid):
-    """
-    Resolve a particular SID to a full DN
-    """
-    data = search(conn, sid, attr=["distinguishedName"])
-    return data[0]["attributes"]["distinguishedName"]
-
-
-def getOrganizationalUnits(conn, attributes=["*"], page_size=2):
+def getOrganizationalUnits(conn, attributes=["*"], page_size=1000):
     """
     Iterator over the Organizational Units
     """
@@ -174,8 +140,8 @@ def getOrganizationalUnits(conn, attributes=["*"], page_size=2):
 
     cookie = ldap_conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
 
-    data = ldap_conn.response_to_json()
-    ous = json.loads(data)["entries"]
+    ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
+
     for ou in ous:
         yield ou
 
@@ -192,8 +158,7 @@ def getOrganizationalUnits(conn, attributes=["*"], page_size=2):
 
         cookie = ldap_conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
 
-        data = ldap_conn.response_to_json()
-        ous = json.loads(data)["entries"]
+        ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
         for ou in ous:
             yield ou
 

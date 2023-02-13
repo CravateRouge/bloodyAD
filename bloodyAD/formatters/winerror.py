@@ -3,7 +3,7 @@ Win32 Error Codes - [MS-ERREF] section 2.2
 https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d
 """
 WINERROR = {
-    0x00000000: {"code": "ERROR_SUCCESS", "message": "The operation completed successfully."},
+ #   0x00000000: {"code": "ERROR_SUCCESS", "message": "The operation completed successfully."},
     0x00000001: {"code": "ERROR_INVALID_FUNCTION", "message": "Incorrect function."},
     0x00000002: {"code": "ERROR_FILE_NOT_FOUND", "message": "The system cannot find the file specified."},
     0x00000003: {"code": "ERROR_PATH_NOT_FOUND", "message": "The system cannot find the path specified."},
