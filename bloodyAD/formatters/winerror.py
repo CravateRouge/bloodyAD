@@ -1,6 +1,6 @@
 """
-Win32 Error Codes - [MS-ERREF] section 2.2
-https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/18d8fbe8-a967-4f1c-ae50-99ca8e491d2d
+[MS-ADTS] 3.1.1.3.1.9 Error Message Strings
+[MS-ERREF] 2.2 Win32 Error Codes
 """
 WINERROR = {
  #   0x00000000: {"code": "ERROR_SUCCESS", "message": "The operation completed successfully."},

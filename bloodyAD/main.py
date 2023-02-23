@@ -85,10 +85,10 @@ def main():
 
                 # If parameter has a default value, then it will be an optional argument
                 param_signature = func_signature.parameters.get(param_name)
-                param_name = param_name.replace("_", "-")
                 if param_signature.default is param_signature.empty:
                     arg_name = param_name
                 else:
+                    param_name = param_name.replace("_", "-")
                     arg_name = f"--{param_name}"
                     parser_args["default"] = param_signature.default
 
