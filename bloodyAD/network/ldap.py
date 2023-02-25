@@ -13,6 +13,7 @@ from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
 import re, ssl
 from functools import cached_property
 import ldap3
+from ldap3.protocol.formatters.formatters import format_sid
 
 class Ldap(ldap3.Connection):
     conf = None
@@ -33,6 +34,8 @@ class Ldap(ldap3.Connection):
                 "msDS-ManagedPassword": formatGMSApass,
                 "dnsRecord": formatDnsRecord,
                 "msDS-KeyCredentialLink": formatKeyCredentialLink,
+                "tokenGroups": format_sid,
+                "tokenGroupsNoGCAcceptable": format_sid
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True, "auto_range": True}

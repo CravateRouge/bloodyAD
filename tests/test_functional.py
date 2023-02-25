@@ -62,11 +62,12 @@ class TestModules(unittest.TestCase):
                     ).split(" ")
                 )
 
-    def test_02SearchAndGetChildAndGetWritableOU(self):
+    def test_02SearchAndGetChildAndGetWritable(self):
         self.launchBloody(
             self.user,
             ["getChildObjects", "OU=Domain Controllers,DC=bloody,DC=local"],
         )
+
         self.launchBloody(
             self.user,
             [
@@ -76,10 +77,26 @@ class TestModules(unittest.TestCase):
                 "description",
             ],
         )
-        self.launchBloody(
+
+        writableAll = self.launchBloody(
             self.user,
-            ["get", "writableOU", "Administrator"],
+            ["get", "writable"]
         )
+        writableUserWrite = self.launchBloody(
+            self.user,
+            ["get", "writable", "--otype", "USER", "--right", "WRITE"]
+        )
+        self.assertEqual(writableAll,writableUserWrite)
+
+        userDirectMembership = self.launchBloody(
+            self.user,
+            ["get", "membership", self.user["username"]]
+        )
+        userRecurseMembership = self.launchBloody(
+            self.user,
+            ["get", "membership", self.user["username"], "--no-recurse"]
+        )
+
 
     def test_03UacOwnerGenericShadowGroupPasswordDCSync(self):
         slave = {"username": "slave", "password": "Password123!"}
@@ -337,6 +354,7 @@ class TestModules(unittest.TestCase):
                 "--ttl", "50",
             ],
         )
+        self.toTear.append((self.launchBloody, self.user, ["remove", "dnsRecord", "test.domain", "8.8.8.8", "--ttl", "50"]))
         self.assertRegex(
             self.launchBloody(
                 self.user,
@@ -348,14 +366,7 @@ class TestModules(unittest.TestCase):
             ),
             "test.domain"
         )
-        self.launchBloody(
-            self.user,
-            [
-                "remove", "dnsRecord",
-                "test.domain", "8.8.8.8",
-                "--ttl", "50"
-            ],
-        )
+
     def createUser(self, creds, usr, pwd, ou=None):
         args = ["addUser", usr, pwd]
         if ou:

@@ -1,4 +1,3 @@
-import bloodyAD.patch.winacl_patch
 from bloodyAD.formatters import (
     accesscontrol,
     common,
