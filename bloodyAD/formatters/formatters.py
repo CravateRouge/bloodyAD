@@ -12,6 +12,7 @@ from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 RESOLVING = False
 
+
 def formatAccountControl(userAccountControl):
     userAccountControl = int(userAccountControl.decode())
     return [
@@ -62,7 +63,9 @@ def formatSchemaVersion(objectVersion):
 def formatGMSApass(managedPassword):
     gmsa_blob = cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword)
     ntlm_hash = "aad3b435b51404eeaad3b435b51404ee:" + gmsa_blob.toNtHash()
-    return  f"NTLM {ntlm_hash} B64ENCODED {base64.b64encode(gmsa_blob['CurrentPassword'])}"
+    return (
+        f"NTLM {ntlm_hash} B64ENCODED {base64.b64encode(gmsa_blob['CurrentPassword'])}"
+    )
 
 
 def formatDnsRecord(dns_record):

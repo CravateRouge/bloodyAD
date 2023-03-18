@@ -84,9 +84,7 @@ ACCOUNT_FLAGS = {
 
 
 # https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
-WELLKNOWN_DOMAIN_RID = {
-        513: "Domain Users"
-}
+WELLKNOWN_DOMAIN_RID = {513: "Domain Users"}
 
 
 @lru_cache

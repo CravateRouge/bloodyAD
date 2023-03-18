@@ -21,8 +21,10 @@ def ldap_search(base_dn, filter, attr):
 @lru_cache
 def resolveSid(sid):
     r = ldap_search(
-        "CN=WellKnown Security"
-        f" Principals,{ldap_conn.server.info.other['configurationNamingContext'][0]}",
+        (
+            "CN=WellKnown Security"
+            f" Principals,{ldap_conn.server.info.other['configurationNamingContext'][0]}"
+        ),
         f"(objectSid={sid})",
         "name",
     )

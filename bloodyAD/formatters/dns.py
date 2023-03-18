@@ -155,8 +155,8 @@ class DNS_COUNT_NAME(Structure):
             nextlen = int.from_bytes(self["RawName"][ind : ind + 1], byteorder="big")
             labels.append(self["RawName"][ind + 1 : ind + 1 + nextlen].decode("utf-8"))
             ind += nextlen + 1
-        # For the final dot
-        labels.append("")
+        # For the final dot, but do we really want to display it?
+        # labels.append("")
         return ".".join(labels)
 
     def fromCanonical(self, canonical):

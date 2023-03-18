@@ -1,7 +1,7 @@
-import ssl
 from functools import cached_property
 from dataclasses import dataclass
 from bloodyAD.network.ldap import Ldap
+
 
 @dataclass
 class Config:

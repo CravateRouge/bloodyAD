@@ -9,11 +9,12 @@ from bloodyAD.formatters.formatters import (
     formatDnsRecord,
     formatKeyCredentialLink,
 )
-from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
+from bloodyAD.exceptions import NoResultError, TooManyResultsError
 import re, ssl
 from functools import cached_property
 import ldap3
 from ldap3.protocol.formatters.formatters import format_sid
+
 
 class Ldap(ldap3.Connection):
     conf = None
@@ -35,7 +36,7 @@ class Ldap(ldap3.Connection):
                 "dnsRecord": formatDnsRecord,
                 "msDS-KeyCredentialLink": formatKeyCredentialLink,
                 "tokenGroups": format_sid,
-                "tokenGroupsNoGCAcceptable": format_sid
+                "tokenGroupsNoGCAcceptable": format_sid,
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True, "auto_range": True}
@@ -88,7 +89,13 @@ class Ldap(ldap3.Connection):
 
         self.domainNC = self.server.info.other["defaultNamingContext"][0]
         self.configNC = self.server.info.other["configurationNamingContext"][0]
-    
+        self.schemaNC = self.server.info.other["schemaNamingContext"][0]
+        self.appNCs = []
+        for nc in self.server.info.naming_contexts:
+            if nc == self.domainNC or nc == self.configNC or nc == self.schemaNC:
+                continue
+            self.appNCs.append(nc)
+
     def dnResolver(self, identity, objtype=None):
         """
         Return the DN for the object based on the parameters identity
@@ -104,7 +111,6 @@ class Ldap(ldap3.Connection):
         if "s-1-" in identity.lower():
             # We assume identity is an SID
             ldap_filter = f"(objectSid={identity})"
-
         elif "{" in identity:
             if objtype == "GPO":
                 ldap_filter = f"(&(objectClass=groupPolicyContainer)(name={identity}))"
@@ -132,16 +138,20 @@ class Ldap(ldap3.Connection):
         """
         [MS-ADTS] - 3.1.1.3.4.6 LDAP Policies
         """
-        dict_policy = {"MaxPageSize":1000}
-        
+        dict_policy = {"MaxPageSize": 1000}
+
         nTDSDSA_dn = self.server.info.other["dsServiceName"][0]
         site_match = re.search("[^,]+,CN=Sites.+", nTDSDSA_dn)
         nTDSSiteSettings_filter = ""
         if site_match:
             nTDSSiteSettings_dn = "CN=NTDS Site Settings," + site_match.group()
             nTDSSiteSettings_filter = f"(distinguishedName={nTDSSiteSettings_dn})"
-        default_policy_dn = "CN=Default Query Policy,CN=Query-Policies,CN=Directory Service,CN=Windows NT,CN=Services," + self.configNC
-        
+        default_policy_dn = (
+            "CN=Default Query Policy,CN=Query-Policies,CN=Directory Service,CN=Windows"
+            " NT,CN=Services,"
+            + self.configNC
+        )
+
         ldap_filter = f"(|(distinguishedName={nTDSDSA_dn}){nTDSSiteSettings_filter}(distinguishedName={default_policy_dn}))"
         raw_policy = ""
         super().search(self.configNC, ldap_filter, attributes=["lDAPAdminLimits"])
@@ -164,20 +174,22 @@ class Ldap(ldap3.Connection):
         return dict_policy
 
     def bloodysearch(
-    self,
-    base,
-    ldap_filter="(objectClass=*)",
-    search_scope=ldap3.BASE,
-    attr=["*"],
-    control_flag= (
-        accesscontrol.OWNER_SECURITY_INFORMATION +
-        accesscontrol.GROUP_SECURITY_INFORMATION +
-        accesscontrol.DACL_SECURITY_INFORMATION
-    ),
-    op_attr=False,
-    generator=False
+        self,
+        base,
+        ldap_filter="(objectClass=*)",
+        search_scope=ldap3.BASE,
+        attr=["*"],
+        control_flag=(
+            accesscontrol.OWNER_SECURITY_INFORMATION
+            + accesscontrol.GROUP_SECURITY_INFORMATION
+            + accesscontrol.DACL_SECURITY_INFORMATION
+        ),
+        op_attr=False,
+        generator=False,
+        raw=False,
     ):
         base_dn = self.dnResolver(base)
+
         controls = ldap3.protocol.microsoft.security_descriptor_control(
             sdflags=control_flag
         )
@@ -191,11 +203,15 @@ class Ldap(ldap3.Connection):
             get_operational_attributes=op_attr,
             paged_size=self.policy["MaxPageSize"],
             controls=controls,
-            generator=generator
+            generator=generator,
         )
 
         if not any(entries):
             raise NoResultError(base_dn, ldap_filter)
 
-        return entries
-        
+        attrtype = "raw_attributes" if raw else "attributes"
+        dntype = "raw_dn" if raw else "dn"
+        for entry in entries:
+            if not attrtype in entry:
+                continue
+            yield {**{"distinguishedName": entry[dntype]}, **entry[attrtype]}

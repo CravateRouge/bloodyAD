@@ -78,25 +78,18 @@ class TestModules(unittest.TestCase):
             ],
         )
 
-        writableAll = self.launchBloody(
-            self.user,
-            ["get", "writable"]
-        )
+        writableAll = self.launchBloody(self.user, ["get", "writable"])
         writableUserWrite = self.launchBloody(
-            self.user,
-            ["get", "writable", "--otype", "USER", "--right", "WRITE"]
+            self.user, ["get", "writable", "--otype", "USER", "--right", "WRITE"]
         )
-        self.assertEqual(writableAll,writableUserWrite)
+        self.assertEqual(writableAll, writableUserWrite)
 
         userDirectMembership = self.launchBloody(
-            self.user,
-            ["get", "membership", self.user["username"]]
+            self.user, ["get", "membership", self.user["username"]]
         )
         userRecurseMembership = self.launchBloody(
-            self.user,
-            ["get", "membership", self.user["username"], "--no-recurse"]
+            self.user, ["get", "membership", self.user["username"], "--no-recurse"]
         )
-
 
     def test_03UacOwnerGenericShadowGroupPasswordDCSync(self):
         slave = {"username": "slave", "password": "Password123!"}
@@ -106,9 +99,11 @@ class TestModules(unittest.TestCase):
         self.launchBloody(
             slave,
             [
-                "get", "object",
+                "get",
+                "object",
                 f"CN={slave['username']},{ou}",
-                "--attr", "distinguishedName",
+                "--attr",
+                "distinguishedName",
             ],
         )
 
@@ -205,7 +200,15 @@ class TestModules(unittest.TestCase):
 
         # Password
         self.launchBloody(
-            slave, ["set" ,"password", slave["username"], "Password124!", "--oldpass", slave["password"]]
+            slave,
+            [
+                "set",
+                "password",
+                slave["username"],
+                "Password124!",
+                "--oldpass",
+                slave["password"],
+            ],
         )
         self.launchBloody(
             self.user, ["changePassword", slave["username"], slave["password"]]
@@ -291,10 +294,12 @@ class TestModules(unittest.TestCase):
             self.launchBloody(
                 self.user,
                 [
-                    "get", "object",
+                    "get",
+                    "object",
                     hostname + "$",
                     "--resolve-sd",
-                    "--attr", "msDS-AllowedToActOnBehalfOfOtherIdentity",
+                    "--attr",
+                    "msDS-AllowedToActOnBehalfOfOtherIdentity",
                 ],
             ),
             hostname3 + "$",
@@ -343,28 +348,34 @@ class TestModules(unittest.TestCase):
         managedPassword_blob = MSDS_MANAGEDPASSWORD_BLOB(managedPassword_raw)
         self.assertEqual(managedPassword_blob.getData(), managedPassword_raw)
         self.assertEqual(managedPassword_blob.toNtHash(), managedPassword_nthash)
-    
+
     def test_06AddRemoveGetDnsRecord(self):
         self.launchBloody(
             self.user,
             [
-                "add", "dnsRecord",
-                "test.domain", "8.8.8.8",
-                "--dnstype", "A",
-                "--ttl", "50",
+                "add",
+                "dnsRecord",
+                "test.domain",
+                "8.8.8.8",
+                "--dnstype",
+                "A",
+                "--ttl",
+                "50",
             ],
         )
-        self.toTear.append((self.launchBloody, self.user, ["remove", "dnsRecord", "test.domain", "8.8.8.8", "--ttl", "50"]))
+        self.toTear.append(
+            (
+                self.launchBloody,
+                self.user,
+                ["remove", "dnsRecord", "test.domain", "8.8.8.8", "--ttl", "50"],
+            )
+        )
         self.assertRegex(
             self.launchBloody(
                 self.user,
-                [
-                    "get", "dnsRecord",
-                    "--zone", "bloody.local",
-                    "--no-legacy", "--no-forest"
-                ],
+                ["get", "dnsDump", "--zone", cls.domain, "--detail"],
             ),
-            "test.domain"
+            "test.domain",
         )
 
     def createUser(self, creds, usr, pwd, ou=None):

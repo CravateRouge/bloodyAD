@@ -8,6 +8,7 @@ from ldap3.core.exceptions import (
 )
 from ldap3 import MODIFY_ADD
 
+
 # Credits to Kevin Robertson and his script Invoke-DNSUpdate.ps1 from the Powermad framework
 def dnsRecord(
     conn,

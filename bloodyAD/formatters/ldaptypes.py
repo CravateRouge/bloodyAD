@@ -24,6 +24,7 @@ from struct import unpack, pack
 # this should be turned off if running unit tests.
 RECALC_ACE_SIZE = True
 
+
 # LDAP SID structure - based on SAMR_RPC_SID, except the SubAuthority is LE here
 class LDAP_SID_IDENTIFIER_AUTHORITY(Structure):
     structure = (("Value", "6s"),)

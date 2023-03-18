@@ -1,7 +1,6 @@
 from bloodyAD.formatters import ldaptypes, accesscontrol, cryptography, common
-from bloodyAD import formatters
 from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
-import random, string, logging, json, sys, datetime, binascii
+import random, string, logging, json, sys, datetime, binascii, types, base64
 from functools import lru_cache
 import ldap3
 from ldap3.protocol.formatters.formatters import format_sid
@@ -60,17 +59,49 @@ def resolvDN(conn, identity, objtype=None):
     return res
 
 
+def renderSearchResult(entries):
+    """
+    Take entries of type Iterator({dn: <list/generator with one depth or primitive type or raw bytes>},{...}...)
+    Returns entries as is but with base64 instead of raw bytes if not decodable in utf-8
+    """
+    decoded_entry = {}
+    for entry in entries:
+        for attr_name, attr_members in entry.items():
+            if type(attr_members) in [list, types.GeneratorType]:
+                decoded_entry[attr_name] = []
+                for member in attr_members:
+                    if type(member) == bytes:
+                        try:
+                            decoded = member.decode()
+                        except UnicodeDecodeError:
+                            decoded = base64.b64encode(member).decode()
+                    else:
+                        decoded = member
+                    decoded_entry[attr_name].append(decoded)
+            else:
+                if type(attr_members) == bytes:
+                    try:
+                        decoded = attr_members.decode()
+                    except UnicodeDecodeError:
+                        decoded = base64.b64encode(attr_members).decode()
+                else:
+                    decoded = attr_members
+                decoded_entry[attr_name] = decoded
+        yield decoded_entry
+        decoded_entry = {}
+
+
 def search(
     conn,
     base,
     ldap_filter="(objectClass=*)",
     search_scope=ldap3.BASE,
     attr=["*"],
-    control_flag= (
-        accesscontrol.OWNER_SECURITY_INFORMATION +
-        accesscontrol.GROUP_SECURITY_INFORMATION +
-        accesscontrol.DACL_SECURITY_INFORMATION
-    )
+    control_flag=(
+        accesscontrol.OWNER_SECURITY_INFORMATION
+        + accesscontrol.GROUP_SECURITY_INFORMATION
+        + accesscontrol.DACL_SECURITY_INFORMATION
+    ),
 ):
     ldap_conn = conn.getLdapConnection()
     base_dn = resolvDN(ldap_conn, base)
@@ -122,23 +153,25 @@ def getOrganizationalUnits(conn, attributes=["*"], page_size=1000):
     ldap_conn = conn.getLdapConnection()
     naming_context = getDefaultNamingContext(ldap_conn)
 
-    control_flag = (accesscontrol.OWNER_SECURITY_INFORMATION + 
-                    accesscontrol.GROUP_SECURITY_INFORMATION + 
-                    accesscontrol.DACL_SECURITY_INFORMATION)
+    control_flag = (
+        accesscontrol.OWNER_SECURITY_INFORMATION
+        + accesscontrol.GROUP_SECURITY_INFORMATION
+        + accesscontrol.DACL_SECURITY_INFORMATION
+    )
     controls = ldap3.protocol.microsoft.security_descriptor_control(
         sdflags=control_flag
     )
 
     ldap_conn.search(
-        search_base = naming_context,
-        search_filter = '(objectClass=OrganizationalUnit)',
-        search_scope = ldap3.SUBTREE,
-        attributes = attributes,
-        paged_size = page_size,
+        search_base=naming_context,
+        search_filter="(objectClass=OrganizationalUnit)",
+        search_scope=ldap3.SUBTREE,
+        attributes=attributes,
+        paged_size=page_size,
         controls=controls,
-        )
+    )
 
-    cookie = ldap_conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+    cookie = ldap_conn.result["controls"]["1.2.840.113556.1.4.319"]["value"]["cookie"]
 
     ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
 
@@ -147,16 +180,18 @@ def getOrganizationalUnits(conn, attributes=["*"], page_size=1000):
 
     while cookie:
         ldap_conn.search(
-            search_base = naming_context,
-            search_filter = '(objectClass=OrganizationalUnit)',
-            search_scope = ldap3.SUBTREE,
-            attributes = attributes,
-            paged_size = page_size,
-            paged_cookie = cookie,
+            search_base=naming_context,
+            search_filter="(objectClass=OrganizationalUnit)",
+            search_scope=ldap3.SUBTREE,
+            attributes=attributes,
+            paged_size=page_size,
+            paged_cookie=cookie,
             controls=controls,
-            )
+        )
 
-        cookie = ldap_conn.result['controls']['1.2.840.113556.1.4.319']['value']['cookie']
+        cookie = ldap_conn.result["controls"]["1.2.840.113556.1.4.319"]["value"][
+            "cookie"
+        ]
 
         ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
         for ou in ous:

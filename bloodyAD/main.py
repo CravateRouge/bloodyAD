@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from bloodyAD import cli_modules
 from bloodyAD import functions, ConnectionHandler
-import sys, argparse
+import sys, argparse, types
 
 # For dynamic argparse
 from inspect import getmembers, isfunction, signature
@@ -127,7 +127,29 @@ def main():
 
     # Launch the command
     conn = ConnectionHandler(args=args)
-    args.func(conn, **params)
+    output = args.func(conn, **params)
+
+    # Prints output, will print it directly if it's not an iterable
+    # Output is expected to be of type [{name:[members]},{...}...]
+    # If it's not, will print it raw
+    output_type = type(output)
+    if not output or output_type == bool:
+        return
+    if output_type not in [list, dict, types.GeneratorType]:
+        print(output)
+        return
+    isFirst = True
+    for entry in output:
+        if not isFirst:
+            print()
+        for attr_name in entry:
+            attr = entry[attr_name]
+            if type(attr) not in [list, types.GeneratorType]:
+                print(f"{attr_name}: {attr}")
+            else:
+                for attr_member in attr:
+                    print(f"{attr_name}: {attr_member}")
+        isFirst = False
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -136,7 +158,6 @@ def main():
 # (other part of the string, one parameter description per line, starting with :param param_name:)
 def doc_parser(doc):
     doc_parsed = doc.splitlines()
-
     return doc_parsed[1], doc_parsed[3:-1]
 
 
