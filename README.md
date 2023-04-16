@@ -33,7 +33,7 @@ A python package is available:
 
 ```ps1
 pip install bloodyAD
-bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password123!'
+bloodyAD --host 172.16.1.15 -d bloody.local -k set password john.doe 'Password123!'
 ```
 
 Or you can clone the repo:
@@ -41,7 +41,7 @@ Or you can clone the repo:
 ```ps1
 git clone --depth 1 https://github.com/CravateRouge/bloodyAD
 pip install .
-bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password123!'
+bloodyAD --host 172.16.1.15 -d bloody.local -k set password john.doe 'Password123!'
 ```
 
 ### Dependencies
@@ -57,7 +57,7 @@ bloodyAD --host 172.16.1.15 -d bloody.local -k changePassword john.doe 'Password
 Simple usage:
 
 ```ps1
-bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword john.doe 'Password123!'
+bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 set password john.doe 'Password123!'
 ```
 
 **Note:** You can find more examples on <https://cravaterouge.github.io/> and in the documentation folder of this project
@@ -95,20 +95,16 @@ Commands:
 Help text to use a specific function:
 
 ```ps1
-[bloodyAD]$ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 changePassword -h
-usage: 
-    Change the target password without knowing the old one using LDAPS or RPC
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        new_pass: new password for the target
-    
-       [-h] [func_args ...]
+[bloodyAD]$ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 set password -h
+usage: bloodyAD.py set password [-h] [--oldpass OLDPASS] target newpass
 
 positional arguments:
-  func_args
+  target             sAMAccountName, DN, GUID or SID of the target
+  newpass            new password for the target
 
-optional arguments:
-  -h, --help  show this help message and exit
+options:
+  -h, --help         show this help message and exit
+  --oldpass OLDPASS  old password of the target, mandatory if you don't have "change password" permission on the target (default: None)
   ```
 
 ## How it works
@@ -119,49 +115,49 @@ bloodyAD communicates with a DC using mainly the LDAP protocol in order to get i
 
 ```ps1
 # Get group members
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes Users member 
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get object Users --attr member 
 
 # Get minimum password length policy
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' minPwdLength
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get object 'DC=bloody,DC=local' --attr minPwdLength
 
 # Get AD functional level
-bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' msDS-Behavior-Version
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 get object 'DC=bloody,DC=local' --attr msDS-Behavior-Version
 
 # Get all users of the domain
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' user
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get children 'DC=bloody,DC=local' --type user
 
 # Get all computers of the domain
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' computer
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get children 'DC=bloody,DC=local' --type computer
 
 # Get all containers of the domain
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getChildObjects 'DC=bloody,DC=local' container
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get children 'DC=bloody,DC=local' --type container
 
 # Enable DONT_REQ_PREAUTH for ASREPRoast
-bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x400000
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 add uac john.doe DONT_REQ_PREAUTH
 
 # Disable ACCOUNTDISABLE
-bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 setUserAccountControl john.doe 0x0002 False
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 remove uac john.doe ACCOUNTDISABLE
 
 # Get UserAccountControl flags
-bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes john.doe userAccountControl
+bloodyAD -u Administrator -d bloody -p Password512! --host 192.168.10.2 get object john.doe --attr userAccountControl
 
 # Read GMSA account password
-bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes gmsaAccount$ msDS-ManagedPassword
+bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 get object 'gmsaAccount$' --attr msDS-ManagedPassword
 
 # Read LAPS password
-bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 getObjectAttributes COMPUTER$ ms-Mcs-AdmPwd
+bloodyAD -u john.doe -d bloody -p Password512 --host 192.168.10.2 get object 'COMPUTER$' --attr ms-Mcs-AdmPwd
 
 # Read quota for adding computer objects to domain
-bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 getObjectAttributes 'DC=bloody,DC=local' ms-DS-MachineAccountQuota
+bloodyAD -u john.doe -d bloody -p Password512! --host 192.168.10.2 get object 'DC=bloody,DC=local' --attr ms-DS-MachineAccountQuota
 
 # Add a new DNS entry
-bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 add domainDNSRecord my_machine_name 192.168.10.48
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 add dnsRecord my_machine_name 192.168.10.48
 
 # Remove a DNS entry
-bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 remove domainDNSRecord my_machine_name 192.168.10.48
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 remove dnsRecord my_machine_name 192.168.10.48
 
 # Get AD DNS records
-bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 get domainDNSRecord
+bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 get dnsDump
 
 ```
 

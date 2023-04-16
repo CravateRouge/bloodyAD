@@ -58,22 +58,25 @@ class TestModules(unittest.TestCase):
                     self.bloody_prefix
                     + auth
                     + (
-                        sec_state + "getObjectAttributes Administrator sAMAccountName"
+                        sec_state + "get object Administrator --attr sAMAccountName"
                     ).split(" ")
                 )
 
     def test_02SearchAndGetChildAndGetWritable(self):
         self.launchBloody(
             self.user,
-            ["getChildObjects", "OU=Domain Controllers,DC=bloody,DC=local"],
+            ["get", "children", "OU=Domain Controllers,DC=bloody,DC=local"],
         )
 
         self.launchBloody(
             self.user,
             [
+                "get",
                 "search",
                 self.rootDomainNamingContext,
+                "--filter",
                 "(cn=Administrator)",
+                "--attr",
                 "description",
             ],
         )
@@ -84,11 +87,15 @@ class TestModules(unittest.TestCase):
         )
         self.assertEqual(writableAll, writableUserWrite)
 
-        userDirectMembership = self.launchBloody(
-            self.user, ["get", "membership", self.user["username"]]
+        self.assertRegex(
+            self.launchBloody(self.user, ["get", "membership", self.user["username"]]),
+            "Domain Users",
         )
-        userRecurseMembership = self.launchBloody(
-            self.user, ["get", "membership", self.user["username"], "--no-recurse"]
+        self.assertRegex(
+            self.launchBloody(
+                self.user, ["get", "membership", self.user["username"], "--no-recurse"]
+            ),
+            "No direct group membership",
         )
 
     def test_03UacOwnerGenericShadowGroupPasswordDCSync(self):
@@ -107,10 +114,10 @@ class TestModules(unittest.TestCase):
             ],
         )
 
-        # SetGenericAll
+        # GenericAll
         self.launchBloody(
             self.admin,
-            ["setGenericAll", self.user["username"], slave["username"]],
+            ["add", "genericAll", slave["username"], self.user["username"]],
         )
         self.toTear.append(
             (
@@ -123,14 +130,16 @@ class TestModules(unittest.TestCase):
 
         # SetUAC
         self.launchBloody(
-            self.user, ["setUserAccountControl", slave["username"], "0x400000"]
+            self.user, ["add", "uac", slave["username"], "-f", "DONT_REQ_PREAUTH"]
         )
         self.assertRegex(
             self.launchBloody(
                 self.user,
                 [
-                    "getObjectAttributes",
+                    "get",
+                    "object",
                     slave["username"],
+                    "--attr",
                     "UserAccountControl",
                 ],
             ),
@@ -138,64 +147,58 @@ class TestModules(unittest.TestCase):
         )
         self.launchBloody(
             self.user,
-            ["setUserAccountControl", slave["username"], "0x400000", "False"],
+            ["remove", "uac", slave["username"], "-f", "DONT_REQ_PREAUTH"],
         )
 
         # SetOwner
         self.launchBloody(
-            self.user, ["setOwner", self.user["username"], slave["username"]]
+            self.user, ["set", "owner", slave["username"], self.user["username"]]
         )
         self.assertRegex(
             self.launchBloody(
                 self.user,
                 [
-                    "getObjectAttributes",
+                    "get",
+                    "object",
                     slave["username"],
+                    "--attr",
                     "ntSecurityDescriptor",
-                    "True",
+                    "--resolve-sd",
                 ],
                 doPrint=False,
             ),
-            f'"Owner": "{self.user["username"]}',
+            f'Owner: {self.user["username"]}',
         )
 
         # Shadow
         outfile1 = "shado_cred"
         out_shado1 = self.launchBloody(
             self.user,
-            ["setShadowCredentials", slave["username"], "True", outfile1],
+            ["add", "shadowCredentials", slave["username"], "--path", outfile1],
         )
         outfile2 = "shado_cred2"
         self.launchBloody(
             self.user,
-            ["setShadowCredentials", slave["username"], "True", outfile2],
+            ["add", "shadowCredentials", slave["username"], "--path", outfile2],
         )
         id_shado1 = re.search("sha256 of RSA key: (.+)", out_shado1).group(1)
         self.pkinit(slave["username"], outfile1)
         self.launchBloody(
             self.user,
-            [
-                "setShadowCredentials",
-                slave["username"],
-                "False",
-                "None",
-                id_shado1,
-            ],
+            ["remove", "shadowCredentials", slave["username"], "--key", id_shado1],
         )
         self.pkinit(slave["username"], outfile2)
-        self.launchBloody(
-            self.user, ["setShadowCredentials", slave["username"], "False"]
-        )
+        self.launchBloody(self.user, ["remove", "shadowCredentials", slave["username"]])
 
         # Group
         self.launchBloody(
-            self.admin, ["setGenericAll", self.user["username"], "IIS_IUSRS"]
+            self.admin, ["add", "genericAll", "IIS_IUSRS", self.user["username"]]
         )
         self.launchBloody(
-            self.user, ["addObjectToGroup", slave["username"], "IIS_IUSRS"]
+            self.user, ["add", "groupMember", "IIS_IUSRS", slave["username"]]
         )
         self.launchBloody(
-            self.user, ["delObjectFromGroup", slave["username"], "IIS_IUSRS"]
+            self.user, ["remove", "groupMember", "IIS_IUSRS", slave["username"]]
         )
 
         # Password
@@ -211,19 +214,15 @@ class TestModules(unittest.TestCase):
             ],
         )
         self.launchBloody(
-            self.user, ["changePassword", slave["username"], slave["password"]]
+            self.user, ["set", "password", slave["username"], slave["password"]]
         )
 
         # DCsync
         self.launchBloody(
             self.admin,
-            [
-                "setGenericAll",
-                self.user["username"],
-                self.rootDomainNamingContext,
-            ],
+            ["add", "genericAll", self.rootDomainNamingContext, self.user["username"]],
         )
-        self.launchBloody(self.user, ["setDCSync", slave["username"]])
+        self.launchBloody(self.user, ["add", "dcsync", slave["username"]])
         self.assertRegex(
             self.launchProcess(
                 [
@@ -235,7 +234,7 @@ class TestModules(unittest.TestCase):
             ),
             "Kerberos keys grabbed",
         )
-        self.launchBloody(self.user, ["setDCSync", slave["username"], "False"])
+        self.launchBloody(self.user, ["remove", "dcsync", slave["username"]])
         self.assertNotRegex(
             self.launchProcess(
                 [
@@ -250,10 +249,10 @@ class TestModules(unittest.TestCase):
         self.launchBloody(
             self.admin,
             [
-                "setGenericAll",
-                self.user["username"],
+                "remove",
+                "genericAll",
                 self.rootDomainNamingContext,
-                "False",
+                self.user["username"],
             ],
         )
 
@@ -262,33 +261,35 @@ class TestModules(unittest.TestCase):
         self.launchBloody(
             self.user,
             [
-                "addComputer",
+                "add",
+                "computer",
                 hostname,
                 "Password123!",
+                "--ou",
                 "CN=COMPUTERS," + self.rootDomainNamingContext,
             ],
         )
         self.toTear.append(
-            (self.launchBloody, self.admin, ["delObject", hostname + "$"])
+            (self.launchBloody, self.admin, ["remove", "object", hostname + "$"])
         )
 
         hostname2 = "test_pc2"
-        self.launchBloody(self.user, ["addComputer", hostname2, "Password123!"])
+        self.launchBloody(self.user, ["add", "computer", hostname2, "Password123!"])
         self.toTear.append(
-            (self.launchBloody, self.admin, ["delObject", hostname2 + "$"])
+            (self.launchBloody, self.admin, ["remove", "object", hostname2 + "$"])
         )
-        self.launchBloody(self.user, ["setRbcd", hostname2 + "$", hostname + "$"])
+        self.launchBloody(self.user, ["add", "rbcd", hostname + "$", hostname2 + "$"])
 
         hostname3 = "test_pc3"
-        self.launchBloody(self.user, ["addComputer", hostname3, "Password123!"])
+        self.launchBloody(self.user, ["add", "computer", hostname3, "Password123!"])
         self.toTear.append(
-            (self.launchBloody, self.admin, ["delObject", hostname3 + "$"])
+            (self.launchBloody, self.admin, ["remove", "object", hostname3 + "$"])
         )
-        self.launchBloody(self.user, ["setRbcd", hostname3 + "$", hostname + "$"])
+        self.launchBloody(self.user, ["add", "rbcd", hostname + "$", hostname3 + "$"])
 
         # Test if rbcd correctly removed and doesn't remove all rbcd rights
         self.launchBloody(
-            self.user, ["setRbcd", hostname3 + "$", hostname + "$", "False"]
+            self.user, ["remove", "rbcd", hostname + "$", hostname3 + "$"]
         )
         self.assertNotRegex(
             self.launchBloody(
@@ -326,15 +327,19 @@ class TestModules(unittest.TestCase):
         # SetAttr
         self.launchBloody(
             self.admin,
-            ["setGenericAll", self.user["username"], hostname + "$"],
+            ["add", "genericAll", hostname + "$", self.user["username"]],
         )
         self.launchBloody(
             self.user,
             [
-                "setAttribute",
+                "set",
+                "object",
                 hostname + "$",
                 "servicePrincipalName",
-                '["TOTO/my.local.domain","TATA/imaginary.unicorn"]',
+                "-v",
+                "TOTO/my.local.domain",
+                "-v",
+                "TATA/imaginary.unicorn",
             ],
         )
 
@@ -373,28 +378,30 @@ class TestModules(unittest.TestCase):
         self.assertRegex(
             self.launchBloody(
                 self.user,
-                ["get", "dnsDump", "--zone", cls.domain, "--detail"],
+                ["get", "dnsDump", "--zone", self.domain, "--detail"],
             ),
             "test.domain",
         )
 
     def createUser(self, creds, usr, pwd, ou=None):
-        args = ["addUser", usr, pwd]
+        args = ["add", "user", usr, pwd]
         if ou:
-            args += [ou]
+            args += ["--ou", ou]
         self.launchBloody(creds, args)
-        self.toTear.append((self.launchBloody, creds, ["delObject", usr]))
+        self.toTear.append((self.launchBloody, creds, ["remove", "object", usr]))
 
     def removeGenericAll(self, creds, identity, target):
-        self.launchBloody(creds, ["setGenericAll", identity, target, "False"])
+        self.launchBloody(creds, ["remove", "genericAll", target, identity])
         self.assertNotRegex(
             self.launchBloody(
                 creds,
                 [
-                    "getObjectAttributes",
+                    "get",
+                    "object",
                     target,
+                    "--attr",
                     "ntSecurityDescriptor",
-                    "True",
+                    "--resolve-sd",
                 ],
                 doPrint=False,
             ),
@@ -429,12 +436,18 @@ class TestModules(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        while len(cls.toTear):
+        if not len(cls.toTear):
+            return
+        try:
             func = cls.toTear.pop()
             if len(func) > 1:
                 func[0](*func[1:])
             else:
                 func[0]()
+        except Exception as e:
+            raise e
+        finally:
+            cls.tearDownClass()
 
     def launchBloody(self, creds, args, isErr=True, doPrint=True):
         cmd_creds = ["-u", creds["username"], "-p", creds["password"]]
@@ -445,10 +458,8 @@ class TestModules(unittest.TestCase):
             cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=self.env
         ).communicate()
         out = out.decode()
-        if isErr:
-            self.assertTrue(out, self.printErr(err.decode(), cmd))
-        else:
-            out += "\n" + err.decode()
+        self.assertFalse(isErr and err, self.printErr(err.decode(), cmd))
+        out += "\n" + err.decode()
         if doPrint:
             print(out)
         return out

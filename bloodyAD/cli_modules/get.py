@@ -1,9 +1,20 @@
-from bloodyAD.formatters import formatters
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from typing import Literal
 import ldap3
 from ldap3.core.exceptions import LDAPNoSuchObjectResult
+
+
+def children(conn, target: str, type: str = "*"):
+    """
+    Lists children for a given target object
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param type: objectClass of object to fetch: user, computer, group, organizationalUnit, container, groupPolicyContainer, etc
+    """
+    return conn.ldap.bloodysearch(
+        target, f"(objectClass={type})", search_scope=ldap3.SUBTREE, attr=""
+    )
 
 
 # TODO: Fetch records from Global Catalog and also other partitions stored on other DC if possible
@@ -142,14 +153,17 @@ def object(
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved !!resolving can take some time!!
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     """
-    old_resolving = formatters.RESOLVING
-    if resolve_sd:
-        formatters.RESOLVING = True
-
     entries = conn.ldap.bloodysearch(target, attr=attr, raw=raw)
-    formatters.RESOLVING = old_resolving
-
-    return utils.renderSearchResult(entries)
+    rendered_entries = utils.renderSearchResult(entries)
+    if resolve_sd and not raw:
+        for entry in rendered_entries:
+            if "nTSecurityDescriptor" in entry:
+                entry["nTSecurityDescriptor"] = utils.renderSD(
+                    entry["nTSecurityDescriptor"], conn
+                )
+            yield entry
+    else:
+        yield from rendered_entries
 
 
 def search(
@@ -160,7 +174,7 @@ def search(
     raw: bool = False,
 ):
     """
-    Search in LDAP database, binary data will be outputed in base64
+    Searches in LDAP database, binary data will be outputed in base64
 
     :param searchbase: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)
@@ -175,6 +189,7 @@ def search(
         raw=raw,
         generator=True,
     )
+
     return utils.renderSearchResult(entries)
 
 
@@ -216,8 +231,10 @@ def writable(
             "right": "WRITE",
         }
 
-        def testSDRights(a):
+        def testSDRights(a):  # Mask defined in MS-ADTS for allowedAttributesEffective
             r = []
+            if not a:
+                return r
             if a & 3:
                 r.append("OWNER")
             if a & 4:
@@ -259,5 +276,8 @@ def writable(
                     right_entry[name].append(attr_params[attr_name]["right"])
 
             if right_entry:
-                yield {**{"distinguishedName": entry["dn"]}, **right_entry}
+                yield {
+                    **{"distinguishedName": entry["distinguishedName"]},
+                    **right_entry,
+                }
                 right_entry = {}

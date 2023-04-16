@@ -1,9 +1,11 @@
 import uuid
 from functools import lru_cache
 
+# TODO change ldap_conn with conn.ldap and verify no formatting functions use ldap_conn (not a good pattern)
 ldap_conn = None
 
 
+@lru_cache
 def ldap_search(base_dn, filter, attr):
     try:
         if (
@@ -20,6 +22,7 @@ def ldap_search(base_dn, filter, attr):
 
 @lru_cache
 def resolveSid(sid):
+    # TODO: Get rid of search for wellknown security or merge it with one after
     r = ldap_search(
         (
             "CN=WellKnown Security"
@@ -38,6 +41,7 @@ def resolveSid(sid):
     return r if r else sid
 
 
+@lru_cache
 def resolveGUID(guid_raw):
     attr = "name"
     guid_canonical = str(uuid.UUID(bytes_le=guid_raw))
@@ -55,4 +59,6 @@ def resolveGUID(guid_raw):
         schema_dn, f"(attributeSecurityGUID={guid_str})", attributes=attr
     ) or not len(ldap_conn.entries):
         return r
-    return {r: [entry[attr].value for entry in ldap_conn.entries]}
+    # TODO: return dict instead of str, functions calling it for str must transform it themselves
+    # return {r: [entry[attr].value for entry in ldap_conn.entries]}
+    return ",".join(sorted([entry[attr].value for entry in ldap_conn.entries]))

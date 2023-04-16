@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from bloodyAD import cli_modules
-from bloodyAD import functions, ConnectionHandler
+from bloodyAD import ConnectionHandler
 import sys, argparse, types
 
 # For dynamic argparse
@@ -38,14 +38,7 @@ def main():
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
     )
 
-    # Find list of functions and their arguments in modules.py
-    # And add them all as subparsers
     subparsers = parser.add_subparsers(title="Commands")
-    for name, f in functions:
-        subparser = subparsers.add_parser(name, prog=f.__doc__)
-        subparser.add_argument("func_args", nargs="*")
-        subparser.set_defaults(func=f)
-
     # Iterates all submodules in module package and creates one parser per submodule
     for importer, submodname, ispkg in iter_modules(cli_modules.__path__):
         subparser = subparsers.add_parser(
@@ -88,8 +81,12 @@ def main():
                 if param_signature.default is param_signature.empty:
                     arg_name = param_name
                 else:
-                    param_name = param_name.replace("_", "-")
-                    arg_name = f"--{param_name}"
+                    # If param with one letter only add just one dash
+                    if len(param_name) < 2:
+                        arg_name = f"-{param_name}"
+                    else:
+                        param_name = param_name.replace("_", "-")
+                        arg_name = f"--{param_name}"
                     parser_args["default"] = param_signature.default
 
                 # If param_type is not a string describing a type it's a literal with a restricted set of values
@@ -99,6 +96,9 @@ def main():
                 else:
                     if param_value.__name__ == "bool":
                         parser_args["action"] = "store_true"
+                    elif param_value.__name__ == "list":
+                        parser_args["action"] = "append"
+                        parser_args["type"] = str
                     else:
                         parser_args["type"] = param_value
 
@@ -114,16 +114,7 @@ def main():
 
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1 : args.func.__code__.co_argcount]
-    if "func_args" in args:
-        param_values = args.func_args
-        if len(param_values) > len(param_names):
-            print("You provided too many arguments\n")
-            print(args.func.__name__ + ":")
-            print(args.func.__doc__)
-            sys.exit(1)
-        params = {param_names[i]: param_values[i] for i in range(len(param_values))}
-    else:
-        params = {param_name: vars(args)[param_name] for param_name in param_names}
+    params = {param_name: vars(args)[param_name] for param_name in param_names}
 
     # Launch the command
     conn = ConnectionHandler(args=args)
@@ -135,21 +126,43 @@ def main():
     output_type = type(output)
     if not output or output_type == bool:
         return
+
     if output_type not in [list, dict, types.GeneratorType]:
-        print(output)
+        print("\n" + output)
         return
-    isFirst = True
+
     for entry in output:
-        if not isFirst:
-            print()
-        for attr_name in entry:
-            attr = entry[attr_name]
-            if type(attr) not in [list, types.GeneratorType]:
-                print(f"{attr_name}: {attr}")
-            else:
-                for attr_member in attr:
-                    print(f"{attr_name}: {attr_member}")
-        isFirst = False
+        print()
+        for attr_name, attr_val in entry.items():
+            entry_str = print_entry(attr_name, attr_val)
+            if entry_str:
+                print(f"{attr_name}: {entry_str}")
+            # attr = entry[attr_name]
+            # if type(attr) not in [list, types.GeneratorType]:
+            #     print(f"{attr_name}: {attr}")
+            # else:
+            #     i = 0
+            #     dict_entries = ""
+            #     simple_entries = f"{attr_name}: "
+            #     isSimple = False
+            #     for attr_member in attr:
+            #         if type(attr_member) == dict:
+            #             for k,v in attr_member.items():
+            #                 if type(v) in [list, set]:
+            #                     rendered_v = ', '.join([str(item) for item in v])
+            #                 else:
+            #                     rendered_v = str(v)
+            #                 dict_entries += f"{attr_name}.{i}.{k}: {rendered_v}\n"
+            #             i += 1
+            #         else:
+            #             isSimple = True
+            #             simple_entries += f"{attr_member}, "
+            #     rendered_entries = dict_entries
+            #     if isSimple:
+            #         # Replaces last ", " with newline
+            #         simple_entries = simple_entries[:-2] + "\n"
+            #         rendered_entries += simple_entries
+            #     print(rendered_entries, end='')
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -159,6 +172,26 @@ def main():
 def doc_parser(doc):
     doc_parsed = doc.splitlines()
     return doc_parsed[1], doc_parsed[3:-1]
+
+
+def print_entry(entryname, entry):
+    if type(entry) in [list, set, types.GeneratorType]:
+        i = 0
+        simple_entries = []
+        for v in entry:
+            entry_str = print_entry(f"{entryname}.{i}", v)
+            i += 1
+            if entry_str:
+                simple_entries.append(entry_str)
+        if simple_entries:
+            print(f"{entryname}: {'; '.join([str(v) for v in simple_entries])}")
+    elif type(entry) is dict:
+        for k in entry:
+            entry_str = print_entry(f"{entryname}.{k}", entry[k])
+            if entry_str:
+                print(f"{entryname}.{k}: {entry_str}")
+    else:
+        return entry
 
 
 if __name__ == "__main__":

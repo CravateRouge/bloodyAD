@@ -102,7 +102,7 @@ class Record(Structure):
         else:
             raise TypeError(f"{dnstype} not supported")
 
-        self["Data"] = record_data
+        self["Data"] = record_data.getData()
 
 
 class DNS_RPC_RECORD_A(Structure):

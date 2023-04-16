@@ -1,5 +1,5 @@
 from bloodyAD.patch import ldap3_patch
-from bloodyAD.formatters import formatters, accesscontrol
+from bloodyAD.formatters import formatters, accesscontrol, helpers
 from bloodyAD.formatters.formatters import (
     formatFunctionalLevel,
     formatGMSApass,
@@ -8,12 +8,13 @@ from bloodyAD.formatters.formatters import (
     formatAccountControl,
     formatDnsRecord,
     formatKeyCredentialLink,
+    formatWellKnownObjects,
 )
-from bloodyAD.exceptions import NoResultError, TooManyResultsError
+from bloodyAD.exceptions import NoResultError, TooManyResultsError, BloodyError
 import re, ssl
-from functools import cached_property
+from functools import cached_property, lru_cache
 import ldap3
-from ldap3.protocol.formatters.formatters import format_sid
+from ldap3.protocol.formatters.formatters import format_sid, format_uuid_le
 
 
 class Ldap(ldap3.Connection):
@@ -37,6 +38,8 @@ class Ldap(ldap3.Connection):
                 "msDS-KeyCredentialLink": formatKeyCredentialLink,
                 "tokenGroups": format_sid,
                 "tokenGroupsNoGCAcceptable": format_sid,
+                "wellKnownObjects": formatWellKnownObjects,
+                "schemaIDGUID": format_uuid_le,
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True, "auto_range": True}
@@ -85,7 +88,7 @@ class Ldap(ldap3.Connection):
         else:
             self.bind()
 
-        formatters.helpers.ldap_conn = self
+        helpers.ldap_conn = self
 
         self.domainNC = self.server.info.other["defaultNamingContext"][0]
         self.configNC = self.server.info.other["configurationNamingContext"][0]
@@ -96,6 +99,15 @@ class Ldap(ldap3.Connection):
                 continue
             self.appNCs.append(nc)
 
+    def bloodyadd(self, target, **kwargs):
+        self.add(self.dnResolver(target), **kwargs)
+        if self.result["description"] != "success":
+            raise BloodyError(self.result["description"])
+
+    def bloodydelete(self, target, *args):
+        self.delete(self.dnResolver(target), *args)
+
+    @lru_cache
     def dnResolver(self, identity, objtype=None):
         """
         Return the DN for the object based on the parameters identity
@@ -132,6 +144,11 @@ class Ldap(ldap3.Connection):
             raise NoResultError(self.domainNC, ldap_filter)
 
         return dn
+
+    def bloodymodify(self, target, *args):
+        self.modify(self.dnResolver(target), *args)
+        if self.result["description"] != "success":
+            raise BloodyError(self.result["description"])
 
     @cached_property
     def policy(self):
@@ -184,15 +201,21 @@ class Ldap(ldap3.Connection):
             + accesscontrol.GROUP_SECURITY_INFORMATION
             + accesscontrol.DACL_SECURITY_INFORMATION
         ),
+        controls=None,
         op_attr=False,
         generator=False,
         raw=False,
     ):
-        base_dn = self.dnResolver(base)
+        # Handles corner case where querying default partitions (no dn provided for that)
+        if base:
+            base_dn = self.dnResolver(base)
+        else:
+            base_dn = base
 
-        controls = ldap3.protocol.microsoft.security_descriptor_control(
-            sdflags=control_flag
-        )
+        if not controls:
+            controls = ldap3.protocol.microsoft.security_descriptor_control(
+                sdflags=control_flag
+            )
 
         entries = self.extend.standard.paged_search(
             base_dn,
@@ -206,12 +229,13 @@ class Ldap(ldap3.Connection):
             generator=generator,
         )
 
-        if not any(entries):
-            raise NoResultError(base_dn, ldap_filter)
-
         attrtype = "raw_attributes" if raw else "attributes"
         dntype = "raw_dn" if raw else "dn"
+        isNul = True
         for entry in entries:
-            if not attrtype in entry:
+            if attrtype not in entry:
                 continue
+            isNul = False
             yield {**{"distinguishedName": entry[dntype]}, **entry[attrtype]}
+        if isNul:
+            raise NoResultError(base_dn, ldap_filter)

@@ -17,7 +17,7 @@ ATTRIBUTE_SECURITY_INFORMATION = 0x00000020
 SCOPE_SECURITY_INFORMATION = 0x00000040
 BACKUP_SECURITY_INFORMATION = 0x00010000
 
-# https://docs.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
+# https://docs.microsoft.com/en-us/windows/win32/api/iads/ne-iads-ads_rights_enum
 ACCESS_FLAGS = {
     # Flag constants
     "GENERIC_READ": 0x80000000,
@@ -81,10 +81,6 @@ ACCOUNT_FLAGS = {
     "TRUSTED_TO_AUTH_FOR_DELEGATION": 0x1000000,
     "PARTIAL_SECRETS_ACCOUNT": 0x04000000,
 }
-
-
-# https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
-WELLKNOWN_DOMAIN_RID = {513: "Domain Users"}
 
 
 @lru_cache

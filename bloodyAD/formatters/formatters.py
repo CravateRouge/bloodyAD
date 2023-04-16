@@ -3,14 +3,9 @@ from bloodyAD.formatters import (
     common,
     cryptography,
     dns,
-    ldaptypes,
-    helpers,
 )
-from bloodyAD import formatters
 import base64
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
-
-RESOLVING = False
 
 
 def formatAccountControl(userAccountControl):
@@ -23,23 +18,7 @@ def formatAccountControl(userAccountControl):
 
 
 def formatSD(sd_bytes):
-    if not RESOLVING:
-        return SECURITY_DESCRIPTOR.from_bytes(sd_bytes).to_sddl()
-
-    sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_bytes)
-    pretty_sd = {}
-    if sd["OffsetOwner"] != 0:
-        pretty_sd["Owner"] = helpers.resolveSid(sd["OwnerSid"].formatCanonical())
-    if sd["OffsetGroup"] != 0:
-        pretty_sd["Group"] = helpers.resolveSid(sd["GroupSid"].formatCanonical())
-    if sd["OffsetSacl"] != 0:
-        pretty_sd["Sacl"] = base64.b64encode(sd["Sacl"].getData())
-    if sd["OffsetDacl"] != 0:
-        pretty_aces = []
-        for ace in sd["Dacl"].aces:
-            pretty_aces.append(accesscontrol.decodeAce(ace))
-        pretty_sd["Dacl"] = pretty_aces
-    return pretty_sd
+    return SECURITY_DESCRIPTOR.from_bytes(sd_bytes).to_sddl()
 
 
 def formatFunctionalLevel(behavior_version):
@@ -63,13 +42,21 @@ def formatSchemaVersion(objectVersion):
 def formatGMSApass(managedPassword):
     gmsa_blob = cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword)
     ntlm_hash = "aad3b435b51404eeaad3b435b51404ee:" + gmsa_blob.toNtHash()
-    return (
-        f"NTLM {ntlm_hash} B64ENCODED {base64.b64encode(gmsa_blob['CurrentPassword'])}"
-    )
+    return {
+        "NTLM": ntlm_hash,
+        "B64ENCODED": base64.b64encode(gmsa_blob["CurrentPassword"]).decode(),
+    }
 
 
 def formatDnsRecord(dns_record):
     return dns.Record(dns_record).toDict()
+
+
+def formatWellKnownObjects(wellKnown_object):
+    dn_binary = common.DNBinary(wellKnown_object)
+    if dn_binary.binary_value in common.WELLKNOWN_GUID:
+        dn_binary.binary_value = common.WELLKNOWN_GUID[dn_binary.binary_value]
+    return dn_binary
 
 
 def formatKeyCredentialLink(key_dnbinary):
