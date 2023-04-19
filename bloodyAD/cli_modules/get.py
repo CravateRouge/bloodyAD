@@ -78,19 +78,25 @@ def dnsDump(conn, zone: str = None, detail: bool = False):
             yield_entry = {"domain": domain_name}
             for record in entry["dnsRecord"]:
                 try:
+                    if record["Type"] not in yield_entry:
+                        yield_entry[record["Type"]] = []
                     if record["Type"] in ["A", "AAAA", "NS", "CNAME", "PTR", "TXT"]:
-                        yield_entry[record["Type"]] = record["Data"]
+                        yield_entry[record["Type"]].append(record["Data"])
                     elif record["Type"] == "MX":
-                        yield_entry[record["Type"]] = record["Data"]["Name"]
+                        yield_entry[record["Type"]].append(record["Data"]["Name"])
                     elif record["Type"] == "SRV":
-                        yield_entry[record["Type"]] = (
+                        yield_entry[record["Type"]].append(
                             f"{record['Data']['Target']}:{record['Data']['Port']}"
                         )
                     elif record["Type"] == "SOA":
-                        yield_entry[record["Type"]] = [
-                            record["Data"]["PrimaryServer"],
-                            record["Data"]["zoneAdminEmail"].replace(".", "@", 1),
-                        ]
+                        yield_entry[record["Type"]].append(
+                            {
+                                "PrimaryServer": record["Data"]["PrimaryServer"],
+                                "zoneAdminEmail": record["Data"][
+                                    "zoneAdminEmail"
+                                ].replace(".", "@", 1),
+                            }
+                        )
                 except KeyError:
                     LOG.error("[-] KeyError for record: " + record)
                     continue
@@ -104,11 +110,6 @@ def membership(conn, target: str, no_recurse: bool = False):
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
     """
-    # We fetch primaryGroupID, since this group is not reflected in memberOf
-    # Additionally we get objectSid to have the domain sid
-    # it is helpful to resolve the primary group RID to a DN
-    # Finally we add the special identity groups: Authenticated Users and Everyone
-
     filter = ""
     if no_recurse:
         entries = conn.ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
@@ -150,7 +151,7 @@ def object(
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param attr: name of the attribute to retrieve, retrieves all the attributes by default
-    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved !!resolving can take some time!!
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see documentation/accesscontrol.md for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     """
     entries = conn.ldap.bloodysearch(target, attr=attr, raw=raw)
@@ -171,6 +172,7 @@ def search(
     searchbase: str,
     filter: str = "(objectClass=*)",
     attr: str = "*",
+    resolve_sd: bool = False,
     raw: bool = False,
 ):
     """
@@ -179,6 +181,7 @@ def search(
     :param searchbase: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)
     :param attr: attributes to retrieve separated by a comma
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see documentation/accesscontrol.md for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     """
     entries = conn.ldap.bloodysearch(
@@ -189,8 +192,16 @@ def search(
         raw=raw,
         generator=True,
     )
-
-    return utils.renderSearchResult(entries)
+    rendered_entries = utils.renderSearchResult(entries)
+    if resolve_sd and not raw:
+        for entry in rendered_entries:
+            if "nTSecurityDescriptor" in entry:
+                entry["nTSecurityDescriptor"] = utils.renderSD(
+                    entry["nTSecurityDescriptor"], conn
+                )
+            yield entry
+    else:
+        yield from rendered_entries
 
 
 # TODO: Search writable for application partitions too?

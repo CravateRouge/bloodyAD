@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-from bloodyAD import cli_modules
-from bloodyAD import ConnectionHandler
+from bloodyAD import cli_modules, ConnectionHandler, utils
 import sys, argparse, types
 
 # For dynamic argparse
@@ -36,6 +35,13 @@ def main():
     parser.add_argument(
         "--host",
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Adjust output verbosity",
+        choices=["QUIET", "INFO", "DEBUG"],
+        default="INFO",
     )
 
     subparsers = parser.add_subparsers(title="Commands")
@@ -116,6 +122,8 @@ def main():
     param_names = args.func.__code__.co_varnames[1 : args.func.__code__.co_argcount]
     params = {param_name: vars(args)[param_name] for param_name in param_names}
 
+    LOGGING_LEVELS = {"QUIET": 50, "INFO": 20, "DEBUG": 10}
+    utils.LOG.setLevel(LOGGING_LEVELS[args.verbose])
     # Launch the command
     conn = ConnectionHandler(args=args)
     output = args.func(conn, **params)
@@ -137,32 +145,6 @@ def main():
             entry_str = print_entry(attr_name, attr_val)
             if entry_str:
                 print(f"{attr_name}: {entry_str}")
-            # attr = entry[attr_name]
-            # if type(attr) not in [list, types.GeneratorType]:
-            #     print(f"{attr_name}: {attr}")
-            # else:
-            #     i = 0
-            #     dict_entries = ""
-            #     simple_entries = f"{attr_name}: "
-            #     isSimple = False
-            #     for attr_member in attr:
-            #         if type(attr_member) == dict:
-            #             for k,v in attr_member.items():
-            #                 if type(v) in [list, set]:
-            #                     rendered_v = ', '.join([str(item) for item in v])
-            #                 else:
-            #                     rendered_v = str(v)
-            #                 dict_entries += f"{attr_name}.{i}.{k}: {rendered_v}\n"
-            #             i += 1
-            #         else:
-            #             isSimple = True
-            #             simple_entries += f"{attr_member}, "
-            #     rendered_entries = dict_entries
-            #     if isSimple:
-            #         # Replaces last ", " with newline
-            #         simple_entries = simple_entries[:-2] + "\n"
-            #         rendered_entries += simple_entries
-            #     print(rendered_entries, end='')
 
 
 # Gets unparsed doc and returns a tuple of two values

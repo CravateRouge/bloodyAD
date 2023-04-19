@@ -429,17 +429,15 @@ class LazySid:
 
 def aceFactory(k, a):
     if k == "Trustee":
-        return {k: LazySid(a)}
+        return LazySid(a)
     elif k == "Right":
-        return {k: Right(a)}
-    elif k == "ObjectType":
-        return {k: LazyGuid(a)}
-    elif k == "InheritedObjectType":
-        return {k: LazyGuid(a)}
+        return Right(a)
+    elif k in ("ObjectType", "InheritedObjectType"):
+        return LazyGuid(a)
     elif k == "Flags":
-        return {k: AceFlag(a)}
+        return AceFlag(a)
     else:
-        return {k: a}
+        return a
 
 
 def renderSD(sddl, conn):
@@ -485,12 +483,14 @@ def renderSD(sddl, conn):
             if not v:
                 continue
             try:
+                typed_ace[k] = []
                 for a in v:  # If it's a set of guids/sids
-                    typed_ace |= aceFactory(k, a)
+                    typed_ace[k].append(aceFactory(k, a))
             except TypeError:  # If it's a mask
-                typed_ace |= aceFactory(k, v)
+                typed_ace[k] = aceFactory(k, v)
 
         typed_aces.append(typed_ace)
+
     renderedSD["ACL"] = typed_aces
 
     return renderedSD

@@ -59,7 +59,7 @@ distinguishedName: CN=ForeignSecurityPrincipals,DC=crash,DC=lab
 
 ## Get Kerberoastable accounts
 ```
-python bloodyAD.py -u user -p 'totoTOTOtoto1234*' -d crash.lab --host 10.100.10.5 search 'DC=crash,DC=lab' --filter '(&(samAccountType=805306368)(servicePrincipalName=*))' --attr sAMAccountName | grep sAMAccountName | cut -d ' ' -f 2
+python bloodyAD.py -u user -p 'totoTOTOtoto1234*' -d crash.lab --host 10.100.10.5 get search 'DC=crash,DC=lab' --filter '(&(samAccountType=805306368)(servicePrincipalName=*))' --attr sAMAccountName | grep sAMAccountName | cut -d ' ' -f 2
 
 krbtgt
 iis_user
@@ -67,7 +67,7 @@ iis_user
 
 ## Get accounts that do not require Kerberos pre-authentication (AS-REP)
 ```
-> python bloodyAD.py -u user -p 'totoTOTOtoto1234*' -d crash.lab --host 10.100.10.5 search 'DC=crash,DC=lab' --filter '(&(userAccountControl:1.2.840.113556.1.4.803:=4194304)(!(UserAccountControl:1.2.840.113556.1.4.803:=2)))' --attr sAMAccountName  
+> python bloodyAD.py -u user -p 'totoTOTOtoto1234*' -d crash.lab --host 10.100.10.5 get search 'DC=crash,DC=lab' --filter '(&(userAccountControl:1.2.840.113556.1.4.803:=4194304)(!(UserAccountControl:1.2.840.113556.1.4.803:=2)))' --attr sAMAccountName  
 
 distinguishedName: CN=Unix,CN=Users,DC=crash,DC=lab
 sAMAccountName: unix

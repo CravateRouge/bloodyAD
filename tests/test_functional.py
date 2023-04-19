@@ -368,14 +368,21 @@ class TestModules(unittest.TestCase):
                 "50",
             ],
         )
-        self.toTear.append(
-            (
-                self.launchBloody,
-                self.user,
-                ["remove", "dnsRecord", "test.domain", "8.8.8.8", "--ttl", "50"],
-            )
-        )
+
         self.assertRegex(
+            self.launchBloody(
+                self.user,
+                ["get", "dnsDump", "--zone", self.domain, "--detail"],
+            ),
+            "test.domain",
+        )
+
+        self.launchBloody(
+            self.user,
+            ["remove", "dnsRecord", "test.domain", "8.8.8.8", "--ttl", "50"],
+        )
+
+        self.assertNotRegex(
             self.launchBloody(
                 self.user,
                 ["get", "dnsDump", "--zone", self.domain, "--detail"],

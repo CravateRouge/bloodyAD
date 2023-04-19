@@ -53,11 +53,11 @@ class KEYCREDENTIALLINK_ENTRY(Structure):
         if identifier:
             self["Identifier"] = self.identifiers[identifier]
 
-    def toString(self):
-        identifier = {
+    def toDict(self):
+        identifier = [
             i for i in self.identifiers if self.identifiers[i] == self["Identifier"]
-        }
-        return f"{identifier}:{self['Value']}"
+        ][0]
+        return {identifier: self["Value"].hex()}
 
 
 class KEYCREDENTIALLINK_BLOB(Structure):
@@ -72,7 +72,7 @@ class KEYCREDENTIALLINK_BLOB(Structure):
 
     # Structure class doesn't handle correctly unpacking variable size array with custom format
     # so we have to do it ourselves. First we take it as raw data and then we're unpacking it
-    # using the underlying entry structure with length header
+    # using the underlying entry structure with header length
     def __init__(self, data=None, **kwargs):
         if data:
             self.structure = (("KEYCREDENTIALLINK_ENTRY_LIST", ":"),)
@@ -108,11 +108,12 @@ class KEYCREDENTIALLINK_BLOB(Structure):
 
         self["KEYCREDENTIALLINK_ENTRY_LIST"] = [key_id, key_material]
 
-    def toString(self):
-        entries_str = ""
-        for entry in self["KEYCREDENTIALLINK_ENTRY_LIST"]:
-            entries_str += entry.toString() + "\n"
-        return entries_str
+    def toDict(self):
+        return {
+            k: v
+            for entry in self["KEYCREDENTIALLINK_ENTRY_LIST"]
+            for k, v in entry.toDict().items()
+        }
 
     def getKeyID(self):
         return [

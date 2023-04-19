@@ -85,10 +85,12 @@ def dnsRecord(
     record_dn = f"DC={name}{zone_dn}"
 
     record_to_remove = None
-    for raw_record in next(
-        conn.ldap.bloodysearch(record_dn, attr="dnsRecord", raw=True)
-    )["dnsRecord"]:
+    dns_list = next(conn.ldap.bloodysearch(record_dn, attr="dnsRecord", raw=True))[
+        "dnsRecord"
+    ]
+    for raw_record in dns_list:
         record = dns.Record(raw_record)
+        print(record.toDict())
         tmp_record = dns.Record()
 
         if not ttl:
@@ -112,9 +114,12 @@ def dnsRecord(
         LOG.warning("[!] Record not found")
         return
 
-    conn.ldap.bloodymodify(
-        record_dn, {"dnsRecord": (ldap3.MODIFY_DELETE, record_to_remove)}
-    )
+    if len(dns_list) > 1:
+        conn.ldap.bloodymodify(
+            record_dn, {"dnsRecord": (ldap3.MODIFY_DELETE, record_to_remove)}
+        )
+    else:
+        conn.ldap.bloodydelete(record_dn)
 
     LOG.info(f"[-] Given record has been successfully removed from {name}")
 

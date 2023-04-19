@@ -3,10 +3,6 @@ from typing import Literal
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
-from ldap3.core.exceptions import (
-    LDAPEntryAlreadyExistsResult,
-    LDAPAttributeOrValueExistsResult,
-)
 import ldap3
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -146,42 +142,53 @@ def dnsRecord(
     else:
         zone_type = "DomainDnsZones"
 
-    zone_dn = f",DC={zone},CN=MicrosoftDNS,DC={zone_type}{naming_context}"
-    record_dn = f"DC={name}{zone_dn}"
+    zone_dn = f"DC={zone},CN=MicrosoftDNS,DC={zone_type}{naming_context}"
+    record_dn = None
 
     serial = None
-    for dns_record in next(conn.ldap.bloodysearch(f"DC=@{zone_dn}", attr="dnsRecord"))[
-        "dnsRecord"
-    ]:
-        if dns_record.get("Type") == "SOA":
-            serial = dns_record["Data"]["SerialNo"]
-            break
+    new_dnsrecord_list = None
+    ldap_filter = f"(|(name=@)(name={name}))"
+    for entry in conn.ldap.bloodysearch(
+        zone_dn,
+        ldap_filter=ldap_filter,
+        search_scope=ldap3.SUBTREE,
+        attr=["name", "dnsRecord"],
+        raw=True,
+    ):
+        if entry["name"][0] == b"@":
+            for raw_record in entry["dnsRecord"]:
+                dns_record = dns.Record(raw_record).toDict()
+                if dns_record.get("Type") == "SOA":
+                    serial = dns_record["Data"]["SerialNo"]
+                    break
+        else:
+            record_dn = entry["distinguishedName"].decode()
+            new_dnsrecord_list = entry["dnsRecord"]
 
-    dns_record = dns.Record()
-    dns_record.fromDict(
+    if not serial:
+        raise BloodyError(f"No '@' entry found in '{zone_dn}' with '{ldap_filter}'")
+    new_dnsrecord = dns.Record()
+    new_dnsrecord.fromDict(
         data, dnstype, ttl, rank, serial, preference, port, priority, weight
     )
-    record_attr = {
-        "objectClass": ["top", "dnsNode"],
-        "dnsRecord": dns_record.getData(),
-        "dNSTombstoned": False,
-    }
 
-    try:
+    if not record_dn:
+        record_dn = f"DC={name},{zone_dn}"
+        record_attr = {
+            "objectClass": ["top", "dnsNode"],
+            "dnsRecord": new_dnsrecord.getData(),
+            "dNSTombstoned": False,
+        }
         conn.ldap.bloodyadd(record_dn, attributes=record_attr)
-        success_log = f"[+] {name} has been successfully added"
-    except LDAPEntryAlreadyExistsResult:
-        try:
-            conn.ldap.bloodymodify(
-                record_dn, {"dnsRecord": [ldap3.MODIFY_ADD, record_attr["dnsRecord"]]}
-            )
-            success_log = f"[+] {name} has been successfully updated"
-        except LDAPAttributeOrValueExistsResult:
-            LOG.warning(f"[!] {name} has already a record of this type")
-            LOG.warning("[!] Record not updated")
-            return
+        LOG.info(f"[+] {name} has been successfully added")
+        return
 
-    LOG.info(success_log)
+    new_dnsrecord_list.append(new_dnsrecord.getData())
+    print(new_dnsrecord_list)
+    conn.ldap.bloodymodify(
+        record_dn, {"dnsRecord": [ldap3.MODIFY_REPLACE, new_dnsrecord_list]}
+    )
+    LOG.info(f"[+] {name} has been successfully updated")
 
 
 def genericAll(conn, target: str, trustee: str):

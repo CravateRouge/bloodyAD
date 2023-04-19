@@ -62,4 +62,4 @@ def formatWellKnownObjects(wellKnown_object):
 def formatKeyCredentialLink(key_dnbinary):
     return cryptography.KEYCREDENTIALLINK_BLOB(
         common.DNBinary(key_dnbinary).value
-    ).toString()
+    ).toDict()

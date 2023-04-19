@@ -65,9 +65,7 @@ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac
 List of all available functions:
 
 ```ps1
-usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST]
-                   {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,search,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl,add,get,remove}
-                   ...
+usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST] [-v {QUIET,INFO,DEBUG}] {add,get,remove,set} ...
 
 AD Privesc Swiss Army Knife
 
@@ -84,12 +82,15 @@ options:
                         Certificate authentication, e.g: "path/to/key:path/to/cert"
   -s, --secure          Try to use LDAP over TLS aka LDAPS (default is LDAP)
   --host HOST           Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)
+  -v {QUIET,INFO,DEBUG}, --verbose {QUIET,INFO,DEBUG}
+                        Adjust output verbosity
 
 Commands:
-  {getObjectAttributes,setAttribute,addUser,addComputer,delObject,changePassword,addObjectToGroup,addForeignObjectToGroup,delObjectFromGroup,getChildObjects,search,setShadowCredentials,setGenericAll,setOwner,setRbcd,setDCSync,setUserAccountControl,add,get,remove}
+  {add,get,remove,set}
     add                 [ADD] function category
     get                 [GET] function category
     remove              [REMOVE] function category
+    set                 [SET] function category
 ```
 
 Help text to use a specific function:
@@ -109,7 +110,7 @@ options:
 
 ## How it works
 
-bloodyAD communicates with a DC using mainly the LDAP protocol in order to get information or add/modify/delete AD objects. ~~A password cannot be updated with LDAP, it must be a secure connection that is LDAPS or SAMR. A DC doesn't have LDAPS activated by default because it must be configured (with a certificate) so SAMR is used in those cases.~~ Exchange of sensitive information such as passwords are now supported using cleartext LDAP.
+bloodyAD communicates with a DC using mainly the LDAP protocol in order to get information or add/modify/delete AD objects. Exchange of sensitive information such as passwords without LDAPS are now supported.
 
 ## Useful commands
 
