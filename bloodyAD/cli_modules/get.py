@@ -282,6 +282,8 @@ def writable(
                     continue
                 key_names = attr_params[attr_name]["lambda"](entry[attr_name])
                 for name in key_names:
+                    if name == "distinguishedName":
+                        name = "dn"
                     if name not in right_entry:
                         right_entry[name] = []
                     right_entry[name].append(attr_params[attr_name]["right"])

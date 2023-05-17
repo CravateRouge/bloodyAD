@@ -251,7 +251,7 @@ class Control:
         self.control_enum = control_enum
 
     def __str__(self):
-        flag_str = str(self.control_enum).split(".")[1]
+        flag_str = repr(self.control_enum).split(".")[1].split(":")[0]
         flag_str = flag_str.replace("SE_", "")
         return flag_str
 
@@ -266,7 +266,7 @@ class AceType:
         return self.acetype_enum == o.acetype_enum
 
     def __str__(self):
-        flag_str = str(self.acetype_enum).split(".")[1]
+        flag_str = repr(self.acetype_enum).split(".")[1].split(":")[0]
         flag_str = flag_str.replace("ACCESS_", "")
         flag_str = flag_str.replace("SYSTEM_", "")
         flag_str = flag_str.replace("_ACE_TYPE", "")
@@ -278,7 +278,7 @@ class AceFlag:
         self.aceflag_enum = aceflag_enum
 
     def __str__(self):
-        flag_str = str(self.aceflag_enum).split(".")[1]
+        flag_str = repr(self.aceflag_enum).split(".")[1].split(":")[0]
         flag_str = flag_str.replace("_ACE_FLAG", "")
         flag_str = flag_str.replace("_ACE", "")
         return flag_str
@@ -287,8 +287,9 @@ class AceFlag:
 class LazyAdSchema:
     guids = set()
     sids = set()
-    guid_dict = adschema.OBJECT_TYPES | {
-        "Self": "Self"
+    guid_dict = {
+        **adschema.OBJECT_TYPES,
+        "Self": "Self",
     }  # Special object to design rule applies to self
     sid_dict = dtyp.sid.well_known_sids_sid_name_map
     isResolved = False
