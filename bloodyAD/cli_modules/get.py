@@ -1,49 +1,57 @@
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from typing import Literal
+import re
 import ldap3
 from ldap3.core.exceptions import LDAPNoSuchObjectResult
 
 
-def children(conn, target: str, type: str = "*"):
+def children(conn, target: str, type: str = "*", direct: bool = False):
     """
     Lists children for a given target object
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param type: objectClass of object to fetch: user, computer, group, organizationalUnit, container, groupPolicyContainer, etc
+    :param direct: Fetch only direct children of target
     """
+    scope = ldap3.LEVEL if direct else ldap3.SUBTREE
     return conn.ldap.bloodysearch(
-        target, f"(objectClass={type})", search_scope=ldap3.SUBTREE, attr=""
+        target,
+        f"(&(objectClass={type})(!(distinguishedName={target})))",
+        search_scope=scope,
+        attr="",
     )
 
 
 # TODO: Fetch records from Global Catalog and also other partitions stored on other DC if possible
-def dnsDump(conn, zone: str = None, detail: bool = False):
+def dnsDump(conn, zone: str = None, no_detail: bool = False):
     """
-    Retrieves DNS records of the Active Directory readable by the user
+    Retrieves DNS records of the Active Directory readable/listable by the user
 
     :param zone: if set, prints only records in this zone
-    :param detail: if set includes system records such as _ldap, _kerberos...
+    :param no_detail: if set doesn't include system records such as _ldap, _kerberos, @, etc
     """
     entries = None
     filter = "(|(objectClass=dnsNode)(objectClass=dnsZone))"
+    prefix_blacklist = [
+        "gc",
+        "_gc.*",
+        "_kerberos.*",
+        "_kpasswd.*",
+        "_ldap.*",
+        "_msdcs",
+        "@",
+        "DomainDnsZones",
+        "ForestDnsZones",
+    ]
 
-    if not detail:
+    if no_detail:
         prefix_filter = ""
-        for prefix in [
-            "gc",
-            "_gc.*",
-            "_kerberos.*",
-            "_kpasswd.*",
-            "_ldap.*",
-            "_msdcs",
-            "@",
-            "DomainDnsZones",
-            "ForestDnsZones",
-        ]:
+        for prefix in prefix_blacklist:
             prefix_filter += f"(!(name={prefix}))"
         filter = f"(&{filter}{prefix_filter})"
 
+    dnsZones = []
     for nc in conn.ldap.appNCs + [conn.ldap.domainNC]:
         try:
             entries = conn.ldap.bloodysearch(
@@ -55,7 +63,6 @@ def dnsDump(conn, zone: str = None, detail: bool = False):
         except LDAPNoSuchObjectResult:
             continue
 
-        dnsZones = []
         for entry in entries:
             domain_suffix = entry["distinguishedName"].split(",")[1]
             domain_suffix = domain_suffix.split("=")[1]
@@ -113,33 +120,40 @@ def dnsDump(conn, zone: str = None, detail: bool = False):
                     continue
             yield yield_entry
 
-        # List record names if we have list child right on dnsZone but no READ_PROP on record object
-        for dnsZone in dnsZones:
-            try:
-                entries = conn.ldap.bloodysearch(
-                    dnsZone,
-                    f"(objectClass=*)",
-                    search_scope=ldap3.SUBTREE,
-                    attr="objectClass",
-                )
-            except LDAPNoSuchObjectResult:
+    # List record names if we have list child right on dnsZone or MicrosoftDNS container but no READ_PROP on record object
+    for nc in conn.ldap.appNCs:
+        dnsZones.append(f"CN=MicrosoftDNS,{nc}")
+    dnsZones.append(f"CN=MicrosoftDNS,CN=System,{conn.ldap.domainNC}")
+    for searchbase in dnsZones:
+        try:
+            entries = conn.ldap.bloodysearch(
+                searchbase,
+                f"(objectClass=*)",
+                search_scope=ldap3.SUBTREE,
+                attr="objectClass",
+            )
+        except LDAPNoSuchObjectResult:
+            continue
+        for entry in entries:
+            if entry["objectClass"] or entry["distinguishedName"] == searchbase:
                 continue
-            for entry in entries:
-                if entry["objectClass"]:
-                    continue
 
-                domain_parts = entry["distinguishedName"].split(",")
-                domain_suffix = domain_parts[1].split("=")[1]
-                domain_prefix = domain_parts[0].split("=")[1]
-                domain_name = f"{domain_prefix}.{domain_suffix}"
+            domain_parts = entry["distinguishedName"].split(",")
+            domain_suffix = domain_parts[1].split("=")[1]
 
-                ip_addr = domain_name.split(".in-addr.arpa")
-                if len(ip_addr) > 1:
-                    decimals = ip_addr[0].split(".")
-                    decimals.reverse()
-                    domain_name = ".".join(decimals)
+            domain_prefix = domain_parts[0].split("=")[1]
+            if no_detail and re.match("|".join(prefix_blacklist), domain_prefix):
+                continue
 
-                yield {"recordName": domain_name, "type": "ACCESS DENIED"}
+            domain_name = f"{domain_prefix}.{domain_suffix}"
+
+            ip_addr = domain_name.split(".in-addr.arpa")
+            if len(ip_addr) > 1:
+                decimals = ip_addr[0].split(".")
+                decimals.reverse()
+                domain_name = ".".join(decimals)
+
+            yield {"recordName": domain_name, "type": "ACCESS DENIED"}
 
 
 def membership(conn, target: str, no_recurse: bool = False):
