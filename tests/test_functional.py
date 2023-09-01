@@ -182,11 +182,15 @@ class TestModules(unittest.TestCase):
             ["add", "shadowCredentials", slave["username"], "--path", outfile2],
         )
         id_shado1 = re.search("sha256 of RSA key: (.+)", out_shado1).group(1)
+        import time
+
+        time.sleep(60)
         self.pkinit(slave["username"], outfile1)
         self.launchBloody(
             self.user,
             ["remove", "shadowCredentials", slave["username"], "--key", id_shado1],
         )
+
         self.pkinit(slave["username"], outfile2)
         self.launchBloody(self.user, ["remove", "shadowCredentials", slave["username"]])
 
@@ -421,8 +425,6 @@ class TestModules(unittest.TestCase):
                 [
                     "python3",
                     f"{self.pkinit_path}/gettgtpkinit.py",
-                    "-dc-ip",
-                    self.host,
                     "-cert-pem",
                     f"{outfile}_cert.pem",
                     "-key-pem",

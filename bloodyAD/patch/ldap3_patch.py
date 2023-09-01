@@ -454,10 +454,8 @@ def do_ntlm_bind(self, controls):
                             if log_enabled(PROTOCOL):
                                 log(
                                     PROTOCOL,
-                                    (
-                                        "NTLM SICILY NEGOTIATE response <%s>"
-                                        " received via <%s>"
-                                    ),
+                                    "NTLM SICILY NEGOTIATE response <%s>"
+                                    " received via <%s>",
                                     response[0],
                                     self,
                                 )
