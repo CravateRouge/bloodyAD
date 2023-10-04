@@ -1,4 +1,3 @@
-from functools import cached_property
 from dataclasses import dataclass
 from bloodyAD.network.ldap import Ldap
 
@@ -48,6 +47,7 @@ class Config:
 
 
 class ConnectionHandler:
+    _ldap = None
     def __init__(self, args=None, config=None):
         if args:
             scheme = "ldaps" if args.secure else "ldap"
@@ -64,22 +64,22 @@ class ConnectionHandler:
             cnf = config
         self.conf = cnf
 
-    @cached_property
+    @property
     def ldap(self):
-        return Ldap(self.conf)
+        if not self._ldap:
+            self._ldap = Ldap(self.conf)
+        return self._ldap
 
-    def getLdapConnection(self):
-        return self.ldap
-
-    def close(self):
-        self._closeLdap()
+    def rebind(self):
+        self._ldap.unbind()
+        self._ldap = Ldap(self.conf)
 
     def _closeLdap(self):
         if self.ldap:
-            self.ldap.unbind()
-            self.ldap = None
+            self._ldap.unbind()
+            self._ldap = None
 
     def switchUser(self, username, password):
         self.conf.username = username
         self.conf.password = password
-        self._closeLdap()
+        self.rebind()
