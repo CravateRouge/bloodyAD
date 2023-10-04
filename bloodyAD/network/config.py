@@ -48,6 +48,7 @@ class Config:
 
 class ConnectionHandler:
     _ldap = None
+
     def __init__(self, args=None, config=None):
         if args:
             scheme = "ldaps" if args.secure else "ldap"

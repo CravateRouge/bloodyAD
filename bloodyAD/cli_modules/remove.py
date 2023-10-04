@@ -9,7 +9,7 @@ import ldap3
 
 def dcsync(conn, trustee: str):
     """
-    Removes DCSync right for provided trustee
+    Remove DCSync right for provided trustee
 
     :param trustee: sAMAccountName, DN, GUID or SID of the trustee
     """
@@ -49,7 +49,7 @@ def dnsRecord(
     forest: bool = False,
 ):
     """
-    Removes a DNS record of an AD environment.
+    Remove a DNS record of an AD environment.
 
     :param name: name of the dnsNode object (hostname) which contains the record
     :param data: DNS record data
@@ -126,7 +126,7 @@ def dnsRecord(
 
 def genericAll(conn, target: str, trustee: str):
     """
-    Removes full control of trustee on target
+    Remove full control of trustee on target
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param trustee: sAMAccountName, DN, GUID or SID of the trustee
@@ -154,7 +154,7 @@ def genericAll(conn, target: str, trustee: str):
 
 def groupMember(conn, group: str, member: str):
     """
-    Removes member (user, group, computer) from group
+    Remove member (user, group, computer) from group
 
     :param group: sAMAccountName, DN, GUID or SID of the group
     :param member: sAMAccountName, DN, GUID or SID of the member
@@ -175,7 +175,7 @@ def groupMember(conn, group: str, member: str):
 
 def object(conn, target: str):
     """
-    Removes object (user, group, computer, organizational unit, etc)
+    Remove object (user, group, computer, organizational unit, etc)
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     """
@@ -185,7 +185,7 @@ def object(conn, target: str):
 
 def rbcd(conn, target: str, service: str):
     """
-    Removes Resource Based Constraint Delegation for service on target
+    Remove Resource Based Constraint Delegation for service on target
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param service: sAMAccountName, DN, GUID or SID of the service account
@@ -221,7 +221,7 @@ def rbcd(conn, target: str, service: str):
 
 def shadowCredentials(conn, target: str, key: str = None):
     """
-    Removes Key Credentials from target
+    Remove Key Credentials from target
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param key: RSA key of Key Credentials to remove from the target, removes all if key not specified
@@ -253,7 +253,7 @@ def shadowCredentials(conn, target: str, key: str = None):
 
 def uac(conn, target: str, f: list = None):
     """
-    Removes property flags altering user/computer object behavior
+    Remove property flags altering user/computer object behavior
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param f: name of property flag to remove, can be called multiple times if multiple flags to remove (e.g -f LOCKOUT  -f ACCOUNTDISABLE)

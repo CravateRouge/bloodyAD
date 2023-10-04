@@ -13,7 +13,7 @@ from bloodyAD.exceptions import BloodyError
 
 def computer(conn, hostname: str, password: str, ou: str = "DefaultOU"):
     """
-    Adds new computer
+    Add new computer
 
     :param hostname: computer name (without trailing $)
     :param password: password for computer
@@ -66,7 +66,7 @@ def computer(conn, hostname: str, password: str, ou: str = "DefaultOU"):
 
 def dcsync(conn, trustee: str):
     """
-    Adds DCSync right on domain to provided trustee (Requires to own or to have WriteDacl on domain object)
+    Add DCSync right on domain to provided trustee (Requires to own or to have WriteDacl on domain object)
 
     :param trustee: sAMAccountName, DN, GUID or SID of the trustee
     """
@@ -193,7 +193,7 @@ def dnsRecord(
 
 def genericAll(conn, target: str, trustee: str):
     """
-    Gives full control to trustee on target (you must own the object or have WriteDacl)
+    Give full control to trustee on target (you must own the object or have WriteDacl)
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param trustee: sAMAccountName, DN, GUID or SID of the trustee which will have full control on target
@@ -221,7 +221,7 @@ def genericAll(conn, target: str, trustee: str):
 
 def groupMember(conn, group: str, member: str):
     """
-    Adds a new member (user, group, computer) to group
+    Add a new member (user, group, computer) to group
 
     :param group: sAMAccountName, DN, GUID or SID of the group
     :param member: sAMAccountName, DN, GUID or SID of the member
@@ -242,7 +242,7 @@ def groupMember(conn, group: str, member: str):
 
 def rbcd(conn, target: str, service: str):
     """
-    Adds Resource Based Constraint Delegation for service on target, used to impersonate a user on target with service (Requires "Write" permission on target's msDS-AllowedToActOnBehalfOfOtherIdentity and Windows Server >= 2012)
+    Add Resource Based Constraint Delegation for service on target, used to impersonate a user on target with service (Requires "Write" permission on target's msDS-AllowedToActOnBehalfOfOtherIdentity and Windows Server >= 2012)
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param service: sAMAccountName, DN, GUID or SID of the service account
@@ -275,7 +275,7 @@ def rbcd(conn, target: str, service: str):
 
 def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     """
-    Adds Key Credentials to target, used to impersonate target with added credentials
+    Add Key Credentials to target, used to impersonate target with added credentials
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param path: filepath for the generated Key Credentials certificate
@@ -359,7 +359,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
 
 def uac(conn, target: str, f: list = None):
     """
-    Adds property flags altering user/computer object behavior
+    Add property flags altering user/computer object behavior
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param f: name of property flag to add, can be called multiple times if multiple flags to add (e.g -f DONT_REQ_PREAUTH  -f DONT_EXPIRE_PASSWORD)
@@ -404,7 +404,7 @@ def uac(conn, target: str, f: list = None):
 
 def user(conn, sAMAccountName: str, password: str, ou: str = "DefaultOU"):
     """
-    Adds a new user
+    Add a new user
 
     :param sAMAccountName: sAMAccountName for new user
     :param password: password for new user

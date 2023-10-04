@@ -8,7 +8,7 @@ from ldap3.core.exceptions import LDAPNoSuchObjectResult
 
 def children(conn, target: str, type: str = "*", direct: bool = False):
     """
-    Lists children for a given target object
+    List children for a given target object
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param type: objectClass of object to fetch: user, computer, group, organizationalUnit, container, groupPolicyContainer, etc
@@ -26,7 +26,7 @@ def children(conn, target: str, type: str = "*", direct: bool = False):
 # TODO: Fetch records from Global Catalog and also other partitions stored on other DC if possible
 def dnsDump(conn, zone: str = None, no_detail: bool = False):
     """
-    Retrieves DNS records of the Active Directory readable/listable by the user
+    Retrieve DNS records of the Active Directory readable/listable by the user
 
     :param zone: if set, prints only records in this zone
     :param no_detail: if set doesn't include system records such as _ldap, _kerberos, @, etc
@@ -158,7 +158,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
 
 def membership(conn, target: str, no_recurse: bool = False):
     """
-    Retrieves SID and SAM Account Names of all groups a target belongs to
+    Retrieve SID and SAM Account Names of all groups a target belongs to
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
@@ -200,7 +200,7 @@ def object(
     conn, target: str, attr: str = "*", resolve_sd: bool = False, raw: bool = False
 ):
     """
-    Retrieves LDAP attributes for the target object provided, binary data will be outputed in base64
+    Retrieve LDAP attributes for the target object provided, binary data will be outputed in base64
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param attr: name of the attribute to retrieve, retrieves all the attributes by default
@@ -229,7 +229,7 @@ def search(
     raw: bool = False,
 ):
     """
-    Searches in LDAP database, binary data will be outputed in base64
+    Search in LDAP database, binary data will be outputed in base64
 
     :param searchbase: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)
@@ -266,7 +266,7 @@ def writable(
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
-    Retrieves objects writable by client
+    Retrieve objects writable by client
 
     :param otype: type of writable object to retrieve
     :param right: type of right to search
