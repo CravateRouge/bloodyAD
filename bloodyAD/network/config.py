@@ -74,11 +74,6 @@ class ConnectionHandler:
         self._ldap.unbind()
         self._ldap = Ldap(self.conf)
 
-    def _closeLdap(self):
-        if self.ldap:
-            self._ldap.unbind()
-            self._ldap = None
-
     def switchUser(self, username, password):
         self.conf.username = username
         self.conf.password = password
