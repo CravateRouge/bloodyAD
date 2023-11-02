@@ -62,9 +62,10 @@ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac
 
 **Note:** You can find more examples on <https://cravaterouge.github.io/> and in the documentation folder of this project
 
-List of all available functions:
-
+### Global arguments
 ```ps1
+$ bloodyAD -h
+
 usage: bloodyAD.py [-h] [-d DOMAIN] [-u USERNAME] [-p PASSWORD] [-k] [-c CERTIFICATE] [-s] [--host HOST] [-v {QUIET,INFO,DEBUG}] {add,get,remove,set} ...
 
 AD Privesc Swiss Army Knife
@@ -93,10 +94,11 @@ Commands:
     set                 [SET] function category
 ```
 
+### Commands Arguments
 Help text to use a specific function:
 
 ```ps1
-[bloodyAD]$ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 set password -h
+$ bloodyAD --host 172.16.1.15 -d bloody.local -u jane.doe -p :70016778cb0524c799ac25b439bd6a31 set password -h
 usage: bloodyAD.py set password [-h] [--oldpass OLDPASS] target newpass
 
 positional arguments:
@@ -107,6 +109,83 @@ options:
   -h, --help         show this help message and exit
   --oldpass OLDPASS  old password of the target, mandatory if you don't have "change password" permission on the target (default: None)
   ```
+
+#### Get Commands
+```ps1
+$ bloodyAD --host 10.1.0.4 -d bloody -u bloodyAdmin -c ":bloodyadmin.pem" -s get -h
+
+usage: bloodyAD get [-h] {children,dnsDump,membership,object,search,writable} ...
+
+options:
+  -h, --help            show this help message and exit
+
+get commands:
+  {children,dnsDump,membership,object,search,writable}
+    children            Lists children for a given target object
+    dnsDump             Retrieves DNS records of the Active Directory readable/listable by the user
+    membership          Retrieves SID and SAM Account Names of all groups a target belongs to
+    object              Retrieves LDAP attributes for the target object provided, binary data will be outputed in base64
+    search              Searches in LDAP database, binary data will be outputed in base64
+    writable            Retrieves objects writable by client
+```
+#### Set Commands
+```ps1
+$ bloodyAD --host 10.1.0.4 -d bloody -u bloodyAdmin -c ":bloodyadmin.pem" -s set -h
+
+usage: bloodyAD set [-h] {object,owner,password} ...
+
+options:
+  -h, --help            show this help message and exit
+
+set commands:
+  {object,owner,password}
+    object              Add/Replace/Delete target's attribute
+    owner               Changes target ownership with provided owner (WriteOwner permission required)
+    password            Change password of a user/computer
+```
+
+#### Add Commands
+```ps1
+$ bloodyAD --host 10.1.0.4 -d bloody -u bloodyAdmin -c ":bloodyadmin.pem" -s add -h
+usage: bloodyAD add [-h] {computer,dcsync,dnsRecord,genericAll,groupMember,rbcd,shadowCredentials,uac,user} ...
+
+options:
+  -h, --help            show this help message and exit
+
+add commands:
+  {computer,dcsync,dnsRecord,genericAll,groupMember,rbcd,shadowCredentials,uac,user}
+    computer            Adds new computer
+    dcsync              Adds DCSync right on domain to provided trustee (Requires to own or to have WriteDacl on domain object)
+    dnsRecord           This function adds a new DNS record into an AD environment.
+    genericAll          Gives full control to trustee on target (you must own the object or have WriteDacl)
+    groupMember         Adds a new member (user, group, computer) to group
+    rbcd                Adds Resource Based Constraint Delegation for service on target, used to impersonate a user on target with service (Requires
+                        "Write" permission on target's msDS-AllowedToActOnBehalfOfOtherIdentity and Windows Server >= 2012)
+    shadowCredentials   Adds Key Credentials to target, used to impersonate target with added credentials
+    uac                 Adds property flags altering user/computer object behavior
+    user                Adds a new user
+```
+
+#### Remove Commands
+```ps1
+$ bloodyAD --host 10.1.0.4 -d bloody -u bloodyAdmin -c ":bloodyadmin.pem" -s remove -h
+
+usage: bloodyAD remove [-h] {dcsync,dnsRecord,genericAll,groupMember,object,rbcd,shadowCredentials,uac} ...
+
+options:
+  -h, --help            show this help message and exit
+
+remove commands:
+  {dcsync,dnsRecord,genericAll,groupMember,object,rbcd,shadowCredentials,uac}
+    dcsync              Removes DCSync right for provided trustee
+    dnsRecord           Removes a DNS record of an AD environment.
+    genericAll          Removes full control of trustee on target
+    groupMember         Removes member (user, group, computer) from group
+    object              Removes object (user, group, computer, organizational unit, etc)
+    rbcd                Removes Resource Based Constraint Delegation for service on target
+    shadowCredentials   Removes Key Credentials from target
+    uac                 Removes property flags altering user/computer object behavior
+```
 
 ## How it works
 
