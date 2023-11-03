@@ -241,6 +241,11 @@ bloodyAD -u stan.dard -p Password123! -d bloody.local --host 192.168.10.2 get dn
 
 ```
 
+## Support
+Like this project? Donations are welcome [![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/CravateRouge)
+
+Need personalized support? send me an [email](mailto:baptiste.crepin@ntymail.com) for trainings or custom features.
+
 ## Acknowledgements
 - Thanks to [impacket](https://github.com/fortra/impacket) contributors. [Structures](https://github.com/fortra/impacket/blob/master/impacket/structure.py) and several [LDAP attacks](https://github.com/fortra/impacket/blob/master/impacket/examples/ntlmrelayx/attacks/ldapattack.py) are based on their work.
 - Thanks to [@PowerShellMafia](https://github.com/PowerShellMafia) team ([PowerView.ps1](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1)) and their work on AD which inspired this tool.
