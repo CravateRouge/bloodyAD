@@ -200,12 +200,12 @@ def object(
     conn, target: str, attr: str = "*", resolve_sd: bool = False, raw: bool = False
 ):
     """
-    Retrieve LDAP attributes for the target object provided, binary data will be outputed in base64
+    Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param attr: name of the attribute to retrieve, retrieves all the attributes by default
-    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see documentation/accesscontrol.md for more information)
-    :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see wiki/Access-Control for more information)
+    :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
     """
     entries = conn.ldap.bloodysearch(target, attr=attr, raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
