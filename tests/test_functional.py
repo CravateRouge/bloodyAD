@@ -65,7 +65,7 @@ class TestModules(unittest.TestCase):
     def test_02SearchAndGetChildAndGetWritable(self):
         self.launchBloody(
             self.user,
-            ["get", "children", "OU=Domain Controllers,DC=bloody,DC=local"],
+            ["get", "children", "--target", "OU=Domain Controllers,DC=bloody,DC=local"],
         )
 
         self.launchBloody(
@@ -376,7 +376,7 @@ class TestModules(unittest.TestCase):
         self.assertRegex(
             self.launchBloody(
                 self.user,
-                ["get", "dnsDump", "--zone", self.domain, "--detail"],
+                ["get", "dnsDump", "--zone", self.domain],
             ),
             "test.domain",
         )
@@ -389,7 +389,7 @@ class TestModules(unittest.TestCase):
         self.assertNotRegex(
             self.launchBloody(
                 self.user,
-                ["get", "dnsDump", "--zone", self.domain, "--detail"],
+                ["get", "dnsDump", "--zone", self.domain],
             ),
             "test.domain",
         )

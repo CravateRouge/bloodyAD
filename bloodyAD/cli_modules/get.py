@@ -6,18 +6,23 @@ import ldap3
 from ldap3.core.exceptions import LDAPNoSuchObjectResult
 
 
-def children(conn, target: str, type: str = "*", direct: bool = False):
+def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
     """
     List children for a given target object
 
     :param target: sAMAccountName, DN, GUID or SID of the target
-    :param type: objectClass of object to fetch: user, computer, group, organizationalUnit, container, groupPolicyContainer, etc
+    :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
+    target = conn.ldap.domainNC
     scope = ldap3.LEVEL if direct else ldap3.SUBTREE
+    if otype == "useronly":
+        otype_filter = f"sAMAccountType=805306368"
+    else:
+        otype_filter = f"objectClass={otype}"
     return conn.ldap.bloodysearch(
         target,
-        f"(&(objectClass={type})(!(distinguishedName={target})))",
+        f"(&({otype_filter})(!(distinguishedName={target})))",
         search_scope=scope,
         attr="",
     )
@@ -163,13 +168,13 @@ def membership(conn, target: str, no_recurse: bool = False):
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
     """
-    filter = ""
+    ldap_filter = ""
     if no_recurse:
         entries = conn.ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
         for entry in entries:
             for group in entry["memberOf"]:
-                filter += f"(distinguishedName={group})"
-        if not filter:
+                ldap_filter += f"(distinguishedName={group})"
+        if not ldap_filter:
             LOG.warning("[!] No direct group membership found")
             return []
     else:
@@ -178,18 +183,18 @@ def membership(conn, target: str, no_recurse: bool = False):
         entries = conn.ldap.bloodysearch(target, attr=[attr])
         for entry in entries:
             for groupSID in entry[attr]:
-                filter += f"(objectSID={groupSID})"
-        if not filter:
+                ldap_filter += f"(objectSID={groupSID})"
+        if not ldap_filter:
             LOG.warning("no GC Server available, the set of groups might be incomplete")
             attr = "tokenGroupsNoGCAcceptable"
             entries = conn.ldap.bloodysearch(target, attr=[attr])
             for entry in entries:
                 for groupSID in entry[attr]:
-                    filter += f"(objectSID={groupSID})"
+                    ldap_filter += f"(objectSID={groupSID})"
 
     entries = conn.ldap.bloodysearch(
         conn.ldap.domainNC,
-        f"(|{filter})",
+        f"(|{ldap_filter})",
         search_scope=ldap3.SUBTREE,
         attr=["objectSID", "sAMAccountName"],
     )
@@ -274,14 +279,19 @@ def writable(
     """
     #:param partition: directory partition a.k.a naming context to explore
 
-    if otype == "ALL":
-        objectClass = "*"
-    elif otype == "OU":
-        objectClass = "container"
-    elif otype == "GPO":
-        objectClass = "groupPolicyContainer"
+    ldap_filter = ""
+    if otype == "USER":
+        ldap_filter = "(sAMAccountType=805306368)"
     else:
-        objectClass = otype
+        if otype == "ALL":
+            objectClass = "*"
+        elif otype == "OU":
+            objectClass = "container"
+        elif otype == "GPO":
+            objectClass = "groupPolicyContainer"
+        else:
+            objectClass = otype
+        ldap_filter = f"(objectClass={objectClass})"
 
     attr_params = {}
     genericReturn = (
@@ -325,7 +335,7 @@ def writable(
     for searchbase in searchbases:
         for entry in conn.ldap.bloodysearch(
             searchbase,
-            f"(objectClass={objectClass})",
+            ldap_filter,
             search_scope=ldap3.SUBTREE,
             attr=attr_params.keys(),
             generator=True,
