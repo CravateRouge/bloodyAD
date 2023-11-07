@@ -209,17 +209,21 @@ def object(
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param attr: name of the attribute to retrieve, retrieves all the attributes by default
-    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see wiki/Access-Control for more information)
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
     """
+    attributesSD = [
+        "nTSecurityDescriptor",
+        "msDS-GroupMSAMembership",
+        "msDS-AllowedToActOnBehalfOfOtherIdentity",
+    ]
     entries = conn.ldap.bloodysearch(target, attr=attr, raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         for entry in rendered_entries:
-            if "nTSecurityDescriptor" in entry:
-                entry["nTSecurityDescriptor"] = utils.renderSD(
-                    entry["nTSecurityDescriptor"], conn
-                )
+            for attrSD in attributesSD:
+                if attrSD in entry:
+                    entry[attrSD] = utils.renderSD(entry[attrSD], conn)
             yield entry
     else:
         yield from rendered_entries
@@ -239,9 +243,14 @@ def search(
     :param searchbase: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)
     :param attr: attributes to retrieve separated by a comma
-    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see documentation/accesscontrol.md for more information)
+    :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     """
+    attributesSD = [
+        "nTSecurityDescriptor",
+        "msDS-GroupMSAMembership",
+        "msDS-AllowedToActOnBehalfOfOtherIdentity",
+    ]
     entries = conn.ldap.bloodysearch(
         searchbase,
         filter,
@@ -253,10 +262,9 @@ def search(
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         for entry in rendered_entries:
-            if "nTSecurityDescriptor" in entry:
-                entry["nTSecurityDescriptor"] = utils.renderSD(
-                    entry["nTSecurityDescriptor"], conn
-                )
+            for attrSD in attributesSD:
+                if attrSD in entry:
+                    entry[attrSD] = utils.renderSD(entry[attrSD], conn)
             yield entry
     else:
         yield from rendered_entries

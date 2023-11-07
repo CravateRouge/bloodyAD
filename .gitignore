@@ -6,3 +6,4 @@ venv/
 dist/
 build/
 secrets.json
+settings.json

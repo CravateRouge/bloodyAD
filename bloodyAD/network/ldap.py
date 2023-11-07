@@ -34,6 +34,7 @@ class Ldap(ldap3.Connection):
                 "objectVersion": formatSchemaVersion,
                 "userAccountControl": formatAccountControl,
                 "msDS-ManagedPassword": formatGMSApass,
+                "msDS-GroupMSAMembership": formatSD,
                 "dnsRecord": formatDnsRecord,
                 "msDS-KeyCredentialLink": formatKeyCredentialLink,
                 "tokenGroups": format_sid,
