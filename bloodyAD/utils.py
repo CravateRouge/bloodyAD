@@ -314,12 +314,10 @@ class LazyAdSchema:
                 filters.append(buffer_filter)
                 buffer_filter = ""
                 filter_nb = 0
-            guid_bin_str = "\\" + "\\".join(
-                [
-                    "{:02x}".format(b)
-                    for b in dtyp.guid.GUID().from_string(guid).to_bytes()
-                ]
-            )
+            guid_bin_str = "\\" + "\\".join([
+                "{:02x}".format(b)
+                for b in dtyp.guid.GUID().from_string(guid).to_bytes()
+            ])
             buffer_filter += f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
             filter_nb += 2
         filters.append(buffer_filter)

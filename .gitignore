@@ -1,9 +1,9 @@
 __pycache__/
 *.pem
+*.pfx
 *.ccache
 venv/
 *.egg-info/
 dist/
 build/
-secrets.json
 settings.json

@@ -54,31 +54,25 @@ class Ldap(ldap3.Connection):
             )
             ldap_server_kwargs["tls"] = tls
             if cnf.scheme != "ldaps":
-                ldap_connection_kwargs.update(
-                    {
-                        "authentication": ldap3.SASL,
-                        "sasl_mechanism": ldap3.EXTERNAL,
-                        "auto_bind": ldap3.AUTO_BIND_TLS_BEFORE_BIND,
-                    }
-                )
-        elif cnf.kerberos:
-            ldap_connection_kwargs.update(
-                {
+                ldap_connection_kwargs.update({
                     "authentication": ldap3.SASL,
-                    "sasl_mechanism": ldap3.KERBEROS,
-                }
-            )
+                    "sasl_mechanism": ldap3.EXTERNAL,
+                    "auto_bind": ldap3.AUTO_BIND_TLS_BEFORE_BIND,
+                })
+        elif cnf.kerberos:
+            ldap_connection_kwargs.update({
+                "authentication": ldap3.SASL,
+                "sasl_mechanism": ldap3.KERBEROS,
+            })
             if cnf.scheme != "ldaps":
                 ldap_connection_kwargs.update({"session_security": "ENCRYPT"})
 
         else:
-            ldap_connection_kwargs.update(
-                {
-                    "user": "%s\\%s" % (cnf.domain, cnf.username),
-                    "password": cnf.password,
-                    "authentication": ldap3.NTLM,
-                }
-            )
+            ldap_connection_kwargs.update({
+                "user": "%s\\%s" % (cnf.domain, cnf.username),
+                "password": cnf.password,
+                "authentication": ldap3.NTLM,
+            })
             if cnf.scheme != "ldaps":
                 ldap_connection_kwargs.update({"session_security": "ENCRYPT"})
 

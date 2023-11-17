@@ -11,12 +11,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from bloodyAD.exceptions import BloodyError
 
 
-def computer(conn, hostname: str, password: str, ou: str = "DefaultOU"):
+def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU"):
     """
     Add new computer
 
     :param hostname: computer name (without trailing $)
-    :param password: password for computer
+    :param newpass: password for computer
     :param ou: Organizational Unit for computer
     """
 
@@ -57,7 +57,7 @@ def computer(conn, hostname: str, password: str, ou: str = "DefaultOU"):
         "userAccountControl": 0x1000,
         "servicePrincipalName": spns,
         "sAMAccountName": f"{hostname}$",
-        "unicodePwd": ('"%s"' % password).encode("utf-16-le"),
+        "unicodePwd": ('"%s"' % newpass).encode("utf-16-le"),
     }
 
     conn.ldap.bloodyadd(computer_dn, attributes=attr)
@@ -287,11 +287,9 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     LOG.debug("[*] Generating certificate")
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
-        ]
-    )
+    issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
+    ])
     cert = (
         x509.CertificateBuilder()
         .subject_name(issuer)
@@ -402,12 +400,12 @@ def uac(conn, target: str, f: list = None):
     LOG.info(f"[-] {f} property flags added to {target}'s userAccountControl")
 
 
-def user(conn, sAMAccountName: str, password: str, ou: str = "DefaultOU"):
+def user(conn, sAMAccountName: str, newpass: str, ou: str = "DefaultOU"):
     """
     Add a new user
 
     :param sAMAccountName: sAMAccountName for new user
-    :param password: password for new user
+    :param newpass: password for new user
     :param ou: Organizational Unit for new user
     """
     if ou == "DefaultOU":
@@ -433,7 +431,7 @@ def user(conn, sAMAccountName: str, password: str, ou: str = "DefaultOU"):
         "distinguishedName": user_dn,
         "sAMAccountName": sAMAccountName,
         "userAccountControl": 544,
-        "unicodePwd": ('"%s"' % password).encode("utf-16-le"),
+        "unicodePwd": ('"%s"' % newpass).encode("utf-16-le"),
     }
 
     conn.ldap.bloodyadd(user_dn, attributes=attr)

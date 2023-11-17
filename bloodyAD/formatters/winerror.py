@@ -2,6 +2,7 @@
 [MS-ADTS] 3.1.1.3.1.9 Error Message Strings
 [MS-ERREF] 2.2 Win32 Error Codes
 """
+
 WINERROR = {
     #   0x00000000: {"code": "ERROR_SUCCESS", "message": "The operation completed successfully."},
     0x00000001: {"code": "ERROR_INVALID_FUNCTION", "message": "Incorrect function."},
