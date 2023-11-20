@@ -4,7 +4,7 @@ from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol
 
 
-def object(conn, target: str, attribute: str, v: list = None):
+def object(conn, target: str, attribute: str, v: list = []):
     """
     Add/Replace/Delete target's attribute
 
@@ -12,6 +12,7 @@ def object(conn, target: str, attribute: str, v: list = None):
     :param attribute: name of the attribute
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     """
+    print(v)
     conn.ldap.bloodymodify(target, {attribute: [ldap3.MODIFY_REPLACE, v]})
     LOG.info(f"[+] {target}'s {attribute} has been updated")
 
