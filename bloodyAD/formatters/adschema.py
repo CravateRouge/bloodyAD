@@ -1,9 +1,13 @@
 VALIDATED_RIGHTS = {
-    "bf9679c0-0de6-11d0-a285-00aa003049e2": "Self-Membership",
-    "72e39547-7b18-11d1-adef-00c04fd8d5cd": "Validated-DNS-Host-Name",
-    "80863791-dbe9-4eb8-837e-7f0ab55d9ac7": "Validated-MS-DS-Additional-DNS-Host-Name",
-    "d31a8757-2447-4545-8081-3bb610cacbf2": "Validated-MS-DS-Behavior-Version",
-    "f3a64788-5306-11d1-a9c5-0000f80367c1": "Validated-SPN",
+    "bf9679c0-0de6-11d0-a285-00aa003049e2": "member (Self-Membership)",
+    "72e39547-7b18-11d1-adef-00c04fd8d5cd": "dNSHostName (Validated-DNS-Host-Name)",
+    "80863791-dbe9-4eb8-837e-7f0ab55d9ac7": (
+        "msDS-AdditionalDnsHostName (Validated-MS-DS-Additional-DNS-Host-Name)"
+    ),
+    "d31a8757-2447-4545-8081-3bb610cacbf2": (
+        "msDS-Behavior-Version (Validated-MS-DS-Behavior-Version)"
+    ),
+    "f3a64788-5306-11d1-a9c5-0000f80367c1": "servicePrincipalName (Validated-SPN)",
 }
 
 CONTROL_ACCESS_RIGHTS = {
@@ -78,21 +82,23 @@ CONTROL_ACCESS_RIGHTS = {
 }
 
 PROPERTY_SETS = {
-    "c7407360-20bf-11d0-a768-00aa006e0529": "Domain-Password",
-    "59ba2f42-79a2-11d0-9020-00c04fc2d3cf": "General-Information",
-    "4c164200-20c0-11d0-a768-00aa006e0529": "Account-Restrictions",
-    "5f202010-79a5-11d0-9020-00c04fc2d4cf": "Logon-Information",
-    "bc0ac240-79a9-11d0-9020-00c04fc2d4cf": "Group-Membership",
-    "e45795b2-9455-11d1-aebd-0000f80367c1": "Phone-and-Mail-Options",
-    "77b5b886-944a-11d1-aebd-0000f80367c1": "Personal-Information",
-    "e45795b3-9455-11d1-aebd-0000f80367c1": "Web-Information",
-    "e48d0154-bcf8-11d1-8702-00c04fb96050": "Public-Information",
-    "037088f8-0ae1-11d2-b422-00a0c968f939": "Remote-Access-Information",
-    "b8119fd0-04f6-4762-ab7a-4986c76b3f9a": "Other-Domain-Parameters",
-    "72e39547-7b18-11d1-adef-00c04fd8d5cd": "DNS-Host-Name-Attributes",
-    "ffa6f046-ca4b-4feb-b40d-04dfee722543": "MS-TS-GatewayAccess",
-    "91e647de-d96f-4b70-9557-d63ff4f3ccd8": "Private-Information",
-    "5805bc62-bdc9-4428-a5e2-856a0f4c185e": "Terminal-Server-License-Server",
+    "c7407360-20bf-11d0-a768-00aa006e0529": "Domain-Password (property set)",
+    "59ba2f42-79a2-11d0-9020-00c04fc2d3cf": "General-Information (property set)",
+    "4c164200-20c0-11d0-a768-00aa006e0529": "Account-Restrictions (property set)",
+    "5f202010-79a5-11d0-9020-00c04fc2d4cf": "Logon-Information (property set)",
+    "bc0ac240-79a9-11d0-9020-00c04fc2d4cf": "Group-Membership (property set)",
+    "e45795b2-9455-11d1-aebd-0000f80367c1": "Phone-and-Mail-Options (property set)",
+    "77b5b886-944a-11d1-aebd-0000f80367c1": "Personal-Information (property set)",
+    "e45795b3-9455-11d1-aebd-0000f80367c1": "Web-Information (property set)",
+    "e48d0154-bcf8-11d1-8702-00c04fb96050": "Public-Information (property set)",
+    "037088f8-0ae1-11d2-b422-00a0c968f939": "Remote-Access-Information (property set)",
+    "b8119fd0-04f6-4762-ab7a-4986c76b3f9a": "Other-Domain-Parameters (property set)",
+    "72e39547-7b18-11d1-adef-00c04fd8d5cd": "DNS-Host-Name-Attributes (property set)",
+    "ffa6f046-ca4b-4feb-b40d-04dfee722543": "MS-TS-GatewayAccess (property set)",
+    "91e647de-d96f-4b70-9557-d63ff4f3ccd8": "Private-Information (property set)",
+    "5805bc62-bdc9-4428-a5e2-856a0f4c185e": (
+        "Terminal-Server-License-Server (property set)"
+    ),
 }
 
 SCHEMA_ATTRIBUTES = {

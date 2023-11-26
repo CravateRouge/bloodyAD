@@ -41,6 +41,7 @@ class Ldap(ldap3.Connection):
                 "tokenGroupsNoGCAcceptable": format_sid,
                 "wellKnownObjects": formatWellKnownObjects,
                 "schemaIDGUID": format_uuid_le,
+                "attributeSecurityGUID": format_uuid_le,
             },
         }
         ldap_connection_kwargs = {"raise_exceptions": True, "auto_range": True}
