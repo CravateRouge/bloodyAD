@@ -33,6 +33,7 @@ class Ldap(ldap3.Connection):
                 "msDS-Behavior-Version": formatFunctionalLevel,
                 "objectVersion": formatSchemaVersion,
                 "userAccountControl": formatAccountControl,
+                "msDS-User-Account-Control-Computed": formatAccountControl,
                 "msDS-ManagedPassword": formatGMSApass,
                 "msDS-GroupMSAMembership": formatSD,
                 "dnsRecord": formatDnsRecord,

@@ -103,7 +103,6 @@ class TestModules(unittest.TestCase):
             [
                 "get",
                 "search",
-                self.rootDomainNamingContext,
                 "--filter",
                 "(cn=Administrator)",
                 "--attr",

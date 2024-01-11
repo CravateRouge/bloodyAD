@@ -206,7 +206,7 @@ def object(
     Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
 
     :param target: sAMAccountName, DN, GUID or SID of the target
-    :param attr: name of the attribute to retrieve, retrieves all the attributes by default
+    :param attr: attributes to retrieve separated by a comma, retrieves all the attributes by default
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
     """
@@ -215,7 +215,7 @@ def object(
         "msDS-GroupMSAMembership",
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
-    entries = conn.ldap.bloodysearch(target, attr=attr, raw=raw)
+    entries = conn.ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         for entry in rendered_entries:
@@ -229,7 +229,7 @@ def object(
 
 def search(
     conn,
-    searchbase: str,
+    base: str = "DOMAIN",
     filter: str = "(objectClass=*)",
     attr: str = "*",
     resolve_sd: bool = False,
@@ -238,7 +238,7 @@ def search(
     """
     Search in LDAP database, binary data will be outputed in base64
 
-    :param searchbase: DN of the parent object
+    :param base: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)
     :param attr: attributes to retrieve separated by a comma
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
@@ -249,8 +249,10 @@ def search(
         "msDS-GroupMSAMembership",
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
+    if base == "DOMAIN":
+        base = conn.ldap.domainNC
     entries = conn.ldap.bloodysearch(
-        searchbase,
+        base,
         filter,
         search_scope=ldap3.SUBTREE,
         attr=attr.split(","),
