@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import bloodyAD.msldap_patch
 from bloodyAD import cli_modules, ConnectionHandler, utils
 import sys, argparse, types
 
@@ -124,27 +125,36 @@ def main():
 
     LOGGING_LEVELS = {"QUIET": 50, "INFO": 20, "DEBUG": 10}
     utils.LOG.setLevel(LOGGING_LEVELS[args.verbose])
+    # import msldap
+    # msldap.logger.setLevel(LOGGING_LEVELS[args.verbose])
+
     # Launch the command
     conn = ConnectionHandler(args=args)
-    output = args.func(conn, **params)
+    try:
+        output = args.func(conn, **params)
 
-    # Prints output, will print it directly if it's not an iterable
-    # Output is expected to be of type [{name:[members]},{...}...]
-    # If it's not, will print it raw
-    output_type = type(output)
-    if not output or output_type == bool:
-        return
+        # Prints output, will print it directly if it's not an iterable
+        # Output is expected to be of type [{name:[members]},{...}...]
+        # If it's not, will print it raw
+        output_type = type(output)
+        if not output or output_type == bool:
+            return
 
-    if output_type not in [list, dict, types.GeneratorType]:
-        print("\n" + output)
-        return
+        if output_type not in [list, dict, types.GeneratorType]:
+            print("\n" + output)
+            return
 
-    for entry in output:
-        print()
-        for attr_name, attr_val in entry.items():
-            entry_str = print_entry(attr_name, attr_val)
-            if entry_str:
-                print(f"{attr_name}: {entry_str}")
+        for entry in output:
+            print()
+            for attr_name, attr_val in entry.items():
+                entry_str = print_entry(attr_name, attr_val)
+                if entry_str:
+                    print(f"{attr_name}: {entry_str}")
+
+    # Close the connection properly anyway
+    finally:
+        if conn._ldap:
+            conn.ldap.close()
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -160,16 +170,24 @@ def print_entry(entryname, entry):
     if type(entry) in [list, set, types.GeneratorType]:
         i = 0
         simple_entries = []
+        length = len(entry)
+        i_str = ""
         for v in entry:
-            entry_str = print_entry(f"{entryname}.{i}", v)
+            if length > 1:
+                i_str = f".{i}"
+            entry_str = print_entry(f"{entryname}{i_str}", v)
             i += 1
             if entry_str:
                 simple_entries.append(entry_str)
         if simple_entries:
             print(f"{entryname}: {'; '.join([str(v) for v in simple_entries])}")
     elif type(entry) is dict:
+        length = len(entry)
+        k_str = ""
         for k in entry:
-            entry_str = print_entry(f"{entryname}.{k}", entry[k])
+            if length > 1:
+                k_str = f".{k}"
+            entry_str = print_entry(f"{entryname}{k_str}", entry[k])
             if entry_str:
                 print(f"{entryname}.{k}: {entry_str}")
     else:

@@ -3,15 +3,14 @@ from bloodyAD.formatters import (
     accesscontrol,
     adschema,
 )
+from bloodyAD.network.ldap import Scope
 import logging, json, sys, types, base64
-import ldap3
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
-from pyasn1.type import namedtype, univ
-
+from asn1crypto import core
 
 LOG = logging.getLogger("bloodyAD")
-LOG.setLevel(logging.DEBUG)
+LOG.propagate = False
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
 LOG.addHandler(handler)
@@ -99,9 +98,9 @@ def getSD(
 ):
     sd_data = next(
         conn.ldap.bloodysearch(
-            object_id, attr=ldap_attribute, control_flag=control_flag, raw=True
+            object_id, attr=[ldap_attribute], control_flag=control_flag, raw=True
         )
-    )[ldap_attribute]
+    ).get(ldap_attribute, [])
     if len(sd_data) < 1:
         LOG.warning(
             "[!] No security descriptor has been returned, a new one will be created"
@@ -324,20 +323,16 @@ class LazyAdSchema:
 
         # Search in all non application partitions
         # TODO: search in GC and add domain linked to it as DOMAIN\sAMAccountName, maybe try trusts in the future?
-        class SearchOptionsRequest(univ.Sequence):
-            componentType = namedtype.NamedTypes(
-                namedtype.NamedType("Flags", univ.Integer())
-            )
+        class SearchOptionsRequest(core.Sequence):
+            _fields = [
+                ("Flags", core.Integer),
+            ]
 
-        scontrols = SearchOptionsRequest()
         SERVER_SEARCH_FLAG_PHANTOM_ROOT = 2
-        scontrols.setComponentByName("Flags", SERVER_SEARCH_FLAG_PHANTOM_ROOT)
+        scontrols = SearchOptionsRequest({"Flags": SERVER_SEARCH_FLAG_PHANTOM_ROOT})
         LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
-        controls = [
-            ldap3.protocol.controls.build_control(
-                LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols
-            )
-        ]
+        controls = [(LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())]
+
         for ldap_filter in filters:
             entries = self.conn.ldap.bloodysearch(
                 "",
@@ -349,7 +344,7 @@ class LazyAdSchema:
                     "rightsGuid",
                     "schemaIDGUID",
                 ],
-                search_scope=ldap3.SUBTREE,
+                search_scope=Scope.SUBTREE,
                 controls=controls,
             )
             for entry in entries:

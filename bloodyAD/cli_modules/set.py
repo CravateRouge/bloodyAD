@@ -1,7 +1,8 @@
-import ldap3
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol
+from bloodyAD.network.ldap import Change
+import msldap
 
 
 def object(conn, target: str, attribute: str, v: list = []):
@@ -13,7 +14,7 @@ def object(conn, target: str, attribute: str, v: list = []):
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     """
     print(v)
-    conn.ldap.bloodymodify(target, {attribute: [ldap3.MODIFY_REPLACE, v]})
+    conn.ldap.bloodymodify(target, {attribute: [(Change.REPLACE.value, v)]})
     LOG.info(f"[+] {target}'s {attribute} has been updated")
 
 
@@ -24,7 +25,7 @@ def owner(conn, target: str, owner: str):
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param owner: sAMAccountName, DN, GUID or SID of the new owner
     """
-    new_sid = next(conn.ldap.bloodysearch(owner, attr="objectSid"))["objectSid"]
+    new_sid = next(conn.ldap.bloodysearch(owner, attr=["objectSid"]))["objectSid"]
 
     new_sd, _ = utils.getSD(
         conn, target, "nTSecurityDescriptor", accesscontrol.OWNER_SECURITY_INFORMATION
@@ -36,12 +37,14 @@ def owner(conn, target: str, owner: str):
     else:
         new_sd["OwnerSid"].fromCanonical(new_sid)
 
-        controls = ldap3.protocol.microsoft.security_descriptor_control(
-            sdflags=accesscontrol.OWNER_SECURITY_INFORMATION
-        )
+        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
+            "Flags": accesscontrol.OWNER_SECURITY_INFORMATION
+        })
+        controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+
         conn.ldap.bloodymodify(
             target,
-            {"nTSecurityDescriptor": [ldap3.MODIFY_REPLACE, new_sd.getData()]},
+            {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
             controls,
         )
 
@@ -58,30 +61,30 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
     :param newpass: new password for the target
     :param oldpass: old password of the target, mandatory if you don't have "change password" permission on the target
     """
-    encoded_new_password = ('"%s"' % newpass).encode("utf-16-le")
+    encoded_new_password = '"%s"' % newpass
     if oldpass is not None:
-        encoded_old_password = ('"%s"' % oldpass).encode("utf-16-le")
+        encoded_old_password = '"%s"' % oldpass
         op_list = [
-            (ldap3.MODIFY_DELETE, [encoded_old_password]),
-            (ldap3.MODIFY_ADD, [encoded_new_password]),
+            (Change.DELETE.value, encoded_old_password),
+            (Change.ADD.value, encoded_new_password),
         ]
     else:
-        op_list = [(ldap3.MODIFY_REPLACE, [encoded_new_password])]
+        op_list = [(Change.REPLACE.value, encoded_new_password)]
 
-    try:
-        conn.ldap.bloodymodify(target, {"unicodePwd": op_list})
-    except ldap3.core.exceptions.LDAPConstraintViolationResult as e:
-        error_str = (
-            "If it's a user, double check new password fits password policy (don't"
-            " forget password history and password change frequency!)"
-        )
-        if oldpass is not None:
-            error_str += ", also ensure old password is valid"
-        ldap3.core.exceptions.LDAPConstraintViolationResult.__str__ = (
-            lambda self: error_str
-        )
+    # try:
+    conn.ldap.bloodymodify(target, {"unicodePwd": op_list})
+    # except ldap3.core.exceptions.LDAPConstraintViolationResult as e:
+    #     error_str = (
+    #         "If it's a user, double check new password fits password policy (don't"
+    #         " forget password history and password change frequency!)"
+    #     )
+    #     if oldpass is not None:
+    #         error_str += ", also ensure old password is valid"
+    #     ldap3.core.exceptions.LDAPConstraintViolationResult.__str__ = (
+    #         lambda self: error_str
+    #     )
 
-        raise e
+    #     raise e
 
     LOG.info("[+] Password changed successfully!")
     return True

@@ -11,6 +11,7 @@ class TestModules(unittest.TestCase):
             "DC=" + subdomain for subdomain in cls.domain.split(".")
         ])
         cls.host = conf["pdc"]["ip"]
+        cls.hostname = conf["pdc"]["hostname"]
         cls.admin = {
             "username": conf["admin_user"]["username"],
             "password": conf["admin_user"]["password"],
@@ -22,7 +23,7 @@ class TestModules(unittest.TestCase):
             "python3",
             "bloodyAD.py",
             "--host",
-            cls.host,
+            cls.hostname,
             "-d",
             cls.domain,
         ]

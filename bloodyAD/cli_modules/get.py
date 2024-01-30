@@ -1,9 +1,8 @@
 from bloodyAD import utils
 from bloodyAD.utils import LOG
+from bloodyAD.network.ldap import Scope
 from typing import Literal
 import re
-import ldap3
-from ldap3.core.exceptions import LDAPNoSuchObjectResult
 
 
 def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
@@ -15,7 +14,7 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
     :param direct: Fetch only direct children of target
     """
     target = conn.ldap.domainNC
-    scope = ldap3.LEVEL if direct else ldap3.SUBTREE
+    scope = Scope.LEVEL if direct else Scope.SUBTREE
     if otype == "useronly":
         otype_filter = f"sAMAccountType=805306368"
     else:
@@ -24,7 +23,7 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
         target,
         f"(&({otype_filter})(!(distinguishedName={target})))",
         search_scope=scope,
-        attr="",
+        attr=["distinguishedName"],
     )
 
 
@@ -58,15 +57,15 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
 
     dnsZones = []
     for nc in conn.ldap.appNCs + [conn.ldap.domainNC]:
-        try:
-            entries = conn.ldap.bloodysearch(
-                nc,
-                filter,
-                search_scope=ldap3.SUBTREE,
-                attr=["dnsRecord", "name", "objectClass"],
-            )
-        except LDAPNoSuchObjectResult:
-            continue
+        # try:
+        entries = conn.ldap.bloodysearch(
+            nc,
+            filter,
+            search_scope=Scope.SUBTREE,
+            attr=["dnsRecord", "name", "objectClass"],
+        )
+        # except LDAPNoSuchObject:
+        #     continue
 
         for entry in entries:
             domain_suffix = entry["distinguishedName"].split(",")[1]
@@ -132,13 +131,13 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
             entries = conn.ldap.bloodysearch(
                 searchbase,
                 f"(objectClass=*)",
-                search_scope=ldap3.SUBTREE,
-                attr="objectClass",
+                search_scope=Scope.SUBTREE,
+                attr=["objectClass"],
             )
         except LDAPNoSuchObjectResult:
             continue
         for entry in entries:
-            if entry["objectClass"] or entry["distinguishedName"] == searchbase:
+            if entry.get("objectClass") or entry["distinguishedName"] == searchbase:
                 continue
 
             domain_parts = entry["distinguishedName"].split(",")
@@ -170,7 +169,7 @@ def membership(conn, target: str, no_recurse: bool = False):
     if no_recurse:
         entries = conn.ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
         for entry in entries:
-            for group in entry["memberOf"]:
+            for group in entry.get("memberOf", []):
                 ldap_filter += f"(distinguishedName={group})"
         if not ldap_filter:
             LOG.warning("[!] No direct group membership found")
@@ -193,7 +192,7 @@ def membership(conn, target: str, no_recurse: bool = False):
     entries = conn.ldap.bloodysearch(
         conn.ldap.domainNC,
         f"(|{ldap_filter})",
-        search_scope=ldap3.SUBTREE,
+        search_scope=Scope.SUBTREE,
         attr=["objectSID", "sAMAccountName"],
     )
     return entries
@@ -221,7 +220,11 @@ def object(
         for entry in rendered_entries:
             for attrSD in attributesSD:
                 if attrSD in entry:
-                    entry[attrSD] = utils.renderSD(entry[attrSD], conn)
+                    e = entry[attrSD]
+                    if not isinstance(e, list):
+                        entry[attrSD] = utils.renderSD(e, conn)
+                    else:
+                        entry[attrSD] = [utils.renderSD(sd, conn) for sd in e]
             yield entry
     else:
         yield from rendered_entries
@@ -252,19 +255,18 @@ def search(
     if base == "DOMAIN":
         base = conn.ldap.domainNC
     entries = conn.ldap.bloodysearch(
-        base,
-        filter,
-        search_scope=ldap3.SUBTREE,
-        attr=attr.split(","),
-        raw=raw,
-        generator=True,
+        base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), raw=raw
     )
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         for entry in rendered_entries:
             for attrSD in attributesSD:
                 if attrSD in entry:
-                    entry[attrSD] = utils.renderSD(entry[attrSD], conn)
+                    e = entry[attrSD]
+                    if not isinstance(e, list):
+                        entry[attrSD] = utils.renderSD(e, conn)
+                    else:
+                        entry[attrSD] = [utils.renderSD(sd, conn) for sd in e]
             yield entry
     else:
         yield from rendered_entries
@@ -342,11 +344,7 @@ def writable(
     right_entry = {}
     for searchbase in searchbases:
         for entry in conn.ldap.bloodysearch(
-            searchbase,
-            ldap_filter,
-            search_scope=ldap3.SUBTREE,
-            attr=attr_params.keys(),
-            generator=True,
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys()
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:

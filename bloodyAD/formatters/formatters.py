@@ -63,3 +63,93 @@ def formatKeyCredentialLink(key_dnbinary):
     return cryptography.KEYCREDENTIALLINK_BLOB(
         common.DNBinary(key_dnbinary).value
     ).toDict()
+
+
+from msldap.protocol.typeconversion import (
+    LDAP_WELL_KNOWN_ATTRS,
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
+    single_guid,
+    multi_bytes,
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
+)
+
+
+def formatFactory(format_func, origin_format):
+    def genericFormat(val, encode=False, *args):
+        if encode:
+            return origin_format(val, encode, *args)
+        if not isinstance(val, list):
+            return format_func(val)
+        return [format_func(e) for e in val]
+
+    return genericFormat
+
+
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
+    multi_bytes
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"] = formatFactory(
+    formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"]
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
+    formatFactory(formatSD, multi_bytes)
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"] = formatFactory(
+    formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"]
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"] = formatFactory(
+    formatGMSApass, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"]
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"] = formatFactory(
+    formatAccountControl, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"]
+)
+LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"] = formatFactory(
+    formatAccountControl, LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"]
+)
+MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"] = formatFactory(
+    formatFunctionalLevel, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"]
+)
+LDAP_WELL_KNOWN_ATTRS["objectVersion"] = formatFactory(
+    formatSchemaVersion, LDAP_WELL_KNOWN_ATTRS["objectVersion"]
+)
+LDAP_WELL_KNOWN_ATTRS["dnsRecord"] = formatFactory(
+    formatDnsRecord, LDAP_WELL_KNOWN_ATTRS["dnsRecord"]
+)
+LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"] = formatFactory(
+    formatKeyCredentialLink, LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"]
+)
+LDAP_WELL_KNOWN_ATTRS["attributeSecurityGUID"] = single_guid
+LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"] = formatFactory(
+    formatWellKnownObjects, LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"]
+)
+
+from winacl.dtyp.ace import (
+    SYSTEM_AUDIT_OBJECT_ACE,
+    SDDL_ACE_TYPE_MAPS_INV,
+    aceflags_to_sddl,
+    accessmask_to_sddl,
+    ACE_OBJECT_PRESENCE,
+)
+
+
+def to_sddl(self, sd_object_type=None):
+    # ace_type;ace_flags;rights;object_guid;inherit_object_guid;account_sid;(resource_attribute)
+    return "(%s;%s;%s;%s;%s;%s)" % (
+        SDDL_ACE_TYPE_MAPS_INV[self.AceType],
+        aceflags_to_sddl(self.AceFlags),
+        accessmask_to_sddl(self.Mask, self.sd_object_type),
+        (
+            self.ObjectType.to_bytes()
+            if self.AceFlags & ACE_OBJECT_PRESENCE.ACE_OBJECT_TYPE_PRESENT
+            else ""
+        ),
+        (
+            self.InheritedObjectType.to_bytes()
+            if self.Flags & ACE_OBJECT_PRESENCE.ACE_INHERITED_OBJECT_TYPE_PRESENT
+            else ""
+        ),
+        self.Sid.to_sddl(),
+    )
+
+
+setattr(SYSTEM_AUDIT_OBJECT_ACE, "to_sddl", to_sddl)
