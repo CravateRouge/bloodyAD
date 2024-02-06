@@ -16,7 +16,7 @@ jobs:
           ref: msldap
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.8'
       - name: Install dependencies
         run: |
           pip install .
@@ -27,4 +27,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: test
-          files: bloodyAD.exe
+          files: D:\a\bloodyAD\bloodyAD\dist\bloodyAD.exe
