@@ -22,9 +22,9 @@ jobs:
           pip install .
           pip install pyinstaller
       - name: Compile
-        run: pyinstaller --onefile bloodyAD.py
+        run: pyinstaller --distpath . --onefile bloodyAD.py
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: test
-          files: D:\a\bloodyAD\bloodyAD\dist\bloodyAD.exe
+          files: bloodyAD.exe
