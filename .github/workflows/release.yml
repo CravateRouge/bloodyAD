@@ -5,6 +5,7 @@ on:
     branches: [ "msldap" ]
     tags:        
       - '*'
+  workflow_dispatch:
       
 jobs:
   windows-build:
