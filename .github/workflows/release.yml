@@ -22,7 +22,7 @@ jobs:
           pip install .
           pip install pyinstaller
       - name: Compile
-        run: pyinstaller --distpath . --onefile bloodyAD.py
+        run: pyinstaller --hidden-import unicrypto.backends.cryptography --hidden-import bloodyAD.cli_modules.add --hidden-import bloodyAD.cli_modules.get --hidden-import bloodyAD.cli_modules.remove --hidden-import bloodyAD.cli_modules.set --distpath . --onefile bloodyAD.py
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
