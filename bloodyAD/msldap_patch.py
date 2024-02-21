@@ -237,17 +237,20 @@ async def pagedsearch(
                             res["protocolOp"]["resultCode"],
                             res["protocolOp"]["diagnosticMessage"],
                         )
-                    for control in res["controls"]:
-                        if control["controlType"] == b"1.2.840.113556.1.4.319":
-                            try:
-                                cookie = SearchControlValue.load(
-                                    control["controlValue"]
-                                ).native["cookie"]
-                            except Exception as e:
-                                raise e
-                            break
-                    else:
-                        raise Exception("SearchControl missing from server response!")
+                    try:
+                        for control in res["controls"]:
+                            if control["controlType"] == b"1.2.840.113556.1.4.319":
+                                try:
+                                    cookie = SearchControlValue.load(
+                                        control["controlValue"]
+                                    ).native["cookie"]
+                                except Exception as e:
+                                    raise e
+                                break
+                    except TypeError:
+                        pass
+                        # Is it really important that SearchControl is missing?
+                        # raise Exception("SearchControl missing from server response!")
                 else:
                     yield (convert_result(res["protocolOp"], raw), None)
 

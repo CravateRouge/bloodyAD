@@ -4,8 +4,7 @@ from bloodyAD import cli_modules, ConnectionHandler, utils
 import sys, argparse, types
 
 # For dynamic argparse
-from inspect import getmembers, isfunction, signature
-from pkgutil import iter_modules
+import inspect, pkgutil, importlib
 
 
 def main():
@@ -18,7 +17,10 @@ def main():
     parser.add_argument(
         "-p",
         "--password",
-        help="Cleartext password or LMHASH:NTHASH for NTLM authentication",
+        help=(
+            "Cleartext password or LMHASH:NTHASH for NTLM authentication (Do not"
+            " specify to trigger integrated windows authentication)"
+        ),
     )
     parser.add_argument("-k", "--kerberos", action="store_true", default=False)
     parser.add_argument(
@@ -47,17 +49,15 @@ def main():
 
     subparsers = parser.add_subparsers(title="Commands")
     # Iterates all submodules in module package and creates one parser per submodule
-    for importer, submodname, ispkg in iter_modules(cli_modules.__path__):
+    for importer, submodname, ispkg in pkgutil.iter_modules(cli_modules.__path__):
         subparser = subparsers.add_parser(
             submodname, help=f"[{submodname.upper()}] function category"
         )
         subsubparsers = subparser.add_subparsers(title=f"{submodname} commands")
-        submodule = importer.find_spec(submodname).loader.load_module()
-        for function_name, function in getmembers(submodule, isfunction):
-            # Doesn't take into account function imported in the module
-            if function.__module__ != submodname:
-                continue
-
+        submodule = importlib.import_module("." + submodname, cli_modules.__name__)
+        for function_name, function in inspect.getmembers(
+            submodule, inspect.isfunction
+        ):
             function_doc, params_doc = doc_parser(function.__doc__)
             # This formatter class prints default values
             subsubparser = subsubparsers.add_parser(
@@ -66,7 +66,7 @@ def main():
                 formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             )
             # Gets function signature to extract parameters default values
-            func_signature = signature(function)
+            func_signature = inspect.signature(function)
             for param_name, param_value, param_doc in zip(
                 function.__annotations__.keys(),
                 function.__annotations__.values(),

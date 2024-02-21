@@ -67,6 +67,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
         # except LDAPNoSuchObject:
         #     continue
 
+        domain_set = set()
         for entry in entries:
             domain_suffix = entry["distinguishedName"].split(",")[1]
             domain_suffix = domain_suffix.split("=")[1]
@@ -89,15 +90,24 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
             if domain_name == "@":  # @ is for dnsZone info
                 domain_name = domain_suffix
             else:  # even for reverse lookup (X.X.X.X.in-addr.arpa), domain suffix should be parent name?
-                domain_name = domain_name + "." + domain_suffix
+                if (
+                    domain_name[-1] != "."
+                ):  # Then it's probably not a fqdn, suffix needed
+                    domain_name = domain_name + "." + domain_suffix
 
             ip_addr = domain_name.split(".in-addr.arpa")
             if len(ip_addr) > 1:
                 decimals = ip_addr[0].split(".")
                 decimals.reverse()
+                while len(decimals) < 4:
+                    decimals.append("0")
                 domain_name = ".".join(decimals)
 
+            # Sometimes domain is in multiple dnsZones
+            if domain_name in domain_set:
+                continue
             yield_entry = {"recordName": domain_name}
+            domain_set.add(domain_name)
             for record in entry["dnsRecord"]:
                 try:
                     if record["Type"] not in yield_entry:
@@ -143,19 +153,28 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
             domain_parts = entry["distinguishedName"].split(",")
             domain_suffix = domain_parts[1].split("=")[1]
 
-            domain_prefix = domain_parts[0].split("=")[1]
-            if no_detail and re.match("|".join(prefix_blacklist), domain_prefix):
+            domain_name = domain_parts[0].split("=")[1]
+            if no_detail and re.match("|".join(prefix_blacklist), domain_name):
                 continue
 
-            domain_name = f"{domain_prefix}.{domain_suffix}"
+            if (
+                domain_name[-1] != "."
+            ):  # Then it's probably not a fqdn, suffix certainly needed
+                domain_name = f"{domain_name}.{domain_suffix}"
 
             ip_addr = domain_name.split(".in-addr.arpa")
             if len(ip_addr) > 1:
                 decimals = ip_addr[0].split(".")
                 decimals.reverse()
+                while len(decimals) < 4:
+                    decimals.append("0")
                 domain_name = ".".join(decimals)
-
-            yield {"recordName": domain_name, "type": "ACCESS DENIED"}
+            # If domain has already been retrieved when searching with dnsNode filter (beacuse we had read_prop on it)
+            # Or domain is in multiple dnsZones
+            if domain_name in domain_set:
+                continue
+            domain_set.add(domain_name)
+            yield {"recordName": domain_name}
 
 
 def membership(conn, target: str, no_recurse: bool = False):

@@ -41,14 +41,28 @@ class Ldap(MSLDAPClient):
 
         elif cnf.kerberos:
             username = "%s\\%s" % (cnf.domain, cnf.username)
-            dc_ip = "dc=" + socket.gethostbyname(cnf.host)
-            params = params + "&" + dc_ip if params else dc_ip
+            dcip = socket.gethostbyname(cnf.host)
+            if dcip == cnf.host:
+                raise TypeError(
+                    "You need to provide the hostname not the IP in --host in order for"
+                    " kerberos to work"
+                )
+            dcip_param = "dc=" + dcip
+            params = params + "&" + dcip_param if params else dcip_param
             if cnf.password:
                 auth = "kerberos-password"
                 key = cnf.password
             else:
                 auth = "kerberos-ccache"
                 key = os.getenv("KRB5CCNAME")
+                if not key:
+                    if os.name == "nt":
+                        auth = "sspi-kerberos"
+                    else:
+                        raise TypeError(
+                            "You should provide a -p 'password' or a kerberos ticket"
+                            " vai environment variable KRB5CCNAME=./myticket "
+                        )
 
         else:
             username = "%s\\%s" % (cnf.domain, cnf.username)
@@ -58,6 +72,11 @@ class Ldap(MSLDAPClient):
             else:
                 auth = "ntlm-password"
                 key = cnf.password
+                if not key:
+                    if os.name == "nt":
+                        auth = "sspi-ntlm"
+                    else:
+                        raise TypeError("You should provide a -p 'password'")
 
         auth = "+" + auth if auth else ""
         creds = username if username else ""
