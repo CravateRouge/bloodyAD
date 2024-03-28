@@ -71,6 +71,7 @@ from msldap.protocol.typeconversion import (
     single_guid,
     multi_bytes,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
+    int2timedelta,
 )
 
 
@@ -122,6 +123,7 @@ LDAP_WELL_KNOWN_ATTRS["attributeSecurityGUID"] = single_guid
 LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"] = formatFactory(
     formatWellKnownObjects, LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"]
 )
+LDAP_WELL_KNOWN_ATTRS["msDS-MinimumPasswordAge"] = int2timedelta
 
 from winacl.dtyp.ace import (
     SYSTEM_AUDIT_OBJECT_ACE,

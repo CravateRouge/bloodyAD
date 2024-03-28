@@ -13,7 +13,8 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
     :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
-    target = conn.ldap.domainNC
+    if target == "DOMAIN":
+        target = conn.ldap.domainNC
     scope = Scope.LEVEL if direct else Scope.SUBTREE
     if otype == "useronly":
         otype_filter = f"sAMAccountType=805306368"
@@ -198,8 +199,12 @@ def membership(conn, target: str, no_recurse: bool = False):
         attr = "tokenGroups"
         entries = conn.ldap.bloodysearch(target, attr=[attr])
         for entry in entries:
-            for groupSID in entry[attr]:
-                ldap_filter += f"(objectSID={groupSID})"
+            try:
+                for groupSID in entry[attr]:
+                    ldap_filter += f"(objectSID={groupSID})"
+            except KeyError:
+                LOG.warning("[!] No membership found")
+                return []
         if not ldap_filter:
             LOG.warning("no GC Server available, the set of groups might be incomplete")
             attr = "tokenGroupsNoGCAcceptable"
@@ -223,7 +228,7 @@ def object(
     """
     Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN, GUID or SID of the target (if you give an empty string "" prints rootDSE)
     :param attr: attributes to retrieve separated by a comma, retrieves all the attributes by default
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64

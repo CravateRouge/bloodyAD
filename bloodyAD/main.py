@@ -40,6 +40,16 @@ def main():
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
     )
     parser.add_argument(
+        "--dc-ip",
+        help="IP of the DC (used for kerberos auth if hostname doesn't resolve)",
+    )
+    parser.add_argument(
+        "--gc",
+        help="Connect to Global Catalog (GC)",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         help="Adjust output verbosity",

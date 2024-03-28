@@ -88,6 +88,41 @@ async def clientPagedsearch(
 
 MSLDAPClient.pagedsearch = clientPagedsearch
 
+
+# MODIFICATIONS:
+# Add the encode arg to be able to pass already encoded value directly
+async def modify(
+    self,
+    dn: str,
+    changes: Dict[str, object],
+    controls: Dict[str, object] = None,
+    encode=True,
+):
+    """
+            Performs the modify operation.
+
+            :param dn: The DN of the object whose attributes are to be modified
+            :type dn: str
+            :param changes: Describes the changes to be made on the object. Must be a dictionary of the following format: {'attribute': [('change_type', [value])]}
+            :type changes: dict
+            :param controls: additional controls to be passed in the query
+            :type controls: dict
+    :param encode: encode the changes provided before sending them to the server
+    :type encode: bool
+            :return: A tuple of (True, None) on success or (False, Exception) on error.
+            :rtype: (:class:`bool`, :class:`Exception`)
+    """
+    if controls is None:
+        controls = []
+    controls_conv = []
+    for control in controls:
+        controls_conv.append(Control(control))
+    return await self._con.modify(dn, changes, controls=controls_conv, encode=encode)
+
+
+MSLDAPClient.modify = modify
+
+
 import asyncio
 from msldap.protocol.messages import (
     LDAPMessage,
@@ -267,11 +302,16 @@ from msldap.protocol.typeconversion import (
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
     LDAP_WELL_KNOWN_ATTRS,
+    multi_bytes,
+    single_bytes,
 )
 from msldap.protocol.messages import Attribute, Change, PartialAttribute
 
 
-def encode_changes(x):
+# MODIFICATIONS:
+# Replacing all single by multi because we doesn't need to ensure only one change has been provided for single attributes, the server will tell it for us.
+# Handle raw changes values with encode param
+def encode_changes(x, encode=True):
     logger.debug("Encode changes: %s" % x)
     res = []
     for k in x:
@@ -286,11 +326,24 @@ def encode_changes(x):
             raise Exception('Unknown conversion type for key "%s"' % k)
 
         for mod, value in x[k]:
+            encoder = lookup_table[k]
+            splitted_name = encoder.__name__.split("_")
+            if isinstance(value, list) and "single" == splitted_name[0]:
+                if len(value) > 1:
+                    raise TypeError(
+                        f"{k} takes only one value but multiple values have been given."
+                    )
+                value = value[0]
+            if not encode and splitted_name[1] != ["bytes"]:
+                if splitted_name[0] == "single":
+                    encoder = single_bytes
+                else:
+                    encoder = multi_bytes
             res.append(
                 Change({
                     "operation": mod,
                     "modification": PartialAttribute({
-                        "type": k.encode(), "attributes": lookup_table[k](value, True)
+                        "type": k.encode(), "attributes": encoder(value, True)
                     }),
                 })
             )
@@ -298,8 +351,14 @@ def encode_changes(x):
     return res
 
 
+# MODIFICATIONS:
+# Add the encode arg to be able to pass already encoded value directly
 async def modify(
-    self, entry: str, changes: Dict[str, object], controls: List[Control] = None
+    self,
+    entry: str,
+    changes: Dict[str, object],
+    controls: List[Control] = None,
+    encode=True,
 ):
     """
     Performs the modify operation.
@@ -310,11 +369,13 @@ async def modify(
     :type changes: dict
     :param controls: additional controls to be passed in the query
     :type controls: List[class:`Control`]
+    :param encode: encode the changes provided before sending them to the server
+    :type encode: bool
     :return: A tuple of (True, None) on success or (False, Exception) on error.
     :rtype: (:class:`bool`, :class:`Exception`)
     """
     try:
-        req = {"object": entry.encode(), "changes": encode_changes(changes)}
+        req = {"object": entry.encode(), "changes": encode_changes(changes, encode)}
         br = {"modifyRequest": ModifyRequest(req)}
         msg = {"protocolOp": protocolOp(br)}
         if controls is not None:

@@ -41,7 +41,10 @@ class Ldap(MSLDAPClient):
 
         elif cnf.kerberos:
             username = "%s\\%s" % (cnf.domain, cnf.username)
-            dcip = socket.gethostbyname(cnf.host)
+            if cnf.dcip:
+                dcip = cnf.dcip
+            else:
+                dcip = socket.gethostbyname(cnf.host)
             if dcip == cnf.host:
                 raise TypeError(
                     "You need to provide the hostname not the IP in --host in order for"
@@ -193,7 +196,7 @@ class Ldap(MSLDAPClient):
             asyncDnResolver(identity, objtype), self.loop
         ).result()
 
-    def bloodymodify(self, target, changes, controls=None):
+    def bloodymodify(self, target, changes, controls=None, encode=True):
         if controls is not None:
             t = []
             for control in controls:
@@ -205,7 +208,8 @@ class Ldap(MSLDAPClient):
             controls = t
 
         _, err = asyncio.run_coroutine_threadsafe(
-            self.modify(self.dnResolver(target), changes, controls), self.loop
+            self.modify(self.dnResolver(target), changes, controls, encode=encode),
+            self.loop,
         ).result()
         if err:
             raise err
