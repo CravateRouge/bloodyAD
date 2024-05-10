@@ -1,10 +1,11 @@
 import binascii
 from typing import Literal
+import msldap
 from bloodyAD import utils
 from bloodyAD.utils import LOG
 from bloodyAD.formatters import accesscontrol, common, dns, cryptography
 from bloodyAD.exceptions import BloodyError
-import ldap3
+from bloodyAD.network.ldap import Change
 
 
 def dcsync(conn, trustee: str):
@@ -17,18 +18,20 @@ def dcsync(conn, trustee: str):
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr="objectSid"))[
+        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
             "objectSid"
         ]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.delRight(new_sd, trustee_sid, access_mask)
 
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=accesscontrol.DACL_SECURITY_INFORMATION
-    )
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
+        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
+    })
+    controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+
     conn.ldap.bloodymodify(
         conn.ldap.domainNC,
-        {"nTSecurityDescriptor": [ldap3.MODIFY_REPLACE, new_sd.getData()]},
+        {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
     )
 
@@ -85,12 +88,11 @@ def dnsRecord(
     record_dn = f"DC={name}{zone_dn}"
 
     record_to_remove = None
-    dns_list = next(conn.ldap.bloodysearch(record_dn, attr="dnsRecord", raw=True))[
+    dns_list = next(conn.ldap.bloodysearch(record_dn, attr=["dnsRecord"], raw=True))[
         "dnsRecord"
     ]
     for raw_record in dns_list:
         record = dns.Record(raw_record)
-        print(record.toDict())
         tmp_record = dns.Record()
 
         if not ttl:
@@ -116,7 +118,7 @@ def dnsRecord(
 
     if len(dns_list) > 1:
         conn.ldap.bloodymodify(
-            record_dn, {"dnsRecord": (ldap3.MODIFY_DELETE, record_to_remove)}
+            record_dn, {"dnsRecord": [(Change.DELETE.value, record_to_remove)]}
         )
     else:
         conn.ldap.bloodydelete(record_dn)
@@ -135,17 +137,19 @@ def genericAll(conn, target: str, trustee: str):
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr="objectSid"))[
+        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
             "objectSid"
         ]
     utils.delRight(new_sd, trustee_sid)
 
-    controls = ldap3.protocol.microsoft.security_descriptor_control(
-        sdflags=accesscontrol.DACL_SECURITY_INFORMATION
-    )
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
+        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
+    })
+    controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+
     conn.ldap.bloodymodify(
         target,
-        {"nTSecurityDescriptor": [ldap3.MODIFY_REPLACE, new_sd.getData()]},
+        {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
     )
 
@@ -169,7 +173,9 @@ def groupMember(conn, group: str, member: str):
     else:
         member_transformed = conn.ldap.dnResolver(member)
 
-    conn.ldap.bloodymodify(group, {"member": (ldap3.MODIFY_DELETE, member_transformed)})
+    conn.ldap.bloodymodify(
+        group, {"member": [(Change.DELETE.value, member_transformed)]}
+    )
     LOG.info(f"[-] {member} removed from {group}")
 
 
@@ -197,7 +203,7 @@ def rbcd(conn, target: str, service: str):
     if "s-1-" in service.lower():
         service_sid = service
     else:
-        service_sid = next(conn.ldap.bloodysearch(service, attr="objectSid"))[
+        service_sid = next(conn.ldap.bloodysearch(service, attr=["objectSid"]))[
             "objectSid"
         ]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
@@ -205,13 +211,15 @@ def rbcd(conn, target: str, service: str):
 
     attr_values = []
     if len(new_sd["Dacl"].aces) > 0:
-        attr_values.append(new_sd.getData())
+        attr_values = new_sd.getData()
     conn.ldap.bloodymodify(
         target,
         {
             "msDS-AllowedToActOnBehalfOfOtherIdentity": [
-                ldap3.MODIFY_REPLACE,
-                attr_values,
+                (
+                    Change.REPLACE.value,
+                    attr_values,
+                )
             ]
         },
     )
@@ -227,7 +235,7 @@ def shadowCredentials(conn, target: str, key: str = None):
     :param key: RSA key of Key Credentials to remove from the target, removes all if key not specified
     """
     keyCreds = next(
-        conn.ldap.bloodysearch(target, attr="msDS-KeyCredentialLink", raw=True)
+        conn.ldap.bloodysearch(target, attr=["msDS-KeyCredentialLink"], raw=True)
     )["msDS-KeyCredentialLink"]
     newKeyCreds = []
     isFound = False
@@ -235,16 +243,15 @@ def shadowCredentials(conn, target: str, key: str = None):
         key_raw = common.DNBinary(keyCred).value
         key_blob = cryptography.KEYCREDENTIALLINK_BLOB(key_raw)
         if key and key_blob.getKeyID() != binascii.unhexlify(key):
-            newKeyCreds.append(keyCred)
+            newKeyCreds.append(keyCred.decode())
         else:
             isFound = True
             LOG.debug("[*] Key to delete found")
 
     if not isFound:
         LOG.warning("[!] No key found")
-
     conn.ldap.bloodymodify(
-        target, {"msDS-KeyCredentialLink": [ldap3.MODIFY_REPLACE, newKeyCreds]}
+        target, {"msDS-KeyCredentialLink": [(Change.REPLACE.value, newKeyCreds)]}
     )
 
     str_key = key if key else "All keys"
@@ -264,10 +271,10 @@ def uac(conn, target: str, f: list = None):
 
     try:
         old_uac = next(
-            conn.ldap.bloodysearch(target, attr="userAccountControl", raw=True)
+            conn.ldap.bloodysearch(target, attr=["userAccountControl"], raw=True)
         )["userAccountControl"][0]
     except IndexError as e:
-        for allowed in next(conn.ldap.bloodysearch(target, attr="allowedAttributes"))[
+        for allowed in next(conn.ldap.bloodysearch(target, attr=["allowedAttributes"]))[
             "allowedAttributes"
         ]:
             if "userAccountControl" in allowed:
@@ -278,6 +285,8 @@ def uac(conn, target: str, f: list = None):
         raise BloodyError(f"{target} doesn't have userAccountControl attribute") from e
 
     uac = int(old_uac) & ~uac
-    conn.ldap.bloodymodify(target, {"userAccountControl": [ldap3.MODIFY_REPLACE, uac]})
+    conn.ldap.bloodymodify(
+        target, {"userAccountControl": [(Change.REPLACE.value, uac)]}
+    )
 
     LOG.info(f"[-] {f} property flags removed from {target}'s userAccountControl")

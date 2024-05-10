@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
+import bloodyAD.msldap_patch
 from bloodyAD import cli_modules, ConnectionHandler, utils
 import sys, argparse, types
 
 # For dynamic argparse
-from inspect import getmembers, isfunction, signature
-from pkgutil import iter_modules
+import inspect, pkgutil, importlib
 
 
 def main():
@@ -17,7 +17,10 @@ def main():
     parser.add_argument(
         "-p",
         "--password",
-        help="Cleartext password or LMHASH:NTHASH for NTLM authentication",
+        help=(
+            "Cleartext password or LMHASH:NTHASH for NTLM authentication (Do not"
+            " specify to trigger integrated windows authentication)"
+        ),
     )
     parser.add_argument("-k", "--kerberos", action="store_true", default=False)
     parser.add_argument(
@@ -37,6 +40,16 @@ def main():
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
     )
     parser.add_argument(
+        "--dc-ip",
+        help="IP of the DC (used for kerberos auth if hostname doesn't resolve)",
+    )
+    parser.add_argument(
+        "--gc",
+        help="Connect to Global Catalog (GC)",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         help="Adjust output verbosity",
@@ -46,17 +59,15 @@ def main():
 
     subparsers = parser.add_subparsers(title="Commands")
     # Iterates all submodules in module package and creates one parser per submodule
-    for importer, submodname, ispkg in iter_modules(cli_modules.__path__):
+    for importer, submodname, ispkg in pkgutil.iter_modules(cli_modules.__path__):
         subparser = subparsers.add_parser(
             submodname, help=f"[{submodname.upper()}] function category"
         )
         subsubparsers = subparser.add_subparsers(title=f"{submodname} commands")
-        submodule = importer.find_spec(submodname).loader.load_module()
-        for function_name, function in getmembers(submodule, isfunction):
-            # Doesn't take into account function imported in the module
-            if function.__module__ != submodname:
-                continue
-
+        submodule = importlib.import_module("." + submodname, cli_modules.__name__)
+        for function_name, function in inspect.getmembers(
+            submodule, inspect.isfunction
+        ):
             function_doc, params_doc = doc_parser(function.__doc__)
             # This formatter class prints default values
             subsubparser = subsubparsers.add_parser(
@@ -65,7 +76,7 @@ def main():
                 formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             )
             # Gets function signature to extract parameters default values
-            func_signature = signature(function)
+            func_signature = inspect.signature(function)
             for param_name, param_value, param_doc in zip(
                 function.__annotations__.keys(),
                 function.__annotations__.values(),
@@ -124,27 +135,36 @@ def main():
 
     LOGGING_LEVELS = {"QUIET": 50, "INFO": 20, "DEBUG": 10}
     utils.LOG.setLevel(LOGGING_LEVELS[args.verbose])
+    # import msldap
+    # msldap.logger.setLevel(LOGGING_LEVELS[args.verbose])
+
     # Launch the command
     conn = ConnectionHandler(args=args)
-    output = args.func(conn, **params)
+    try:
+        output = args.func(conn, **params)
 
-    # Prints output, will print it directly if it's not an iterable
-    # Output is expected to be of type [{name:[members]},{...}...]
-    # If it's not, will print it raw
-    output_type = type(output)
-    if not output or output_type == bool:
-        return
+        # Prints output, will print it directly if it's not an iterable
+        # Output is expected to be of type [{name:[members]},{...}...]
+        # If it's not, will print it raw
+        output_type = type(output)
+        if not output or output_type == bool:
+            return
 
-    if output_type not in [list, dict, types.GeneratorType]:
-        print("\n" + output)
-        return
+        if output_type not in [list, dict, types.GeneratorType]:
+            print("\n" + output)
+            return
 
-    for entry in output:
-        print()
-        for attr_name, attr_val in entry.items():
-            entry_str = print_entry(attr_name, attr_val)
-            if entry_str:
-                print(f"{attr_name}: {entry_str}")
+        for entry in output:
+            print()
+            for attr_name, attr_val in entry.items():
+                entry_str = print_entry(attr_name, attr_val)
+                if entry_str:
+                    print(f"{attr_name}: {entry_str}")
+
+    # Close the connection properly anyway
+    finally:
+        if conn._ldap:
+            conn.ldap.close()
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -160,16 +180,24 @@ def print_entry(entryname, entry):
     if type(entry) in [list, set, types.GeneratorType]:
         i = 0
         simple_entries = []
+        length = len(entry)
+        i_str = ""
         for v in entry:
-            entry_str = print_entry(f"{entryname}.{i}", v)
+            if length > 1:
+                i_str = f".{i}"
+            entry_str = print_entry(f"{entryname}{i_str}", v)
             i += 1
             if entry_str:
                 simple_entries.append(entry_str)
         if simple_entries:
             print(f"{entryname}: {'; '.join([str(v) for v in simple_entries])}")
     elif type(entry) is dict:
+        length = len(entry)
+        k_str = ""
         for k in entry:
-            entry_str = print_entry(f"{entryname}.{k}", entry[k])
+            if length > 1:
+                k_str = f".{k}"
+            entry_str = print_entry(f"{entryname}{k_str}", entry[k])
             if entry_str:
                 print(f"{entryname}.{k}: {entry_str}")
     else:

@@ -17,7 +17,7 @@ class Config:
     certificate: str = ""
     crt: str = ""
     key: str = ""
-    url: str = ""
+    dcip: str = ""
 
     def __post_init__(self):
         # Handle case where password is hashes
@@ -42,16 +42,17 @@ class Config:
         if self.certificate:
             self.key, self.crt = self.certificate.split(":")
 
-        # Build the url from parameters given
-        self.url = self.scheme + "://" + self.host
-
 
 class ConnectionHandler:
     _ldap = None
 
     def __init__(self, args=None, config=None):
         if args:
-            scheme = "ldaps" if args.secure else "ldap"
+            scheme = "ldap"
+            if args.gc:
+                scheme = "gc"
+            elif args.secure:
+                scheme = "ldaps"
             cnf = Config(
                 domain=args.domain,
                 username=args.username,
@@ -60,6 +61,7 @@ class ConnectionHandler:
                 host=args.host,
                 kerberos=args.kerberos,
                 certificate=args.certificate,
+                dcip=args.dc_ip,
             )
         else:
             cnf = config
@@ -72,7 +74,7 @@ class ConnectionHandler:
         return self._ldap
 
     def rebind(self):
-        self._ldap.unbind()
+        self._ldap.close()
         self._ldap = Ldap(self.conf)
 
     def switchUser(self, username, password):

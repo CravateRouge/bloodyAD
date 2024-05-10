@@ -29,6 +29,7 @@ Like this project? Donations are greatly appreciated :relaxed: [![](https://img.
 Need personalized support? send me an [email](mailto:baptiste.crepin@ntymail.com) for trainings or custom features.
 
 ## Acknowledgements
+- Thanks to [@skelsec](https://github.com/skelsec) for his amazing libraries especially [MSLDAP](https://github.com/skelsec/msldap) which is now the engine on which bloodyAD is running.
 - Thanks to [impacket](https://github.com/fortra/impacket) contributors. [Structures](https://github.com/fortra/impacket/blob/master/impacket/structure.py) and several [LDAP attacks](https://github.com/fortra/impacket/blob/master/impacket/examples/ntlmrelayx/attacks/ldapattack.py) are based on their work.
 - Thanks to [@PowerShellMafia](https://github.com/PowerShellMafia) team ([PowerView.ps1](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1)) and their work on AD which inspired this tool.
 - Thanks to [@dirkjanm](https://github.com/dirkjanm) ([adidnsdump.py](https://github.com/dirkjanm/adidnsdump)) and ([@Kevin-Robertson](https://github.com/Kevin-Robertson))([Invoke-DNSUpdate.ps1](https://github.com/Kevin-Robertson/Powermad/blob/master/Invoke-DNSUpdate.ps1)) for their work on AD DNS which inspired DNS functionnalities.

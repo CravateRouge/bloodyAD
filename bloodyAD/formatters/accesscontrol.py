@@ -1,6 +1,5 @@
-from bloodyAD.formatters import ldaptypes, helpers
+from bloodyAD.formatters import ldaptypes
 import uuid
-from functools import lru_cache
 
 
 # 2.4.7 SECURITY_INFORMATION
@@ -82,51 +81,6 @@ ACCOUNT_FLAGS = {
     "PARTIAL_SECRETS_ACCOUNT": 0x04000000,
     "USE_AES_KEYS": 0x8000000,
 }
-
-
-@lru_cache
-def decodeAccessMask(mask):
-    tmp_mask = [(key, val) for key, val in ACCESS_FLAGS.items() if mask.hasPriv(val)]
-    pretty_mask = []
-    for i in range(0, len(tmp_mask)):
-        isDuplicate = False
-        for j in range(i + 1, len(tmp_mask)):
-            if tmp_mask[j][1] & tmp_mask[i][1] == tmp_mask[i][1]:
-                isDuplicate = True
-        for mask in pretty_mask:
-            if mask[1] & tmp_mask[i][1] == tmp_mask[i][1]:
-                isDuplicate = True
-        if not isDuplicate:
-            pretty_mask.append(tmp_mask[i])
-    pretty_mask = [key for key, val in pretty_mask]
-    return pretty_mask if len(pretty_mask) > 0 else mask["Mask"]
-
-
-def decodeAceFlags(ace):
-    pretty_flags = [key for key, val in ACE_FLAGS.items() if ace.hasFlag(val)]
-    return pretty_flags if len(pretty_flags) > 0 else ace["AceFlags"]
-
-
-def decodeAce(ace):
-    ace_val = ace["Ace"]
-    pretty_ace = {
-        "TypeName": ace["TypeName"],
-        "Trustee": helpers.resolveSid(ace_val["Sid"].formatCanonical()),
-        "Mask": decodeAccessMask(ace_val["Mask"]),
-    }
-    if ace["AceFlags"] > 0:
-        pretty_ace["Flags"] = decodeAceFlags(ace)
-    if (
-        "InheritedObjectType" in ace_val.__dict__["fields"]
-        and len(ace_val["InheritedObjectType"]) != 0
-    ):
-        pretty_ace["InheritedObjectType"] = helpers.resolveGUID(
-            ace_val["InheritedObjectType"]
-        )
-    if "ObjectType" in ace_val.__dict__["fields"] and len(ace_val["ObjectType"]) != 0:
-        pretty_ace["ObjectType"] = helpers.resolveGUID(ace_val["ObjectType"])
-
-    return pretty_ace
 
 
 def createACE(sid, object_type=None, access_mask=ACCESS_FLAGS["FULL_CONTROL"]):
