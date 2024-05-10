@@ -2,7 +2,7 @@ name: Compile bloodyAD into standalone binary
 
 on:
   push:
-    branches: [ "msldap" ]
+    branches: [ "main" ]
     tags:        
       - '*'
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
           ref: msldap
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.8'
+          python-version: '3.9'
       - name: Install dependencies
         run: |
           pip install .
@@ -26,5 +26,4 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: test
           files: bloodyAD.exe
