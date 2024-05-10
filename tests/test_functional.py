@@ -96,7 +96,7 @@ class TestModules(unittest.TestCase):
     def test_02SearchAndGetChildAndGetWritable(self):
         self.launchBloody(
             self.user,
-            ["get", "children", "--target", "OU=Domain Controllers,DC=bloody,DC=local"],
+            ["get", "children", "--target", "OU=Domain Controllers,DC=bloody,DC=lab"],
         )
 
         self.launchBloody(
@@ -261,7 +261,7 @@ class TestModules(unittest.TestCase):
             self.launchProcess([
                 "secretsdump.py",
                 "-just-dc-user",
-                "Administrator",
+                "BLOODY/Administrator",
                 f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
             ]),
             "Kerberos keys grabbed",
@@ -271,7 +271,7 @@ class TestModules(unittest.TestCase):
             self.launchProcess([
                 "secretsdump.py",
                 "-just-dc-user",
-                "Administrator",
+                "BLOODY/Administrator",
                 f"{self.domain}/{slave['username']}:{slave['password']}@{self.host}",
             ]),
             "Kerberos keys grabbed",

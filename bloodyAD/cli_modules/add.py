@@ -151,6 +151,7 @@ def dnsRecord(
     serial = None
     new_dnsrecord_list = None
     ldap_filter = f"(|(name=@)(name={name}))"
+    print(zone_dn)
     for entry in conn.ldap.bloodysearch(
         zone_dn,
         ldap_filter=ldap_filter,

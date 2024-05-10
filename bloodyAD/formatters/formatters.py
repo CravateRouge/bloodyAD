@@ -17,6 +17,31 @@ def formatAccountControl(userAccountControl):
     ]
 
 
+def formatTrustDirection(trustDirection):
+    trustDirection = int(trustDirection.decode())
+    for key, val in common.TRUST_DIRECTION.items():
+        if trustDirection == val:
+            return key
+    return trustDirection
+
+
+def formatTrustAttributes(trustAttributes):
+    trustAttributes = int(trustAttributes.decode())
+    return [
+        key
+        for key, val in common.TRUST_ATTRIBUTES.items()
+        if trustAttributes & val == val
+    ]
+
+
+def formatTrustType(trustType):
+    trustType = int(trustType.decode())
+    for key, val in common.TRUST_TYPE.items():
+        if trustType == val:
+            return key
+    return trustType
+
+
 def formatSD(sd_bytes):
     return SECURITY_DESCRIPTOR.from_bytes(sd_bytes).to_sddl()
 
@@ -106,6 +131,15 @@ MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"] = formatFactory(
 )
 LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"] = formatFactory(
     formatAccountControl, LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"]
+)
+LDAP_WELL_KNOWN_ATTRS["trustDirection"] = formatFactory(
+    formatTrustDirection, LDAP_WELL_KNOWN_ATTRS["trustDirection"]
+)
+LDAP_WELL_KNOWN_ATTRS["trustAttributes"] = formatFactory(
+    formatTrustAttributes, LDAP_WELL_KNOWN_ATTRS["trustAttributes"]
+)
+LDAP_WELL_KNOWN_ATTRS["trustType"] = formatFactory(
+    formatTrustType, LDAP_WELL_KNOWN_ATTRS["trustType"]
 )
 MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"] = formatFactory(
     formatFunctionalLevel, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"]

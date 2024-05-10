@@ -1,6 +1,6 @@
-from bloodyAD.formatters import accesscontrol, helpers, formatters
-from bloodyAD.exceptions import NoResultError, TooManyResultsError, BloodyError
-import re, ssl, socket, os, enum, asyncio, threading
+from bloodyAD.formatters import accesscontrol
+from bloodyAD.exceptions import NoResultError, TooManyResultsError
+import re, socket, os, enum, asyncio, threading
 from functools import cached_property, lru_cache
 from msldap.client import MSLDAPClient
 from msldap.commons.factory import LDAPConnectionFactory
@@ -91,8 +91,6 @@ class Ldap(MSLDAPClient):
         )
         super().__init__(ldap_factory.target, ldap_factory.credential, keepalive=True)
 
-        helpers.ldap_conn = self
-
         # Connect function runs indefinitely waiting for I/O events so using asyncio.run will not allow us to reuse the connection
         # To avoid it, we launch it in another thread and we control it using a defined event_loop
         self.loop = asyncio.new_event_loop()
@@ -178,9 +176,10 @@ class Ldap(MSLDAPClient):
                 ldap_filter = f"(sAMAccountName={identity})"
 
             dn = ""
-            async for entry, err in self.pagedsearch(
+            entries = self.pagedsearch(
                 ldap_filter, ["distinguishedName"], tree=self.domainNC
-            ):
+            )
+            async for entry, err in entries:
                 if err:
                     raise err
                 if dn:
@@ -283,6 +282,7 @@ class Ldap(MSLDAPClient):
             base_dn = base
 
         if not controls:
+            # Search control to request security descriptor parts
             req_flags = SDFlagsRequestValue({"Flags": control_flag})
             controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 

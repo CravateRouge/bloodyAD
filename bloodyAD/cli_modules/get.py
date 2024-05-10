@@ -1,6 +1,10 @@
-from bloodyAD import utils
+from bloodyAD import utils, asciitree
 from bloodyAD.utils import LOG
 from bloodyAD.network.ldap import Scope
+from bloodyAD.exceptions import NoResultError
+from bloodyAD.formatters import common
+from msldap.commons.exceptions import LDAPSearchException
+from dns import resolver
 from typing import Literal
 import re
 
@@ -10,14 +14,14 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
     List children for a given target object
 
     :param target: sAMAccountName, DN, GUID or SID of the target
-    :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
+    :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
     if target == "DOMAIN":
         target = conn.ldap.domainNC
     scope = Scope.LEVEL if direct else Scope.SUBTREE
     if otype == "useronly":
-        otype_filter = f"sAMAccountType=805306368"
+        otype_filter = "sAMAccountType=805306368"
     else:
         otype_filter = f"objectClass={otype}"
     return conn.ldap.bloodysearch(
@@ -58,15 +62,15 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
 
     dnsZones = []
     for nc in conn.ldap.appNCs + [conn.ldap.domainNC]:
-        # try:
-        entries = conn.ldap.bloodysearch(
-            nc,
-            filter,
-            search_scope=Scope.SUBTREE,
-            attr=["dnsRecord", "name", "objectClass"],
-        )
-        # except LDAPNoSuchObject:
-        #     continue
+        try:
+            entries = conn.ldap.bloodysearch(
+                nc,
+                filter,
+                search_scope=Scope.SUBTREE,
+                attr=["dnsRecord", "name", "objectClass"],
+            )
+        except (NoResultError, LDAPSearchException):
+            continue
 
         domain_set = set()
         for entry in entries:
@@ -90,7 +94,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
 
             if domain_name == "@":  # @ is for dnsZone info
                 domain_name = domain_suffix
-            else:  # even for reverse lookup (X.X.X.X.in-addr.arpa), domain suffix should be parent name?
+            else:  # even for reverse lookup (X.X.X.X.in-addr.arpa), domain suffix should be the parent name?
                 if (
                     domain_name[-1] != "."
                 ):  # Then it's probably not a fqdn, suffix needed
@@ -141,11 +145,11 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
         try:
             entries = conn.ldap.bloodysearch(
                 searchbase,
-                f"(objectClass=*)",
+                "(objectClass=*)",
                 search_scope=Scope.SUBTREE,
                 attr=["objectClass"],
             )
-        except LDAPNoSuchObjectResult:
+        except (NoResultError, LDAPSearchException):
             continue
         for entry in entries:
             if entry.get("objectClass") or entry["distinguishedName"] == searchbase:
@@ -220,6 +224,124 @@ def membership(conn, target: str, no_recurse: bool = False):
         attr=["objectSID", "sAMAccountName"],
     )
     return entries
+
+
+def trusts(conn, transitive_trust: bool = False, dns: str = ""):
+    """
+    Display trusts in an ascii tree starting from the DC domain as tree root. A->B means A can auth on B and A-<B means B can auth on A, A-<>B means bidirectionnal
+
+    :param transitive_trust: Try to fetch transitive trusts (you should start from a dc of your user domain to have more complete results)
+    :param dns: custom DNS IP (useful if current DC is not a GC and system DNS and DC DNS can't resolve trusts domains)
+    """
+    # Get all forest partitions of domain type
+    # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objecClass=crossRef)(systemFlags=3))", attr=["nCName"])
+
+    # Get the host domain as root for the trust tree
+    trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
+
+    def fetchTrusts(conn, domain_name, trust_dict, dns):
+        if domain_name:
+            try:
+                gc = utils.findReachableServer(conn, domain_name, "gc", dns)
+            except resolver.NoAnswer:
+                gc = None
+            if not gc:
+                LOG.warning(
+                    f"[!] No Global Catalog found for {domain_name}, try to provide one"
+                    " manually in --host"
+                )
+                return {}
+
+        else:
+            gc = conn.conf.host
+
+        # Switch connection to a GC but on LDAP port to increase firewall bypass chances
+        # Anyway we can access all partitions hosted by the DC on LDAP port too
+        # We try to find a GC because we're sure it has all forest partitions but:
+        # TODO: we could check by who has the NC replicas we need until we collect all the replicas
+        conn.conf.scheme = "ldap"
+        conn.conf.host = gc
+        conn.rebind()
+
+        # Tree root is the DC domain
+        trust_to_explore = set()
+        trusts = conn.ldap.bloodysearch(
+            "",
+            "(objectClass=trustedDomain)",
+            attr=["trustDirection", "trustPartner", "trustAttributes", "trustType"],
+            search_scope=Scope.SUBTREE,
+            raw=True,
+            controls=[utils.phantomRoot()],
+        )
+        for trust in trusts:
+            already_in_tree = (
+                ((trust["distinguishedName"]).rsplit("CN=System,", 1)[1]).replace(
+                    "DC=", ""
+                )
+            ).replace(",", ".")
+            if already_in_tree not in trust_dict:
+                trust_dict[already_in_tree] = {}
+            trust_dict[already_in_tree][trust["trustPartner"][0].decode()] = trust
+
+            # We already have access to all the partitions of the forest through the GC we don't need to connect to other forest DCs
+            if (
+                common.TRUST_ATTRIBUTES["WITHIN_FOREST"]
+                & int(trust["trustAttributes"][0].decode())
+                > 0
+            ):
+                continue
+            # We assume user belong to forest of provided DC in --host so we can explore external trusts only if we can auth on it (inbound)
+            if (
+                common.TRUST_DIRECTION["INBOUND"]
+                & int(trust["trustDirection"][0].decode())
+                > 0
+            ):
+                trust_to_explore.add(trust["trustPartner"][0].decode())
+
+        return trust_to_explore
+
+    forest_name = ""
+    # Find a GC
+    # Check if current DC is a GC
+    NTDSDSA_OPT_IS_GC = 1
+    nTDSDSA_options = next(
+        conn.ldap.bloodysearch(conn.ldap._serverinfo["dsServiceName"], attr=["options"])
+    )["options"]
+    if nTDSDSA_options & NTDSDSA_OPT_IS_GC == 0:
+        LOG.debug("[*] Current DC is not a GC, let's find one")
+        forest_name = (
+            ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
+        ).split("DC=")[1]
+
+    trust_dict = {}
+    trust_to_explore = fetchTrusts(conn, forest_name, trust_dict, dns)
+
+    # We don't do it on foreign trust because there is no transitivity between 3 forests (A<->B<->C) A doesn't have trust on C even if B has it
+    if transitive_trust:
+        if not conn.conf.domain:
+            LOG.warning(
+                "[!] No domain (-d, --domain) provided, transitive trust will not be"
+                " performed"
+            )
+        elif conn.conf.domain not in trust_dict:
+            LOG.warning(
+                "[!] User doesn't belong to this forest, transitive trusts will not be"
+                " performed"
+            )
+        else:
+            LOG.info(
+                "[+] Forest trusts fetched, performing transitive trusts resolution"
+            )
+            for domain_name in trust_to_explore:
+                fetchTrusts(conn, domain_name, trust_dict, dns)
+
+    if not trust_dict:
+        LOG.warning("[!] No Trusts found")
+    else:
+        tree = {}
+        asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
+        tree_printer = asciitree.LeftAligned()
+        print(tree_printer({trust_root_domain: tree}))
 
 
 def object(
@@ -311,7 +433,7 @@ def writable(
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
     """
-    #:param partition: directory partition a.k.a naming context to explore
+    # :param partition: directory partition a.k.a naming context to explore
 
     ldap_filter = ""
     if otype == "USER":

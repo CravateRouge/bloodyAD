@@ -17,7 +17,6 @@ class Config:
     certificate: str = ""
     crt: str = ""
     key: str = ""
-    url: str = ""
     dcip: str = ""
 
     def __post_init__(self):
@@ -42,9 +41,6 @@ class Config:
         # Handle case where certificate is provided
         if self.certificate:
             self.key, self.crt = self.certificate.split(":")
-
-        # Build the url from parameters given
-        self.url = self.scheme + "://" + self.host
 
 
 class ConnectionHandler:
@@ -78,7 +74,7 @@ class ConnectionHandler:
         return self._ldap
 
     def rebind(self):
-        self._ldap.unbind()
+        self._ldap.close()
         self._ldap = Ldap(self.conf)
 
     def switchUser(self, username, password):

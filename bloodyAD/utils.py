@@ -4,9 +4,10 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope
-import logging, json, sys, types, base64
+import logging, sys, types, base64, socket, asyncio
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
+from dns import resolver
 from asn1crypto import core
 
 LOG = logging.getLogger("bloodyAD")
@@ -43,7 +44,7 @@ def addRight(
         if ace["AceType"] == access_denied_type and new_mask.hasPriv(mask["Mask"]):
             sd["Dacl"].aces.remove(ace)
             LOG.debug("[-] An interfering Access-Denied ACE has been removed:")
-            LOG.info(json.dumps(accesscontrol.decodeAce(ace)))
+            LOG.debug(ace)
         # Adds ACE if not already added
         elif mask.hasPriv(new_mask["Mask"]):
             hasPriv = True
@@ -323,16 +324,6 @@ class LazyAdSchema:
 
         # Search in all non application partitions
         # TODO: search in GC and add domain linked to it as DOMAIN\sAMAccountName, maybe try trusts in the future?
-        class SearchOptionsRequest(core.Sequence):
-            _fields = [
-                ("Flags", core.Integer),
-            ]
-
-        SERVER_SEARCH_FLAG_PHANTOM_ROOT = 2
-        scontrols = SearchOptionsRequest({"Flags": SERVER_SEARCH_FLAG_PHANTOM_ROOT})
-        LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
-        controls = [(LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())]
-
         for ldap_filter in filters:
             entries = self.conn.ldap.bloodysearch(
                 "",
@@ -345,7 +336,7 @@ class LazyAdSchema:
                     "schemaIDGUID",
                 ],
                 search_scope=Scope.SUBTREE,
-                controls=controls,
+                controls=[phantomRoot()],
             )
             for entry in entries:
                 if entry["objectSid"]:
@@ -506,7 +497,7 @@ def renderSearchResult(entries):
             if type(attr_members) in [list, types.GeneratorType]:
                 decoded_entry[attr_name] = []
                 for member in attr_members:
-                    if type(member) == bytes:
+                    if type(member) is bytes:
                         try:
                             decoded = member.decode()
                         except UnicodeDecodeError:
@@ -515,7 +506,7 @@ def renderSearchResult(entries):
                         decoded = member
                     decoded_entry[attr_name].append(decoded)
             else:
-                if type(attr_members) == bytes:
+                if type(attr_members) is bytes:
                     try:
                         decoded = attr_members.decode()
                     except UnicodeDecodeError:
@@ -525,3 +516,118 @@ def renderSearchResult(entries):
                 decoded_entry[attr_name] = decoded
         yield decoded_entry
         decoded_entry = {}
+
+
+def getCurrentSite(conn):
+    return (conn.ldap._serverinfo["serverName"].rsplit(",CN=Sites")[0]).split(
+        ",CN=Servers,CN="
+    )[1]
+
+
+# Find LDAP or GC server based on current AD site
+def findReachableServer(conn, domain_or_forest_name, server_type, dns_addr=""):
+    custom_resolver = resolver.Resolver()
+    custom_resolver.nameservers = [socket.gethostbyname(conn.conf.host)] + (
+        resolver.get_default_resolver()
+    ).nameservers
+    current_site = getCurrentSite(conn)
+    # Do 389 event for GC because more probabilities to bypass fw
+    port = 389
+    if dns_addr:
+        custom_resolver.nameservers = [dns_addr] + custom_resolver.nameservers
+    LOG.debug(f"[+] Nameservers set to: {custom_resolver.nameservers}")
+    record_list = []
+    if server_type == "gc":
+        record_list = [
+            {
+                "type": "SRV",
+                "name": f"_gc._tcp.{current_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": "A", "name": f"gc._msdcs.{domain_or_forest_name}"},
+        ]
+    elif server_type == "ldap":
+        record_list = [
+            {
+                "type": "SRV",
+                "name": f"_ldap._tcp.{current_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": "A", "name": domain_or_forest_name},
+        ]
+    answer = None
+    for record in record_list:
+        LOG.debug(f"[*] Resolving {record}")
+        try:
+            answer = custom_resolver.resolve(record["name"], record["type"], tcp=True)
+            if record["type"] == "SRV":
+                srv_ip_list = []
+                for rsrv in answer:
+                    try:
+                        srv_ip_list += [
+                            rdata
+                            for rdata in custom_resolver.resolve(
+                                rsrv.target.to_text(), "A", tcp=True
+                            )
+                        ]
+                    except (resolver.NXDOMAIN, resolver.NoAnswer, resolver.Timeout):
+                        continue
+                    if srv_ip_list:
+                        break
+                answer = srv_ip_list
+        except (resolver.NXDOMAIN, resolver.NoAnswer, resolver.Timeout):
+            continue
+        if answer:
+            break
+    if not answer:
+        raise resolver.NoAnswer(
+            f"No DNS resolution for {server_type} in {domain_or_forest_name} with the"
+            f" following name servers: {custom_resolver.nameservers}"
+        )
+
+    async def record_connect(record, port):
+        try:
+            LOG.debug(f"[*] Attempting to TCP connect to {record.to_text()}:{port}")
+            await asyncio.open_connection(record.to_text(), port)
+            return record.address
+        except (TimeoutError, OSError, ConnectionRefusedError):
+            LOG.debug(f"[!] Could not TCP connect to {record.to_text()}:{port}")
+            return
+
+    async def wait_first_connect(records, port):
+        tasks = [asyncio.create_task(record_connect(r, port)) for r in records]
+        while tasks:
+            finished, unfinished = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for x in finished:
+                result = x.result()
+                if result:
+                    if unfinished:
+                        # cancel the other tasks, we have a result. We need to wait for the cancellations
+                        # to propagate.
+                        LOG.debug(f"[*] Cancelling {len(unfinished)} remaining tasks")
+                        for task in unfinished:
+                            task.cancel()
+                        await asyncio.wait(unfinished)
+                    return result
+            tasks = unfinished
+        return
+
+    result = asyncio.get_event_loop().run_until_complete(
+        wait_first_connect(answer, port)
+    )
+    return result
+
+
+def phantomRoot():
+    # [MS-ADTS] 3.1.1.3.4.1.12
+    # Search control to search in all NC replicas except applications replicas (DNS partitions)
+    class SearchOptionsRequest(core.Sequence):
+        _fields = [
+            ("Flags", core.Integer),
+        ]
+
+    SERVER_SEARCH_FLAG_PHANTOM_ROOT = 2
+    scontrols = SearchOptionsRequest({"Flags": SERVER_SEARCH_FLAG_PHANTOM_ROOT})
+    LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
+
+    return (LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())

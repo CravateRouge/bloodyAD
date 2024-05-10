@@ -219,21 +219,21 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                 print(pwdPolicy)
                 if pwdPolicy.get("pwdHistoryLength", 0) > 0:
                     if oldpass == newpass:
-                        error_str = f"New Password can't be identical to old password."
+                        error_str = "New Password can't be identical to old password."
                     else:
                         error_str = (
-                            f"Password can't be changed. It may be because the new"
-                            f" password is already in the password history of the"
-                            f" target or that the oldpass provided is not valid.\nYou"
-                            f" can try to use another password change protocol such as"
-                            f" smbpasswd, server error may be more explicit."
+                            "Password can't be changed. It may be because the new"
+                            " password is already in the password history of the"
+                            " target or that the oldpass provided is not valid.\nYou"
+                            " can try to use another password change protocol such as"
+                            " smbpasswd, server error may be more explicit."
                         )
                 else:
                     error_str = (
-                        f"Password can't be changed. It may be because the oldpass"
-                        f" provided is not valid.\nYou can try to use another password"
-                        f" change protocol such as smbpasswd, server error may be more"
-                        f" explicit."
+                        "Password can't be changed. It may be because the oldpass"
+                        " provided is not valid.\nYou can try to use another password"
+                        " change protocol such as smbpasswd, server error may be more"
+                        " explicit."
                     )
 
         # We can't modify the object on the fly so let's do it on the class :D
