@@ -47,8 +47,8 @@ class Ldap(MSLDAPClient):
                 dcip = socket.gethostbyname(cnf.host)
             if dcip == cnf.host:
                 raise TypeError(
-                    "You need to provide the hostname not the IP in --host in order for"
-                    " kerberos to work"
+                    "You can provide the IP in --dc-ip but you need to provide the"
+                    " hostname in --host in order for kerberos to work"
                 )
             dcip_param = "dc=" + dcip
             params = params + "&" + dcip_param if params else dcip_param
@@ -64,7 +64,7 @@ class Ldap(MSLDAPClient):
                     else:
                         raise TypeError(
                             "You should provide a -p 'password' or a kerberos ticket"
-                            " vai environment variable KRB5CCNAME=./myticket "
+                            " via environment variable KRB5CCNAME=./myticket "
                         )
 
         else:
