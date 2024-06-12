@@ -57,7 +57,7 @@ class Ldap(MSLDAPClient):
                 key = cnf.password
             else:
                 auth = "kerberos-ccache"
-                key = os.getenv("KRB5CCNAME")
+                key = cnf.keyfile
                 if not key:
                     if os.name == "nt":
                         auth = "sspi-kerberos"

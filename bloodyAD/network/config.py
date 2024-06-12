@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from bloodyAD.network.ldap import Ldap
+import os
+from urllib import parse
 
 
 @dataclass
@@ -14,6 +16,7 @@ class Config:
     lmhash: str = "aad3b435b51404eeaad3b435b51404ee"
     nthash: str = ""
     kerberos: bool = False
+    keyfile: str = ""
     certificate: str = ""
     crt: str = ""
     key: str = ""
@@ -60,11 +63,15 @@ class ConnectionHandler:
                 scheme=scheme,
                 host=args.host,
                 kerberos=args.kerberos,
+                keyfile=os.getenv("KRB5CCNAME"),
                 certificate=args.certificate,
                 dcip=args.dc_ip,
             )
         else:
             cnf = config
+        for prop, val in vars(cnf).items():
+            if type(val) is str:
+                setattr(cnf, prop, parse.quote(val, safe=""))
         self.conf = cnf
 
     @property

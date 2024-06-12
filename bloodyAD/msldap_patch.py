@@ -465,3 +465,248 @@ async def add(self, entry: str, attributes: Dict[str, object]):
 
 
 MSLDAPClientConnection.add = add
+
+
+from asysocks.unicomm.common.target import UniTarget, UniProto
+from urllib.parse import urlparse
+from msldap.commons.target import MSLDAPTarget
+from asysocks.unicomm.utils.paramprocessor import str_one, int_one, bool_one
+
+msldaptarget_url_params = {
+    "pagesize": int_one,
+    "rate": int_one,
+}
+
+from urllib import parse
+
+
+def from_url(connection_url):
+    url_e = urlparse(connection_url)
+    url_dict = url_e._asdict()
+    for prop, val in url_dict.items():
+        if type(val) is str:
+            url_dict[prop] = parse.unquote(val)
+    url_e = url_e._replace(**url_dict)
+    schemes = []
+    for item in url_e.scheme.upper().split("+"):
+        schemes.append(item.replace("-", "_"))
+    if schemes[0] == "LDAP":
+        protocol = UniProto.CLIENT_TCP
+        port = 389
+    elif schemes[0] == "LDAPS":
+        protocol = UniProto.CLIENT_SSL_TCP
+        port = 636
+    elif schemes[0] == "LDAP_SSL":
+        protocol = UniProto.CLIENT_SSL_TCP
+        port = 636
+    elif schemes[0] == "LDAP_TCP":
+        protocol = UniProto.CLIENT_TCP
+        port = 389
+    elif schemes[0] == "LDAP_UDP":
+        raise NotImplementedError()
+        protocol = UniProto.CLIENT_UDP
+        port = 389
+    elif schemes[0] == "GC":
+        protocol = UniProto.CLIENT_TCP
+        port = 3268
+    elif schemes[0] == "GC_SSL":
+        protocol = UniProto.CLIENT_SSL_TCP
+        port = 3269
+    else:
+        raise Exception("Unknown protocol! %s" % schemes[0])
+
+    if url_e.port:
+        port = url_e.port
+    if port is None:
+        raise Exception("Port must be provided!")
+
+    path = None
+    if url_e.path not in ["/", "", None]:
+        path = url_e.path
+
+    unitarget, extraparams = UniTarget.from_url(
+        connection_url, protocol, port, msldaptarget_url_params
+    )
+    pagesize = extraparams["pagesize"] if extraparams["pagesize"] is not None else 1000
+    rate = extraparams["rate"] if extraparams["rate"] is not None else 0
+
+    target = MSLDAPTarget(
+        unitarget.ip,
+        port=unitarget.port,
+        protocol=unitarget.protocol,
+        tree=path,
+        proxies=unitarget.proxies,
+        timeout=unitarget.timeout,
+        ldap_query_page_size=pagesize,
+        ldap_query_ratelimit=rate,
+        dns=unitarget.dns,
+        dc_ip=unitarget.dc_ip,
+        domain=unitarget.domain,
+        hostname=unitarget.hostname,
+        ssl_ctx=unitarget.ssl_ctx,
+    )
+    return target
+
+
+MSLDAPTarget.from_url = from_url
+
+
+from urllib.parse import urlparse, parse_qs
+from asyauth.common.constants import asyauthSecret, asyauthProtocol, asyauthSubProtocol
+from asyauth.common.subprotocols import SubProtocol, SubProtocolNative
+from asyauth.common.credentials import UniCredential
+
+from urllib import parse
+
+
+def from_url(connection_url):
+    from asysocks.unicomm.common.target import UniTarget, UniProto
+
+    secret = None
+    username = None
+    domain = None
+    stype = asyauthSecret.NONE
+    protocol = asyauthProtocol.NONE
+    subprotocol = SubProtocolNative()
+    url_e = urlparse(connection_url)
+    url_dict = url_e._asdict()
+    for prop, val in url_dict.items():
+        if type(val) is str:
+            url_dict[prop] = parse.unquote(val)
+    url_e = url_e._replace(**url_dict)
+    schemes = url_e.scheme.upper().split("+")
+    if len(schemes) == 1:
+        try:
+            protocol = asyauthProtocol(schemes)
+        except:
+            pass
+    else:
+        auth_tags = schemes[1].replace("-", "_")
+        try:
+            protocol = asyauthProtocol(auth_tags)
+        except:
+            auth_tags = schemes[1].split("-")
+            if len(auth_tags) > 1:
+                try:
+                    spt = asyauthSubProtocol(auth_tags[0])
+                except:
+                    protocol = asyauthProtocol(auth_tags[0])
+                    stype = asyauthSecret(auth_tags[1])
+                else:
+                    protocol = asyauthProtocol(auth_tags[1])
+                    query = None
+                    if url_e.query is not None:
+                        query = parse_qs(url_e.query)
+                    subprotocol = SubProtocol.from_url_params(spt, query)
+
+            else:
+                try:
+                    spt = asyauthSubProtocol(auth_tags[0])
+                    protocol = asyauthProtocol.NTLM
+                except:
+                    protocol = asyauthProtocol(auth_tags[0])
+
+    if url_e.username is not None:
+        if url_e.username.find("\\") != -1:
+            domain, username = url_e.username.split("\\")
+            if domain == ".":
+                domain = None
+        else:
+            domain = None
+            username = url_e.username
+
+    secret = url_e.password
+    credobj = None
+    if protocol == asyauthProtocol.KERBEROS:
+        from asyauth.common.credentials.kerberos import KerberosCredential
+
+        credobj = KerberosCredential
+
+    elif protocol in [asyauthProtocol.NTLM, asyauthProtocol.SICILY]:
+        from asyauth.common.credentials.ntlm import NTLMCredential
+
+        credobj = NTLMCredential
+
+    extraparams = {}
+    if credobj is not None:
+        extraparams = credobj.get_url_params()
+
+    paramstemplate = UniCredential.get_url_params()
+    params = dict.fromkeys(UniCredential.get_url_params(), None)
+    extra = dict.fromkeys(extraparams.keys(), None)
+    proxy_present = False
+    if url_e.query is not None:
+        query = parse_qs(url_e.query)
+        for k in query:
+            if k.startswith("proxy") is True:
+                proxy_present = True
+            if k in params:
+                params[k] = paramstemplate[k](query[k])
+            if k in extraparams:
+                extra[k] = extraparams[k](query[k])
+
+    if protocol in [asyauthProtocol.NTLM, asyauthProtocol.SICILY]:
+        res = credobj(
+            secret,
+            username,
+            domain,
+            stype,
+            subprotocol=subprotocol,
+        )
+        if protocol == asyauthProtocol.SICILY:
+            res.protocol = asyauthProtocol.SICILY
+        return res
+
+    elif protocol == asyauthProtocol.KERBEROS:
+        proxies = None
+        if proxy_present is True:
+            from asysocks.unicomm.common.proxy import UniProxyTarget
+
+            proxies = UniProxyTarget.from_url_params(
+                url_e.query, url_e.hostname, endpoint_port=88
+            )
+
+        target = None
+        if extra["dc"] is not None:
+            target = UniTarget(
+                extra["dc"],
+                88,
+                UniProto.CLIENT_TCP,
+                proxies=proxies,
+                dns=params["dns"],
+                dc_ip=extra["dc"],
+            )
+
+        cross_target = None
+        if extra["dcc"] is not None:
+            cross_target = UniTarget(
+                extra["dcc"],
+                88,
+                UniProto.CLIENT_TCP,
+                proxies=proxies,
+                dns=params["dnsc"],
+                dc_ip=extra["dcc"],
+            )
+
+        etypes = extra["etype"] if extra["etype"] is not None else [23, 17, 18]
+
+        return credobj(
+            secret,
+            username,
+            domain,
+            stype,
+            target=target,
+            altname=extra["altname"],
+            altdomain=extra["altdomain"],
+            certdata=extra["certdata"],
+            keydata=extra["keydata"],
+            etypes=etypes,
+            subprotocol=subprotocol,
+            cross_target=cross_target,
+            cross_realm=extra["realmc"],
+        )
+    else:
+        return UniCredential(secret, username, domain, stype, protocol, subprotocol)
+
+
+UniCredential.from_url = from_url
