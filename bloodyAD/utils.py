@@ -339,16 +339,16 @@ class LazyAdSchema:
                 controls=[phantomRoot()],
             )
             for entry in entries:
-                if entry["objectSid"]:
+                if entry.get("objectSid"):
                     self.sid_dict[entry["objectSid"]] = (
                         entry["sAMAccountName"]
                         if entry["sAMAccountName"]
                         else entry["name"]
                     )
                 else:
-                    if entry["rightsGuid"]:
+                    if entry.get("rightsGuid"):
                         key = entry["rightsGuid"]
-                    elif entry["schemaIDGUID"]:
+                    elif entry.get("schemaIDGUID"):
                         key = entry["schemaIDGUID"][
                             1:-1
                         ]  # Removes brackets for GUID formatted with ldap3 format_uuid_le

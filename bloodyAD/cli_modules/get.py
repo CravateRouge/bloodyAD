@@ -53,6 +53,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
         "DomainDnsZones",
         "ForestDnsZones",
     ]
+    suffix_blacklist = ["RootDNSServers", "..TrustAnchors"]
 
     if no_detail:
         prefix_filter = ""
@@ -78,7 +79,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
             domain_suffix = domain_suffix.split("=")[1]
 
             # RootDNSServers and ..TrustAnchors are system records not interesting for offensive normally
-            if domain_suffix == "RootDNSServers" or domain_suffix == "..TrustAnchors":
+            if domain_suffix in suffix_blacklist:
                 continue
 
             if zone and zone not in domain_suffix:
@@ -88,6 +89,8 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
             # Useful if we have list_child on it but no read_prop on the child record
             if "dnsZone" in entry["objectClass"]:
                 dnsZones.append(entry["distinguishedName"])
+                if entry["name"] not in suffix_blacklist:
+                    yield {"zoneName": entry["name"]}
                 continue
 
             domain_name = entry["name"]
@@ -113,7 +116,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
                 continue
             yield_entry = {"recordName": domain_name}
             domain_set.add(domain_name)
-            for record in entry["dnsRecord"]:
+            for record in entry.get("dnsRecord", []):
                 try:
                     if record["Type"] not in yield_entry:
                         yield_entry[record["Type"]] = []
@@ -152,6 +155,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
         except (NoResultError, LDAPSearchException):
             continue
         for entry in entries:
+            # If we can get objectClass it means we have a READ_PROP on the record object so we already found it before
             if entry.get("objectClass") or entry["distinguishedName"] == searchbase:
                 continue
 
