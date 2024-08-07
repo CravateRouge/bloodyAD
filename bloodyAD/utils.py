@@ -287,13 +287,18 @@ class AceFlag:
 class LazyAdSchema:
     guids = set()
     sids = set()
+    # All known guids
     guid_dict = {
         **adschema.OBJECT_TYPES,
         "Self": "Self",
-    }  # Special object to design rule applies to self
+    }
+    # All known sids
     sid_dict = dtyp.sid.well_known_sids_sid_name_map
     isResolved = False
 
+    # We resolve every guid/sid in one request to be more efficient
+    # Put the load on the server instead of the client
+    # Perfect in case of bad network
     def _resolveAll(self):
         if self.isResolved:
             return
@@ -314,10 +319,12 @@ class LazyAdSchema:
                 filters.append(buffer_filter)
                 buffer_filter = ""
                 filter_nb = 0
-            guid_bin_str = "\\" + "\\".join([
-                "{:02x}".format(b)
-                for b in dtyp.guid.GUID().from_string(guid).to_bytes()
-            ])
+            guid_bin_str = "\\" + "\\".join(
+                [
+                    "{:02x}".format(b)
+                    for b in dtyp.guid.GUID().from_string(guid).to_bytes()
+                ]
+            )
             buffer_filter += f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
             filter_nb += 2
         filters.append(buffer_filter)
@@ -349,9 +356,7 @@ class LazyAdSchema:
                     if entry.get("rightsGuid"):
                         key = entry["rightsGuid"]
                     elif entry.get("schemaIDGUID"):
-                        key = entry["schemaIDGUID"][
-                            1:-1
-                        ]  # Removes brackets for GUID formatted with ldap3 format_uuid_le
+                        key = entry["schemaIDGUID"]
                     else:
                         LOG.warning(f"[!] No guid/sid returned for {entry}")
                         continue
@@ -367,9 +372,11 @@ class LazyAdSchema:
             self.guids.add(guid)
 
     def addsid(self, sid):
+        # Should not add in set to resolve after if it is already resolved
         if sid not in self.sid_dict:
             self.sids.add(sid)
 
+    # Return name mapped to the guid
     def getguid(self, guid):
         try:
             return self.guid_dict[guid]
@@ -380,6 +387,7 @@ class LazyAdSchema:
             else:
                 return guid
 
+    # Return name mapped to the sid
     def getsid(self, sid):
         try:
             return self.sid_dict[sid]

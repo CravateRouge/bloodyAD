@@ -24,9 +24,9 @@ def dcsync(conn, trustee: str):
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.delRight(new_sd, trustee_sid, access_mask)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
-        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
-    })
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+        {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
+    )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
     conn.ldap.bloodymodify(
@@ -142,9 +142,9 @@ def genericAll(conn, target: str, trustee: str):
         ]
     utils.delRight(new_sd, trustee_sid)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
-        "Flags": accesscontrol.DACL_SECURITY_INFORMATION
-    })
+    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+        {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
+    )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
     conn.ldap.bloodymodify(

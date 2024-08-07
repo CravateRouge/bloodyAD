@@ -199,11 +199,13 @@ class Ldap(MSLDAPClient):
         if controls is not None:
             t = []
             for control in controls:
-                t.append({
-                    "controlType": control[0].encode(),
-                    "criticality": control[1],
-                    "controlValue": control[2],
-                })
+                t.append(
+                    {
+                        "controlType": control[0].encode(),
+                        "criticality": control[1],
+                        "controlValue": control[2],
+                    }
+                )
             controls = t
 
         _, err = asyncio.run_coroutine_threadsafe(
@@ -230,8 +232,7 @@ class Ldap(MSLDAPClient):
                 nTDSSiteSettings_filter = f"(distinguishedName={nTDSSiteSettings_dn})"
             default_policy_dn = (
                 "CN=Default Query Policy,CN=Query-Policies,CN=Directory"
-                " Service,CN=Windows NT,CN=Services,"
-                + self.configNC
+                " Service,CN=Windows NT,CN=Services," + self.configNC
             )
             ldap_filter = f"(|(distinguishedName={nTDSDSA_dn}){nTDSSiteSettings_filter}(distinguishedName={default_policy_dn}))"
             raw_policy = ""

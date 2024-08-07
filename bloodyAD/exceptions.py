@@ -18,8 +18,7 @@ class ResultError(LDAPError):
         elif self.result["result"] == 19:
             self.message = (
                 "[-] Could not modify object, the server reports a constrained"
-                " violation: "
-                + self.result["message"]
+                " violation: " + self.result["message"]
             )
         else:
             self.message = "[-] The server returned an error: " + self.result["message"]

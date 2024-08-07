@@ -129,12 +129,14 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False):
                             f"{record['Data']['Target']}:{record['Data']['Port']}"
                         )
                     elif record["Type"] == "SOA":
-                        yield_entry[record["Type"]].append({
-                            "PrimaryServer": record["Data"]["PrimaryServer"],
-                            "zoneAdminEmail": record["Data"]["zoneAdminEmail"].replace(
-                                ".", "@", 1
-                            ),
-                        })
+                        yield_entry[record["Type"]].append(
+                            {
+                                "PrimaryServer": record["Data"]["PrimaryServer"],
+                                "zoneAdminEmail": record["Data"][
+                                    "zoneAdminEmail"
+                                ].replace(".", "@", 1),
+                            }
+                        )
                 except KeyError:
                     LOG.error("[-] KeyError for record: " + record)
                     continue

@@ -48,9 +48,9 @@ def owner(conn, target: str, owner: str):
     else:
         new_sd["OwnerSid"].fromCanonical(new_sid)
 
-        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({
-            "Flags": accesscontrol.OWNER_SECURITY_INFORMATION
-        })
+        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+            {"Flags": accesscontrol.OWNER_SECURITY_INFORMATION}
+        )
         controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
         conn.ldap.bloodymodify(
