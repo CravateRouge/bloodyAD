@@ -157,9 +157,7 @@ def main():
         for entry in output:
             print()
             for attr_name, attr_val in entry.items():
-                entry_str = print_entry(attr_name, attr_val)
-                if entry_str:
-                    print(f"{attr_name}: {entry_str}")
+                print_entry(attr_name, attr_val)
 
     # Close the connection properly anyway
     finally:
@@ -201,7 +199,7 @@ def print_entry(entryname, entry):
             if entry_str:
                 print(f"{entryname}.{k}: {entry_str}")
     else:
-        return entry
+        print(f"{entryname}: {entry}")
 
 
 if __name__ == "__main__":
