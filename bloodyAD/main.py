@@ -158,7 +158,7 @@ def main():
             print()
             for attr_name, attr_val in entry.items():
                 entry_str = print_entry(attr_name, attr_val)
-                if entry_str:
+                if not (entry_str is None or entry_str == ""):
                     print(f"{attr_name}: {entry_str}")
 
     # Close the connection properly anyway
@@ -187,7 +187,7 @@ def print_entry(entryname, entry):
                 i_str = f".{i}"
             entry_str = print_entry(f"{entryname}{i_str}", v)
             i += 1
-            if entry_str:
+            if not (entry_str is None or entry_str == ""):
                 simple_entries.append(entry_str)
         if simple_entries:
             print(f"{entryname}: {'; '.join([str(v) for v in simple_entries])}")
@@ -198,7 +198,7 @@ def print_entry(entryname, entry):
             if length > 1:
                 k_str = f".{k}"
             entry_str = print_entry(f"{entryname}{k_str}", entry[k])
-            if entry_str:
+            if not (entry_str is None or entry_str == ""):
                 print(f"{entryname}.{k}: {entry_str}")
     else:
         return entry
