@@ -344,7 +344,7 @@ class LazyAdSchema:
                 if entry.get("objectSid"):
                     self.sid_dict[entry["objectSid"]] = (
                         entry["sAMAccountName"]
-                        if entry["sAMAccountName"]
+                        if entry.get("sAMAccountName")
                         else entry["name"]
                     )
                 else:
