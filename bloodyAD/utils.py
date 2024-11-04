@@ -1,20 +1,15 @@
+from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import (
     ldaptypes,
     accesscontrol,
     adschema,
 )
 from bloodyAD.network.ldap import Scope
-import logging, sys, types, base64, socket, asyncio
+import types, base64, socket, asyncio
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from dns import resolver
 from asn1crypto import core
-
-LOG = logging.getLogger("bloodyAD")
-LOG.propagate = False
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-LOG.addHandler(handler)
 
 
 def addRight(
@@ -533,7 +528,7 @@ def getCurrentSite(conn):
 
 
 # Find LDAP or GC server based on current AD site
-def findReachableServer(conn, domain_or_forest_name, server_type, dns_addr=""):
+async def findReachableServer(conn, domain_or_forest_name, server_type, dns_addr=""):
     custom_resolver = resolver.Resolver()
     custom_resolver.nameservers = [socket.gethostbyname(conn.conf.host)] + (
         resolver.get_default_resolver()
@@ -620,10 +615,7 @@ def findReachableServer(conn, domain_or_forest_name, server_type, dns_addr=""):
             tasks = unfinished
         return
 
-    result = asyncio.get_event_loop().run_until_complete(
-        wait_first_connect(answer, port)
-    )
-    return result
+    return await wait_first_connect(answer, port)
 
 
 def phantomRoot():

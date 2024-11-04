@@ -2,7 +2,7 @@ import binascii
 from typing import Literal
 import msldap
 from bloodyAD import utils
-from bloodyAD.utils import LOG
+from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, dns, cryptography
 from bloodyAD.exceptions import BloodyError
 from bloodyAD.network.ldap import Change

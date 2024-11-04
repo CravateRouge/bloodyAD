@@ -1,5 +1,5 @@
 from bloodyAD.formatters import accesscontrol
-from bloodyAD.exceptions import NoResultError, TooManyResultsError
+from bloodyAD.exceptions import NoResultError, TooManyResultsError, LOG
 import re, socket, os, enum, asyncio, threading
 from functools import cached_property, lru_cache
 from msldap.client import MSLDAPClient
@@ -103,12 +103,13 @@ class Ldap(MSLDAPClient):
             return await task
 
         try:
+            LOG.debug(f"[*] Trying to connect to {cnf.host}...")
             _, err = asyncio.run_coroutine_threadsafe(
                 getServerInfo(connect_task), self.loop
             ).result()
             if err:
                 raise err
-
+            LOG.debug("[+] Connection successful")
             self.domainNC = self._serverinfo["defaultNamingContext"]
             self.configNC = self._serverinfo["configurationNamingContext"]
             self.schemaNC = self._serverinfo["schemaNamingContext"]

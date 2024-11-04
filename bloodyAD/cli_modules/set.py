@@ -1,5 +1,5 @@
 from bloodyAD import utils
-from bloodyAD.utils import LOG
+from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
 from bloodyAD.network.ldap import Change
 import msldap

@@ -1,12 +1,12 @@
 from bloodyAD import utils, asciitree
-from bloodyAD.utils import LOG
+from bloodyAD.exceptions import LOG
 from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
 from bloodyAD.formatters import common
 from msldap.commons.exceptions import LDAPSearchException
 from dns import resolver
 from typing import Literal
-import re
+import re, asyncio
 
 
 def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
@@ -234,7 +234,7 @@ def membership(conn, target: str, no_recurse: bool = False):
 
 def trusts(conn, transitive_trust: bool = False, dns: str = ""):
     """
-    Display trusts in an ascii tree starting from the DC domain as tree root. A->B means A can auth on B and A-<B means B can auth on A, A-<>B means bidirectionnal
+    Display trusts in an ascii tree starting from the DC domain as tree root. A->B means A can auth on B and A-<B means B can auth on A, A-<>B means bidirectional
 
     :param transitive_trust: Try to fetch transitive trusts (you should start from a dc of your user domain to have more complete results)
     :param dns: custom DNS IP (useful if current DC is not a GC and system DNS and DC DNS can't resolve trusts domains)
@@ -242,13 +242,60 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
     # Get all forest partitions of domain type
     # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objecClass=crossRef)(systemFlags=3))", attr=["nCName"])
 
-    # Get the host domain as root for the trust tree
-    trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
+    async def asyncTrusts(conn, transitive_trust: bool = False, dns: str = ""):
+        trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
+        # Get the host domain as root for the trust tree
+        forest_name = ""
+        # Check if current DC is a GC, if not, find a GC
+        NTDSDSA_OPT_IS_GC = 1
+        nTDSDSA_options = next(
+            conn.ldap.bloodysearch(
+                conn.ldap._serverinfo["dsServiceName"], attr=["options"]
+            )
+        )["options"]
+        if nTDSDSA_options & NTDSDSA_OPT_IS_GC == 0:
+            LOG.debug("[*] Current DC is not a GC, let's find one")
+            forest_name = (
+                ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
+            ).split("DC=")[1]
 
-    def fetchTrusts(conn, domain_name, trust_dict, dns):
+        # We shouldn't need to make trust_dict async_safe cause there is no call to trust_dict before an await connected to it in fetchTrusts()
+        trust_dict = {}
+        trust_to_explore = await fetchTrusts(conn, forest_name, trust_dict, dns)
+
+        # We don't do it on foreign trust because there is no transitivity between 3 forests (A<->B<->C) A doesn't have trust on C even if B has it
+        if transitive_trust:
+            if not conn.conf.domain:
+                LOG.warning(
+                    "[!] No domain (-d, --domain) provided, transitive trust will not be"
+                    " performed"
+                )
+            elif conn.conf.domain not in trust_dict:
+                LOG.warning(
+                    "[!] User doesn't belong to this forest, transitive trusts will not be"
+                    " performed"
+                )
+            else:
+                LOG.info(
+                    "[+] Forest trusts fetched, performing transitive trusts resolution"
+                )
+                tasks = []
+                for domain_name in trust_to_explore:
+                    tasks.append(fetchTrusts(conn, domain_name, trust_dict, dns))
+                await asyncio.gather(*tasks)
+
+        if not trust_dict:
+            LOG.warning("[!] No Trusts found")
+        else:
+            tree = {}
+            asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
+            tree_printer = asciitree.LeftAligned()
+            print(tree_printer({trust_root_domain: tree}))
+
+    async def fetchTrusts(conn, domain_name, trust_dict, dns):
         if domain_name:
             try:
-                gc = utils.findReachableServer(conn, domain_name, "gc", dns)
+                gc = await utils.findReachableServer(conn, domain_name, "gc", dns)
             except resolver.NoAnswer:
                 gc = None
             if not gc:
@@ -296,7 +343,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 > 0
             ):
                 continue
-            # We assume user belong to forest of provided DC in --host so we can explore external trusts only if we can auth on it (inbound)
+            # We assume user belongs to forest of provided DC in --host so we can explore external trusts only if we can auth on them (inbound)
             if (
                 common.TRUST_DIRECTION["INBOUND"]
                 & int(trust["trustDirection"][0].decode())
@@ -306,48 +353,9 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
 
         return trust_to_explore
 
-    forest_name = ""
-    # Find a GC
-    # Check if current DC is a GC
-    NTDSDSA_OPT_IS_GC = 1
-    nTDSDSA_options = next(
-        conn.ldap.bloodysearch(conn.ldap._serverinfo["dsServiceName"], attr=["options"])
-    )["options"]
-    if nTDSDSA_options & NTDSDSA_OPT_IS_GC == 0:
-        LOG.debug("[*] Current DC is not a GC, let's find one")
-        forest_name = (
-            ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
-        ).split("DC=")[1]
-
-    trust_dict = {}
-    trust_to_explore = fetchTrusts(conn, forest_name, trust_dict, dns)
-
-    # We don't do it on foreign trust because there is no transitivity between 3 forests (A<->B<->C) A doesn't have trust on C even if B has it
-    if transitive_trust:
-        if not conn.conf.domain:
-            LOG.warning(
-                "[!] No domain (-d, --domain) provided, transitive trust will not be"
-                " performed"
-            )
-        elif conn.conf.domain not in trust_dict:
-            LOG.warning(
-                "[!] User doesn't belong to this forest, transitive trusts will not be"
-                " performed"
-            )
-        else:
-            LOG.info(
-                "[+] Forest trusts fetched, performing transitive trusts resolution"
-            )
-            for domain_name in trust_to_explore:
-                fetchTrusts(conn, domain_name, trust_dict, dns)
-
-    if not trust_dict:
-        LOG.warning("[!] No Trusts found")
-    else:
-        tree = {}
-        asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
-        tree_printer = asciitree.LeftAligned()
-        print(tree_printer({trust_root_domain: tree}))
+    asyncio.get_event_loop().run_until_complete(
+        asyncTrusts(conn, transitive_trust, dns)
+    )
 
 
 def object(

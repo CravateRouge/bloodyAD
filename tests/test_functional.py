@@ -57,7 +57,7 @@ class TestModules(unittest.TestCase):
                 "-target",
                 self.host,
                 "-ca",
-                "bloody-ALLMIGHTY-CA-1",
+                "bloody-MAIN-CA",
                 "-template",
                 "User",
                 "-p",
@@ -100,7 +100,7 @@ class TestModules(unittest.TestCase):
     def test_02SearchAndGetChildAndGetWritable(self):
         self.launchBloody(
             self.user,
-            ["get", "children", "--target", "OU=Domain Controllers,DC=bloody,DC=lab"],
+            ["get", "children", "--target", "OU=Domain Controllers,DC=bloody,DC=corp"],
         )
 
         self.launchBloody(

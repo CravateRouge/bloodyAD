@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import bloodyAD.msldap_patch
-from bloodyAD import cli_modules, ConnectionHandler, utils
+from bloodyAD import cli_modules, ConnectionHandler, exceptions
 import sys, argparse, types
 
 # For dynamic argparse
@@ -134,7 +134,7 @@ def main():
     params = {param_name: vars(args)[param_name] for param_name in param_names}
 
     LOGGING_LEVELS = {"QUIET": 50, "INFO": 20, "DEBUG": 10}
-    utils.LOG.setLevel(LOGGING_LEVELS[args.verbose])
+    exceptions.LOG.setLevel(LOGGING_LEVELS[args.verbose])
     # import msldap
     # msldap.logger.setLevel(LOGGING_LEVELS[args.verbose])
 
