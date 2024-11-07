@@ -240,7 +240,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
     :param dns: custom DNS IP (useful if current DC is not a GC and system DNS and DC DNS can't resolve trusts domains)
     """
     # Get all forest partitions of domain type
-    # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objecClass=crossRef)(systemFlags=3))", attr=["nCName"])
+    # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objectClass=crossRef)(systemFlags=3))", attr=["nCName"])
 
     async def asyncTrusts(conn, transitive_trust: bool = False, dns: str = ""):
         trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
@@ -267,17 +267,17 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
         if transitive_trust:
             if not conn.conf.domain:
                 LOG.warning(
-                    "[!] No domain (-d, --domain) provided, transitive trust will not be"
+                    "[!] No domain (-d, --domain) provided, transitive trust search will not be"
                     " performed"
                 )
             elif conn.conf.domain not in trust_dict:
                 LOG.warning(
-                    "[!] User doesn't belong to this forest, transitive trusts will not be"
+                    "[!] User doesn't belong to this forest, transitive trust search will not be"
                     " performed"
                 )
             else:
                 LOG.info(
-                    "[+] Forest trusts fetched, performing transitive trusts resolution"
+                    "[+] Forest trusts fetched, performing transitive trust search"
                 )
                 tasks = []
                 for domain_name in trust_to_explore:
@@ -294,17 +294,13 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
 
     async def fetchTrusts(conn, domain_name, trust_dict, dns):
         if domain_name:
-            try:
-                gc = await utils.findReachableServer(conn, domain_name, "gc", dns)
-            except resolver.NoAnswer:
-                gc = None
+            gc = (await utils.findReachableServer(conn, domain_name, "gc", dns))[0]
             if not gc:
                 LOG.warning(
                     f"[!] No Global Catalog found for {domain_name}, try to provide one"
                     " manually in --host"
                 )
                 return {}
-
         else:
             gc = conn.conf.host
 
