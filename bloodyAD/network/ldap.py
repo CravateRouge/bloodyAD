@@ -142,6 +142,9 @@ class Ldap(MSLDAPClient):
                     if cnf.format in ["b64", "hex"]:
                         auth += cnf.format
 
+        if cnf.timeout:
+            params += "&timeout=" + cnf.timeout
+
         auth = "+" + auth if auth else ""
         creds = username if username else ""
         creds = creds + ":" + key if key else creds

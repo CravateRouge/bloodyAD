@@ -65,6 +65,11 @@ def main():
         help="IP of the DNS to resolve AD names (useful for inter-domain functions)",
     )
     parser.add_argument(
+        "-t",
+        "--timeout",
+        help="Connction timeout in seconds",
+    )
+    parser.add_argument(
         "--gc",
         help="Connect to Global Catalog (GC)",
         action="store_true",

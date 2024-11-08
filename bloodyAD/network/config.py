@@ -27,6 +27,7 @@ class Config:
     realmc: str = ""
     krbformat: str = "ccache"
     dns: str = ""
+    timeout: int = 0
 
     def __post_init__(self):
         # Resolve dc ip
@@ -117,6 +118,7 @@ class ConnectionHandler:
                 dcip=args.dc_ip,
                 format=args.format,
                 dns=args.dns,
+                timeout=args.timeout,
             )
         else:
             cnf = config
