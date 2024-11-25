@@ -1,10 +1,6 @@
-import logging, sys
+import logging
 
 LOG = logging.getLogger("bloodyAD")
-LOG.propagate = False
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-LOG.addHandler(handler)
 
 
 class BloodyError(Exception):

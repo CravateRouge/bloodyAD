@@ -26,6 +26,8 @@ class TestModules(unittest.TestCase):
             cls.hostname,
             "-d",
             cls.domain,
+            "--dc-ip",
+            cls.host,
         ]
         cls.user = {"username": "stan.dard", "password": "Password1123!"}
 
@@ -460,6 +462,8 @@ class TestModules(unittest.TestCase):
                 [
                     "python3",
                     f"{self.pkinit_path}/gettgtpkinit.py",
+                    "-dc-ip",
+                    self.host,
                     "-cert-pem",
                     f"{outfile}_cert.pem",
                     "-key-pem",

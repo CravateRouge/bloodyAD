@@ -1,12 +1,11 @@
-from bloodyAD import utils, asciitree
+from bloodyAD import utils, asciitree, ConnectionHandler
 from bloodyAD.exceptions import LOG
 from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
 from bloodyAD.formatters import common
 from msldap.commons.exceptions import LDAPSearchException
-from dns import resolver
 from typing import Literal
-import re, asyncio
+import re, asyncio, collections, dataclasses
 
 
 def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
@@ -239,29 +238,19 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
     :param transitive_trust: Try to fetch transitive trusts (you should start from a dc of your user domain to have more complete results)
     :param dns: custom DNS IP (useful if current DC is not a GC and system DNS and DC DNS can't resolve trusts domains)
     """
-    # Get all forest partitions of domain type
-    # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objectClass=crossRef)(systemFlags=3))", attr=["nCName"])
 
     async def asyncTrusts(conn, transitive_trust: bool = False, dns: str = ""):
-        trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
         # Get the host domain as root for the trust tree
-        forest_name = ""
-        # Check if current DC is a GC, if not, find a GC
-        NTDSDSA_OPT_IS_GC = 1
-        nTDSDSA_options = next(
-            conn.ldap.bloodysearch(
-                conn.ldap._serverinfo["dsServiceName"], attr=["options"]
-            )
-        )["options"]
-        if nTDSDSA_options & NTDSDSA_OPT_IS_GC == 0:
-            LOG.debug("[*] Current DC is not a GC, let's find one")
-            forest_name = (
-                ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
-            ).split("DC=")[1]
+        trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
+
+        # forest_name = ""
+        # forest_name = (
+        #     ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
+        # ).split("DC=")[1]
 
         # We shouldn't need to make trust_dict async_safe cause there is no call to trust_dict before an await connected to it in fetchTrusts()
         trust_dict = {}
-        trust_to_explore = await fetchTrusts(conn, forest_name, trust_dict, dns)
+        trust_to_explore = await fetchTrusts(conn, trust_dict, dns)
 
         # We don't do it on foreign trust because there is no transitivity between 3 forests (A<->B<->C) A doesn't have trust on C even if B has it
         if transitive_trust:
@@ -281,7 +270,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 )
                 tasks = []
                 for domain_name in trust_to_explore:
-                    tasks.append(fetchTrusts(conn, domain_name, trust_dict, dns))
+                    tasks.append(fetchTrusts(conn, trust_dict, dns, domain_name))
                 await asyncio.gather(*tasks)
 
         if not trust_dict:
@@ -292,36 +281,20 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
             tree_printer = asciitree.LeftAligned()
             print(tree_printer({trust_root_domain: tree}))
 
-    async def fetchTrusts(conn, domain_name, trust_dict, dns):
-        if domain_name:
-            gc = (await utils.findReachableServer(conn, domain_name, "gc", dns))[0]
-            if not gc:
-                LOG.warning(
-                    f"[!] No Global Catalog found for {domain_name}, try to provide one"
-                    " manually in --host"
-                )
-                return {}
-        else:
-            gc = conn.conf.host
-
-        # Switch connection to a GC but on LDAP port to increase firewall bypass chances
-        # Anyway we can access all partitions hosted by the DC on LDAP port too
-        # We try to find a GC because we're sure it has all forest partitions but:
-        # TODO: we could check by who has the NC replicas we need until we collect all the replicas
-        conn.conf.scheme = "ldap"
-        conn.conf.host = gc
-        conn.rebind()
-
+    async def fetchTrusts(conn, trust_dict, dns, domain_name=""):
+        # Search request to look into all available domain partitions on the dc for trusts relationships
+        # We don't care if because of simultaneous dc search there are duplicates, the overhead is minor, trusts are not many
+        search_params = {
+            "base": "",
+            "ldap_filter": "(objectClass=trustedDomain)",
+            "attr": ["trustDirection", "trustPartner", "trustAttributes", "trustType"],
+            "search_scope": Scope.SUBTREE,
+            "raw": True,
+            "controls": [utils.phantomRoot()],
+        }
+        trusts = await searchInForest(conn, search_params, dns, domain_name)
         # Tree root is the DC domain
         trust_to_explore = set()
-        trusts = conn.ldap.bloodysearch(
-            "",
-            "(objectClass=trustedDomain)",
-            attr=["trustDirection", "trustPartner", "trustAttributes", "trustType"],
-            search_scope=Scope.SUBTREE,
-            raw=True,
-            controls=[utils.phantomRoot()],
-        )
         for trust in trusts:
             already_in_tree = (
                 ((trust["distinguishedName"]).rsplit("CN=System,", 1)[1]).replace(
@@ -346,8 +319,135 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 > 0
             ):
                 trust_to_explore.add(trust["trustPartner"][0].decode())
-
         return trust_to_explore
+
+    async def searchInForest(conn, search_params, dns, domain_name="", allow_gc=True):
+        # If domain_name is provided it means we try to reach a domain outside of current "conn" forest so we have to find a server that we can reach for this outsider domain and then we search the entire forest related to this outsider domain
+        newconn = conn
+        if domain_name:
+            host_params = await utils.findReachableDomainServer(
+                domain_name,
+                newconn.ldap.current_site,
+                dns_addr=dns,
+                dc_dns=newconn.conf.host,
+            )
+            if not host_params:
+                LOG.warning(
+                    f"[!] No reachable server found for {domain_name}, try to provide one"
+                    " manually in --host"
+                )
+                return {}
+            schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
+            newconf = dataclasses.replace(
+                conn.conf,
+                scheme=schemes[host_params["port"]],
+                host=host_params["name"],
+                dcip=host_params["ip"],
+            )
+            newconn = ConnectionHandler(config=newconf)
+
+        search_results = []
+        # dc is a gc for this forest, hosting every records we want, we don't need to look for other domain partitions on other dc
+        # Except if we're looking for attributes no replicated in GC, then searchInForest must be called with allow_gc=False
+        if newconn.ldap.is_gc and allow_gc:
+            search_results = await searchInPartition(newconn, search_params, dns)
+            if newconn != conn and newconn._ldap:
+                newconn.ldap.close()
+            return search_results
+
+        # Find all domain partitions in the forest and dc hosting them
+        try:
+            # Get all domain partitions in the forest
+            # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objectClass=crossRef)(systemFlags=3))", attr=["nCName"])
+            # Find nTDSDSA objects containing msDS-HasDomainNCs and server objects parents containing dNSHostname
+            entries = newconn.ldap.bloodysearch(
+                "CN=Sites," + newconn.ldap.configNC,
+                "(|(objectClass=nTDSDSA)(objectClass=server))",
+                search_scope=Scope.SUBTREE,
+                attr=["msDS-HasDomainNCs", "dNSHostName"],
+            )
+            # Put domain partitions and hostnames together by matching server distinguished name on them
+            forest_servers = collections.defaultdict(dict)
+            for entry in entries:
+                hostname = entry.get("dNSHostName")
+                if hostname:
+                    forest_servers[entry["distinguishedName"]]["host"] = hostname
+                elif "msDS-HasDomainNCs" in entry:
+                    parent_name = (entry["distinguishedName"]).split(",", 1)[1]
+                    forest_servers[parent_name]["partitions"] = entry[
+                        "msDS-HasDomainNCs"
+                    ]
+                else:
+                    LOG.warning(
+                        f"[!] No dNSHostName found for DC {entry['distinguishedName']}, the DC may have been demoted or have synchronization issues"
+                    )
+            # Reorganize dict on domain so domain becomes the key containing the hosts
+            forest_partitions = collections.defaultdict(list)
+            for dn, attributes in forest_servers.items():
+                if not "host" in attributes:
+                    LOG.warning(
+                        f"[!] No dNSHostName found for DC {dn}, the DC may have been demoted or have synchronization issues"
+                    )
+                for p in attributes.get("partitions"):
+                    forest_partitions[p].append(
+                        {"type": ["A", "AAAA"], "name": attributes["host"]}
+                    )
+            tasks = []
+            for p, hosts in forest_partitions.items():
+                tasks.append(searchInPartition(newconn, search_params, dns, p, hosts))
+            search_results = await asyncio.gather(*tasks)
+            search_results = [entry for entries in search_results for entry in entries]
+        except Exception as e:
+            LOG.error(
+                f"[!] Something went wrong when trying to perform searchInForest for {domain_name}"
+            )
+            LOG.error(f"[!] Error {type(e).__name__}: {e}")
+        finally:
+            if newconn != conn and newconn._ldap:
+                newconn.ldap.close()
+            return search_results
+
+    async def searchInPartition(
+        conn, bloodysearch_params, dns, partition="", host_records=[]
+    ):
+        schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
+        # If host_records empty means the dc in "conn" is already the one we want to query
+        if host_records:
+            host_params = await utils.findReachableServer(
+                host_records, dns, conn.conf.host
+            )
+            if not host_params:
+                LOG.warning(
+                    f"[!] No reachable server found for {partition}, try to provide one"
+                    " manually in --host"
+                )
+                return {}
+            newconf = dataclasses.replace(
+                conn.conf,
+                scheme=schemes[host_params["port"]],
+                host=host_params["name"],
+                dcip=host_params["ip"],
+            )
+            newconn = ConnectionHandler(config=newconf)
+        else:
+            newconn = conn
+
+        search_result = []
+        try:
+            if bloodysearch_params["base"] == "domainNC":
+                # The directory can be handled by others instances of the function so we have to duplicate it before modifying it
+                bloodysearch_params = dict(bloodysearch_params)
+                bloodysearch_params["base"] = newconn.ldap.domainNC
+            search_result = list(newconn.ldap.bloodysearch(**bloodysearch_params))
+        except Exception as e:
+            LOG.error(
+                f"[!] Something went wrong when trying to perform this ldap search: {bloodysearch_params} on {newconn.conf.host} with the {newconn.conf.scheme} protocol"
+            )
+            LOG.error(f"[!] Error {type(e).__name__}: {e}")
+        finally:
+            if newconn != conn and newconn._ldap:
+                newconn.ldap.close()
+            return search_result
 
     asyncio.get_event_loop().run_until_complete(
         asyncTrusts(conn, transitive_trust, dns)
@@ -395,7 +495,7 @@ def search(
     raw: bool = False,
 ):
     """
-    Search in LDAP database, binary data will be outputed in base64
+    Search in LDAP database, binary data will be outputted in base64
 
     :param base: DN of the parent object
     :param filter: filter to apply to the LDAP search (see Microsoft LDAP filter syntax)

@@ -1,6 +1,6 @@
 from bloodyAD.formatters import accesscontrol
 from bloodyAD.exceptions import NoResultError, TooManyResultsError, LOG
-import re, socket, os, enum, asyncio, threading
+import re, socket, os, enum, asyncio, threading, urllib
 from functools import cached_property, lru_cache
 from msldap.client import MSLDAPClient
 from msldap.commons.factory import LDAPConnectionFactory
@@ -27,20 +27,30 @@ class Ldap(MSLDAPClient):
 
     def __init__(self, cnf):
         self.conf = cnf
+
+        # Because msldap uses a url format we have to encode everything properly
+        encoded_cnf = {}
+        for attr_name, attr_value in vars(cnf).items():
+            if type(attr_value) is str:
+                encoded_cnf[attr_name] = urllib.parse.quote(attr_value, safe="")
+            else:
+                encoded_cnf[attr_name] = attr_value
+
         auth = ""
         creds = ""
         params = ""
         username = ""
         key = ""
-
+        if cnf.dcip:
+            params = "serverip=" + cnf.dcip
         if cnf.crt:
             auth = "ssl"
-            crt = "sslcert=" + cnf.crt
-            sslparams = f"{crt}&sslpassword={cnf.key}" if cnf.key else crt
+            crt = "sslcert=" + encoded_cnf["crt"]
+            sslparams = f"{crt}&sslpassword={encoded_cnf['key']}" if cnf.key else crt
             params = params + "&" + sslparams if params else sslparams
 
         elif cnf.kerberos:
-            username = "%s\\%s" % (cnf.domain, cnf.username)
+            username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
             if cnf.dcip:
                 dcip = cnf.dcip
             else:
@@ -54,10 +64,10 @@ class Ldap(MSLDAPClient):
             params = params + "&" + dcip_param if params else dcip_param
             if cnf.password:
                 auth = "kerberos-password"
-                key = cnf.password
+                key = encoded_cnf["password"]
             else:
                 auth = "kerberos-ccache"
-                key = cnf.keyfile
+                key = encoded_cnf["keyfile"]
                 if not key:
                     if os.name == "nt":
                         auth = "sspi-kerberos"
@@ -68,13 +78,13 @@ class Ldap(MSLDAPClient):
                         )
 
         else:
-            username = "%s\\%s" % (cnf.domain, cnf.username)
+            username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
             if cnf.nthash:
                 auth = "ntlm-nt"
-                key = cnf.nthash
+                key = encoded_cnf["nthash"]
             else:
                 auth = "ntlm-password"
-                key = cnf.password
+                key = encoded_cnf["password"]
                 if not key:
                     if os.name == "nt":
                         auth = "sspi-ntlm"
@@ -87,8 +97,9 @@ class Ldap(MSLDAPClient):
         creds = creds + "@" if creds else ""
         params = "/?" + params if params else ""
         ldap_factory = LDAPConnectionFactory.from_url(
-            f"{cnf.scheme}{auth}://{creds}{cnf.host}{params}"
+            f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
         )
+        # print(f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}")
         super().__init__(ldap_factory.target, ldap_factory.credential, keepalive=True)
 
         # Connect function runs indefinitely waiting for I/O events so using asyncio.run will not allow us to reuse the connection
@@ -217,6 +228,20 @@ class Ldap(MSLDAPClient):
             raise err
 
     @cached_property
+    def current_site(self):
+        return (self._serverinfo["serverName"].rsplit(",CN=Sites")[0]).split(
+            ",CN=Servers,CN="
+        )[1]
+
+    @cached_property
+    def is_gc(self):
+        NTDSDSA_OPT_IS_GC = 1
+        nTDSDSA_options = next(
+            self.bloodysearch(self._serverinfo["dsServiceName"], attr=["options"])
+        )["options"]
+        return nTDSDSA_options & NTDSDSA_OPT_IS_GC
+
+    @cached_property
     def policy(self):
         """
         [MS-ADTS] - 3.1.1.3.4.6 LDAP Policies
@@ -300,8 +325,8 @@ class Ldap(MSLDAPClient):
         )
 
         isNul = True
-        while True:
-            try:
+        try:
+            while True:
                 entry, err = asyncio.run_coroutine_threadsafe(
                     search_generator.__anext__(), self.loop
                 ).result()
@@ -312,7 +337,11 @@ class Ldap(MSLDAPClient):
                     **{"distinguishedName": entry["objectName"]},
                     **entry["attributes"],
                 }
-            except StopAsyncIteration:
-                break
+        except StopAsyncIteration:
+            pass
+        finally:
+            asyncio.run_coroutine_threadsafe(
+                search_generator.aclose(), self.loop
+            ).result()
         if isNul:
             raise NoResultError(base_dn, ldap_filter)

@@ -5,7 +5,7 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope
-import types, base64, socket, asyncio
+import types, base64, socket, asyncio, collections, ssl
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from dns import resolver, rdatatype
@@ -521,51 +521,52 @@ def renderSearchResult(entries):
         decoded_entry = {}
 
 
-def getCurrentSite(conn):
-    return (conn.ldap._serverinfo["serverName"].rsplit(",CN=Sites")[0]).split(
-        ",CN=Servers,CN="
-    )[1]
-
-
-# Find LDAP or GC server based on current AD site
-async def findReachableServer(conn, domain_or_forest_name, server_type="", dns_addr=""):
-    nameservers = [socket.gethostbyname(conn.conf.host)] + (
-        resolver.get_default_resolver()
-    ).nameservers
+async def findReachableServer(record_list, dns_addr="", dc_dns=""):
+    nameservers = [] + (resolver.get_default_resolver()).nameservers
+    if dc_dns:
+        nameservers = [socket.gethostbyname(dc_dns)] + nameservers
     if dns_addr:
-        nameservers= [dns_addr] + nameservers
+        nameservers = [dns_addr] + nameservers
     LOG.debug(f"[+] Nameservers set to: {nameservers}")
-
     # Do 389 even for GC because more probabilities to bypass fw
     # 389 LDAP, 636 LDAPS, 3268 GC, 3269 GCS
     ports = [389, 636, 3268, 3269]
-    record_list = []
-    current_site = getCurrentSite(conn)
-    if not server_type or server_type == "gc":
-        record_list += [
-            {
-                "type": ["SRV"],
-                "name": f"_gc._tcp.{current_site}._sites.{domain_or_forest_name}",
-            },
-            {"type": ["A","AAAA"], "name": f"gc._msdcs.{domain_or_forest_name}"},
-        ]
-    if not server_type or server_type == "ldap":
-        record_list += [
-            {
-                "type": ["SRV"],
-                "name": f"_ldap._tcp.{current_site}._sites.{domain_or_forest_name}",
-            },
-            {"type": ["A","AAAA"], "name": domain_or_forest_name},
-        ]
 
     # Try to find a dc where we can connect asap
     resolve_tasks = []
     for ns in nameservers:
         for r in record_list:
-            resolve_tasks.append(asyncio.create_task(asyncResolveAndConnect(ns,r, ports)))
-    
-    host_ipport = await wait_first(resolve_tasks)
-    return host_ipport
+            resolve_tasks.append(
+                asyncio.create_task(asyncResolveAndConnect(ns, r, ports))
+            )
+
+    host_params = await wait_first(resolve_tasks)
+    return host_params
+
+
+# Find LDAP or GC server based on current AD site
+async def findReachableDomainServer(
+    domain_or_forest_name, ad_site, server_type="", dns_addr="", dc_dns=""
+):
+    record_list = []
+    if not server_type or server_type == "gc":
+        record_list += [
+            {
+                "type": ["SRV"],
+                "name": f"_gc._tcp.{ad_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": ["SRV"], "name": f"_gc._tcp.{domain_or_forest_name}"},
+        ]
+    if not server_type or server_type == "ldap":
+        record_list += [
+            {
+                "type": ["SRV"],
+                "name": f"_ldap._tcp.{ad_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": ["SRV"], "name": f"_ldap._tcp.{domain_or_forest_name}"},
+        ]
+    host_params = await findReachableServer(record_list, dns_addr, dc_dns)
+    return host_params
 
 
 # Try to reach a host by first resolving its IPv4 or v6 by providing a nameserver and SRV, A or AAAA records
@@ -573,62 +574,86 @@ async def findReachableServer(conn, domain_or_forest_name, server_type="", dns_a
 async def asyncResolveAndConnect(ns, r, ports):
     custom_resolver = resolver.Resolver()
     custom_resolver.nameservers = [ns]
-    target_ips=[]
+    target_srvs = collections.defaultdict(list)
     answer = None
     LOG.debug(f"[*] Resolving {r}...")
     for rtype in r["type"]:
         try:
             answer = custom_resolver.resolve(r["name"], rtype, tcp=True)
+            # SRV records
             if answer.rdtype == rdatatype.SRV:
                 # Try to get IPs from additional part of the answer if there is one
                 for raddi in answer.response.additional:
                     if raddi.rdtype in [rdatatype.A, rdatatype.AAAA]:
                         for raddr in raddi:
-                            target_ips.append(raddr.address)
+                            target_srvs[str(raddi.name)].append(raddr.address)
                 # If no additional part we have to make other queries
-                if not target_ips:
+                if not target_srvs:
                     for rsrv in answer:
-                        for rsrv_type in ["A","AAAA"]:
+                        for rsrv_type in ["A", "AAAA"]:
                             try:
-                                target_ips += [
+                                target_srvs[rsrv.target.to_text()] += [
                                     rdata.address
                                     for rdata in custom_resolver.resolve(
                                         rsrv.target.to_text(), rsrv_type, tcp=True
                                     )
                                 ]
-                            except (resolver.NXDOMAIN, resolver.NoAnswer, resolver.Timeout) as e:
-                                LOG.debug(f"[!] Failed to resolve {rsrv.target.to_text()} {rsrv_type} with nameserver {ns}: {e}")
+                            except Exception as e:
+                                LOG.debug(
+                                    f"[!] Failed to resolve {rsrv.target.to_text()} {rsrv_type} with nameserver {ns}: {e}"
+                                )
                                 continue
+            # A and AAAA records
             else:
-                target_ips = [raddr.address for raddr in answer]
+                target_srvs[r["name"]] += [raddr.address for raddr in answer]
 
-        except (resolver.NXDOMAIN, resolver.NoAnswer, resolver.Timeout) as e:
-            LOG.debug(f"[!] Failed to resolve {r['name']} {rtype} with nameserver {ns}: {e}")
+        except Exception as e:
+            LOG.debug(
+                f"[!] Failed to resolve {r['name']} {rtype} with nameserver {ns}: {e}"
+            )
             continue
 
     # If the function failed to find hosts
-    if not target_ips:
-        return
+    if not target_srvs:
+        return {}
 
     # We try every combination of ips/ports, useful if there are firewalls
     # And we take the first to answer, we need only one having the replicas we need
     connect_tasks = []
     for port in ports:
-        for ip in target_ips:
-            connect_tasks.append(asyncio.create_task(host_connect(ip, port)))
-    
-    host_ipport = await wait_first(connect_tasks)
-    return host_ipport
+        for target_ips in target_srvs.values():
+            for ip in target_ips:
+                connect_tasks.append(asyncio.create_task(host_connect(ip, port)))
+
+    host_params = await wait_first(connect_tasks)
+    # Function couldn't reach a host for this record
+    if not host_params:
+        return {}
+
+    for name, ips in target_srvs.items():
+        if host_params["ip"] in ips:
+            host_params["name"] = name
+            break
+    return host_params
 
 
 async def host_connect(ip, port):
+    # Even if a dc doesn't support tls with ldap/gc it will accept the tcp connection
+    # so we start a tls handshake on those port to be sure it handles tls
+    ssl_context = None
+    if port in [636, 3269]:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
     try:
         LOG.debug(f"[*] Attempting to TCP connect to {ip}:{port}")
-        await asyncio.open_connection(ip, port)
-        return (ip, port)
-    except (TimeoutError, OSError, ConnectionRefusedError) as e:
+        reader, writer = await asyncio.open_connection(ip, port, ssl=ssl_context)
+        writer.close()
+        await writer.wait_closed()
+        return {"ip": ip, "port": port}
+    except:
         LOG.debug(f"[!] Could not TCP connect to {ip}:{port}")
-        return
+        return {}
 
 
 async def wait_first(tasks):

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from bloodyAD.network.ldap import Ldap
 import os
-from urllib import parse
 
 
 @dataclass
@@ -69,9 +68,6 @@ class ConnectionHandler:
             )
         else:
             cnf = config
-        for prop, val in vars(cnf).items():
-            if type(val) is str:
-                setattr(cnf, prop, parse.quote(val, safe=""))
         self.conf = cnf
 
     @property

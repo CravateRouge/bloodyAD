@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import bloodyAD.msldap_patch
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
-import sys, argparse, types
+import sys, argparse, types, logging
 
 # For dynamic argparse
 import inspect, pkgutil, importlib
@@ -41,7 +41,7 @@ def main():
     )
     parser.add_argument(
         "--dc-ip",
-        help="IP of the DC (used for kerberos auth if hostname doesn't resolve)",
+        help="IP of the DC (useful if you provided a --host which can't resolve)",
     )
     parser.add_argument(
         "--gc",
@@ -133,10 +133,32 @@ def main():
     param_names = args.func.__code__.co_varnames[1 : args.func.__code__.co_argcount]
     params = {param_name: vars(args)[param_name] for param_name in param_names}
 
-    LOGGING_LEVELS = {"QUIET": 50, "INFO": 20, "DEBUG": 10}
-    exceptions.LOG.setLevel(LOGGING_LEVELS[args.verbose])
-    # import msldap
-    # msldap.logger.setLevel(LOGGING_LEVELS[args.verbose])
+    # Configure loggers #
+
+    # Doesn't work when launching new threads in bloodyAD.ldap so we'll use propagate to false below
+    # # Enable all children loggers in debug mode
+    # logging.getLogger().setLevel(logging.DEBUG)
+    # # Make the root logger quiet
+    # # WARNING: operation below is not thread safe!
+    # logging.getLogger().handlers = []
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(message)s")
+    handler.setFormatter(formatter)
+    exceptions.LOG.addHandler(handler)
+    exceptions.LOG.setLevel(getattr(logging, args.verbose))
+    exceptions.LOG.propagate = False
+    # We show msldap logs only if debug is enabled
+    # if args.verbose == "DEBUG":
+    #     msldap.logger.handlers = []
+    #     handler = logging.StreamHandler(sys.stdout)
+    #     handler.setLevel(logging.DEBUG)
+    #     formatter = logging.Formatter('[msldap] %(message)s')
+    #     handler.setFormatter(formatter)
+    #     msldap.logger.addHandler(handler)
+    #     msldap.logger.setLevel(logging.DEBUG)
+    #     msldap.logger.propagate = False
 
     # Launch the command
     conn = ConnectionHandler(args=args)
