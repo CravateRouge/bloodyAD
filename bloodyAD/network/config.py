@@ -1,6 +1,7 @@
+import dataclasses
 from dataclasses import dataclass
 from bloodyAD.network.ldap import Ldap
-import os
+import os, socket
 
 
 @dataclass
@@ -15,13 +16,62 @@ class Config:
     lmhash: str = "aad3b435b51404eeaad3b435b51404ee"
     nthash: str = ""
     kerberos: bool = False
-    keyfile: str = ""
     certificate: str = ""
     crt: str = ""
     key: str = ""
+    format: str = ""
     dcip: str = ""
+    krb_args: list = None
+    kdc: str = ""
+    kdcc: str = ""
+    realmc: str = ""
+    krbformat: str = "ccache"
 
     def __post_init__(self):
+        # Resolve dc ip
+        if not self.dcip:
+            try:
+                self.dcip = socket.gethostbyname(self.host)
+            except socket.gaierror as e:
+                if e.errno == -5:
+                    raise socket.gaierror(
+                        "Can't resolve hostname provided in --host"
+                    ) from e
+                else:
+                    raise
+
+        # Parse krb args
+        if self.krb_args is not None:
+            self.kerberos = True
+            for arg in self.krb_args:
+                key, value = arg.split("=")
+                if key == "kdc":
+                    self.kdc = value
+                elif key == "kdcc":
+                    self.kdcc = value
+                elif key == "realmc":
+                    self.realmc = value
+                elif key in ["ccache", "kirbi", "keytab", "pem", "pfx"]:
+                    self.key = value
+                    self.krbformat = key
+                else:
+                    raise ValueError(f"{key} is not recognized as arg for --kerberos")
+
+            if not (self.key or self.password):
+                self.key = os.getenv("KRB5CCNAME")
+
+            # If we have a kdc provided and user domain is different from dc domain we provide cross realm parameters
+            if self.kdc and self.domain not in self.host:
+                # If cross realm and no kdcc we consider it's the dc
+                if not self.kdcc:
+                    self.kdcc = self.dcip
+                # If cross realm and no realmc we consider it's the host suffix
+                if not self.realmc:
+                    self.realmc = self.host.split(".", 1)[1]
+            # If kdc hasn't been set we consider the ldap dc provided as kdc
+            if not self.kdc:
+                self.kdc = self.dcip
+
         # Handle case where password is hashes
         if self.password and ":" in self.password:
             lmhash_maybe, nthash_maybe = self.password.split(":")
@@ -41,7 +91,7 @@ class Config:
                     self.lmhash, self.nthash = None, None
 
         # Handle case where certificate is provided
-        if self.certificate:
+        if ":" in self.certificate:
             self.key, self.crt = self.certificate.split(":")
 
 
@@ -61,10 +111,10 @@ class ConnectionHandler:
                 password=args.password,
                 scheme=scheme,
                 host=args.host,
-                kerberos=args.kerberos,
-                keyfile=os.getenv("KRB5CCNAME"),
+                krb_args=args.kerberos,
                 certificate=args.certificate,
                 dcip=args.dc_ip,
+                format=args.format,
             )
         else:
             cnf = config
@@ -84,3 +134,32 @@ class ConnectionHandler:
         self.conf.username = username
         self.conf.password = password
         self.rebind()
+
+    # kwargs takes the same arguments as the Config Class
+    def copy(self, **kwargs):
+        # If it's krb creds and the new host hasn't the same REALM as the previous connection we'll have to request a ticket for the new REALM from the previous kdcc if there is one, if not from the previous dc ip possible
+        if (
+            self.conf.kerberos
+            and kwargs.get("host")
+            and self.conf.domain not in kwargs.get("host")
+        ):
+            kirbi_tgt = self.ldap._con.auth.selected_authentication_context.kc.ccache.get_all_tgt_kirbis()[
+                0
+            ]
+            kwargs["key"] = kirbi_tgt.to_b64()
+            kwargs["krbformat"] = "kirbi"
+            kwargs["format"] = "b64"
+            if self.conf.kdcc:
+                kwargs["kdc"] = self.conf.kdcc
+            else:
+                kwargs["kdc"] = self.conf.dcip
+            # Reset previous conf params
+            kwargs["krb_args"] = []
+            kwargs["password"] = ""
+            kwargs["kdcc"] = ""
+            kwargs["realmc"] = ""
+            if "dcip" not in kwargs:
+                kwargs["dcip"] = ""
+
+        newconf = dataclasses.replace(self.conf, **kwargs)
+        return ConnectionHandler(config=newconf)

@@ -5,7 +5,7 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope
-import types, base64, socket, asyncio, collections, ssl
+import types, base64, asyncio, collections, ssl
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from dns import resolver, rdatatype
@@ -524,7 +524,7 @@ def renderSearchResult(entries):
 async def findReachableServer(record_list, dns_addr="", dc_dns=""):
     nameservers = [] + (resolver.get_default_resolver()).nameservers
     if dc_dns:
-        nameservers = [socket.gethostbyname(dc_dns)] + nameservers
+        nameservers = [dc_dns] + nameservers
     if dns_addr:
         nameservers = [dns_addr] + nameservers
     LOG.debug(f"[+] Nameservers set to: {nameservers}")
@@ -632,6 +632,8 @@ async def asyncResolveAndConnect(ns, r, ports):
 
     for name, ips in target_srvs.items():
         if host_params["ip"] in ips:
+            if name.endswith("."):
+                name = name.rstrip(".")
             host_params["name"] = name
             break
     return host_params

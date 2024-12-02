@@ -18,15 +18,33 @@ def main():
         "-p",
         "--password",
         help=(
-            "Cleartext password or LMHASH:NTHASH for NTLM authentication (Do not"
-            " specify to trigger integrated windows authentication)"
+            "password or LMHASH:NTHASH for NTLM authentication, password or AES/RC4 key for kerberos, password for certificate"
+            "(Do not specify to trigger integrated windows authentication)"
         ),
     )
-    parser.add_argument("-k", "--kerberos", action="store_true", default=False)
+    parser.add_argument(
+        "-k",
+        "--kerberos",
+        nargs="*",
+        help=(
+            "Enable Kerberos authentication. If '-p' is provided it will try to query a TGT with it. You can also provide a list of one or more optional keywords as '-k kdc=192.168.100.1 kdcc=192.168.150.1 realmc=foreign.realm.corp <keyfile_type>=/home/silver/Admin.ccache', <keyfile_type> being ccache, kirbi, keytab, pem or pfx, 'kdc' being the kerberos server for the keyfile provided and 'realmc' and 'kdcc' for cross realm (the realm of the '--host' provided)"
+        ),
+    )
+
+    parser.add_argument(
+        "-f",
+        "--format",
+        help="Specify format for '--password' or '-k <keyfile>'",
+        choices=["b64", "hex", "aes", "rc4", "default"],
+        default="default",
+    )
     parser.add_argument(
         "-c",
         "--certificate",
-        help='Certificate authentication, e.g: "path/to/key:path/to/cert"',
+        nargs="?",
+        const="certstore",
+        default="",
+        help='Certificate authentication, e.g: "path/to/key:path/to/cert" (Use Windows Certstore with krb if left empty)',
     )
     parser.add_argument(
         "-s",
@@ -58,8 +76,10 @@ def main():
     )
 
     subparsers = parser.add_subparsers(title="Commands")
+    submodnames = []
     # Iterates all submodules in module package and creates one parser per submodule
     for importer, submodname, ispkg in pkgutil.iter_modules(cli_modules.__path__):
+        submodnames.append(submodname)
         subparser = subparsers.add_parser(
             submodname, help=f"[{submodname.upper()}] function category"
         )
@@ -123,7 +143,19 @@ def main():
             # If a function name is provided in cli, arg.func will exist with function as value
             subsubparser.set_defaults(func=function)
 
-    args = parser.parse_args()
+    # Preprocess the input arguments because nargs ? and * can capture subparsers commands if put at the end
+    input_args = sys.argv[1:]
+    # Identify where options stop and where commands start
+    i = 0
+    for arg in input_args:
+        if arg in submodnames:
+            break
+        i += 1
+    # Detect if nargs options are at the end of options and place them at the beginning
+    # We try only the following keywords even if actually it can take --kerb etc
+    if input_args[i - 1] in ["-k", "--kerberos", "-c", "--certificate"]:
+        input_args = [input_args[i - 1]] + input_args[: i - 1] + input_args[i:]
+    args = parser.parse_args(input_args)
 
     if "func" not in args:
         parser.print_help(sys.stderr)

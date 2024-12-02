@@ -5,7 +5,7 @@ from bloodyAD.exceptions import NoResultError
 from bloodyAD.formatters import common
 from msldap.commons.exceptions import LDAPSearchException
 from typing import Literal
-import re, asyncio, collections, dataclasses
+import re, asyncio, collections
 
 
 def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
@@ -248,7 +248,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
         #     ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
         # ).split("DC=")[1]
 
-        # We shouldn't need to make trust_dict async_safe cause there is no call to trust_dict before an await connected to it in fetchTrusts()
+        # We shouldn't need to make trust_dict async_safe cause there is no call to trust_dict before an await access it in fetchTrusts()
         trust_dict = {}
         trust_to_explore = await fetchTrusts(conn, trust_dict, dns)
 
@@ -269,8 +269,8 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                     "[+] Forest trusts fetched, performing transitive trust search"
                 )
                 tasks = []
-                for domain_name in trust_to_explore:
-                    tasks.append(fetchTrusts(conn, trust_dict, dns, domain_name))
+                for domain_name, parent_conn in trust_to_explore.items():
+                    tasks.append(fetchTrusts(parent_conn, trust_dict, dns, domain_name))
                 await asyncio.gather(*tasks)
 
         if not trust_dict:
@@ -294,7 +294,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
         }
         trusts = await searchInForest(conn, search_params, dns, domain_name)
         # Tree root is the DC domain
-        trust_to_explore = set()
+        trust_to_explore = {}
         for trust in trusts:
             already_in_tree = (
                 ((trust["distinguishedName"]).rsplit("CN=System,", 1)[1]).replace(
@@ -318,7 +318,11 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 & int(trust["trustDirection"][0].decode())
                 > 0
             ):
-                trust_to_explore.add(trust["trustPartner"][0].decode())
+                # NOTE: If we need later we can add more than one parent_conn as a failsafe and then try to co to trust with more than one parent_conn
+                # Useful when using kerberos and performing cross realm
+                trust_to_explore[trust["trustPartner"][0].decode()] = trust[
+                    "parent_conn"
+                ]
         return trust_to_explore
 
     async def searchInForest(conn, search_params, dns, domain_name="", allow_gc=True):
@@ -329,7 +333,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 domain_name,
                 newconn.ldap.current_site,
                 dns_addr=dns,
-                dc_dns=newconn.conf.host,
+                dc_dns=newconn.conf.dcip,
             )
             if not host_params:
                 LOG.warning(
@@ -338,13 +342,11 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 )
                 return {}
             schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
-            newconf = dataclasses.replace(
-                conn.conf,
+            newconn = conn.copy(
                 scheme=schemes[host_params["port"]],
                 host=host_params["name"],
                 dcip=host_params["ip"],
             )
-            newconn = ConnectionHandler(config=newconf)
 
         search_results = []
         # dc is a gc for this forest, hosting every records we want, we don't need to look for other domain partitions on other dc
@@ -384,7 +386,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
             # Reorganize dict on domain so domain becomes the key containing the hosts
             forest_partitions = collections.defaultdict(list)
             for dn, attributes in forest_servers.items():
-                if not "host" in attributes:
+                if "host" not in attributes:
                     LOG.warning(
                         f"[!] No dNSHostName found for DC {dn}, the DC may have been demoted or have synchronization issues"
                     )
@@ -414,7 +416,7 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
         # If host_records empty means the dc in "conn" is already the one we want to query
         if host_records:
             host_params = await utils.findReachableServer(
-                host_records, dns, conn.conf.host
+                host_records, dns, conn.conf.dcip
             )
             if not host_params:
                 LOG.warning(
@@ -422,13 +424,12 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                     " manually in --host"
                 )
                 return {}
-            newconf = dataclasses.replace(
-                conn.conf,
+            newconn = conn.copy(
                 scheme=schemes[host_params["port"]],
                 host=host_params["name"],
                 dcip=host_params["ip"],
             )
-            newconn = ConnectionHandler(config=newconf)
+
         else:
             newconn = conn
 
@@ -438,7 +439,11 @@ def trusts(conn, transitive_trust: bool = False, dns: str = ""):
                 # The directory can be handled by others instances of the function so we have to duplicate it before modifying it
                 bloodysearch_params = dict(bloodysearch_params)
                 bloodysearch_params["base"] = newconn.ldap.domainNC
-            search_result = list(newconn.ldap.bloodysearch(**bloodysearch_params))
+            # We add parent_conn to know which conn as the trust, useful for krb cross realm
+            search_result = [
+                {"parent_conn": newconn, **entry}
+                for entry in newconn.ldap.bloodysearch(**bloodysearch_params)
+            ]
         except Exception as e:
             LOG.error(
                 f"[!] Something went wrong when trying to perform this ldap search: {bloodysearch_params} on {newconn.conf.host} with the {newconn.conf.scheme} protocol"

@@ -1,6 +1,6 @@
 from bloodyAD.formatters import accesscontrol
 from bloodyAD.exceptions import NoResultError, TooManyResultsError, LOG
-import re, socket, os, enum, asyncio, threading, urllib
+import re, os, enum, asyncio, threading, urllib
 from functools import cached_property, lru_cache
 from msldap.client import MSLDAPClient
 from msldap.commons.factory import LDAPConnectionFactory
@@ -38,44 +38,61 @@ class Ldap(MSLDAPClient):
 
         auth = ""
         creds = ""
-        params = ""
         username = ""
         key = ""
-        if cnf.dcip:
-            params = "serverip=" + cnf.dcip
-        if cnf.crt:
-            auth = "ssl"
-            crt = "sslcert=" + encoded_cnf["crt"]
-            sslparams = f"{crt}&sslpassword={encoded_cnf['key']}" if cnf.key else crt
-            params = params + "&" + sslparams if params else sslparams
+        params = "serverip=" + cnf.dcip
+
+        if cnf.certificate:
+            if cnf.certificate == "certstore":
+                if os.name == "nt":
+                    auth = "kerberos-certstore"
+                else:
+                    raise ValueError(
+                        "Certstore only available on Windows, --certstore can't be left empty here"
+                    )
+            elif cnf.crt:
+                auth = "ssl"
+                params += "&sslcert=" + encoded_cnf["crt"]
+                if cnf.key:
+                    params += "&sslkey=" + encoded_cnf["key"]
+                if cnf.password:
+                    params += "&sslpassword=" + encoded_cnf["password"]
+            else:
+                raise ValueError(
+                    "--certificate must have <cert_key>+':'+<cert> format, leave it empty to use the Windows certstore"
+                )
 
         elif cnf.kerberos:
             username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
-            if cnf.dcip:
-                dcip = cnf.dcip
-            else:
-                dcip = socket.gethostbyname(cnf.host)
-            if dcip == cnf.host:
-                raise TypeError(
+            if cnf.dcip == cnf.host:
+                raise ValueError(
                     "You can provide the IP in --dc-ip but you need to provide the"
                     " hostname in --host in order for kerberos to work"
                 )
-            dcip_param = "dc=" + dcip
-            params = params + "&" + dcip_param if params else dcip_param
+            params += "&dc=" + cnf.kdc
+            if cnf.kdcc and cnf.realmc:
+                params += f"&dcc={cnf.kdcc}&realmc={cnf.realmc}"
+
             if cnf.password:
-                auth = "kerberos-password"
+                if cnf.format in ["aes", "rc4"]:
+                    auth = "kerberos-" + cnf.format
+                else:
+                    auth = "kerberos-password"
                 key = encoded_cnf["password"]
             else:
-                auth = "kerberos-ccache"
-                key = encoded_cnf["keyfile"]
+                key = encoded_cnf["key"]
                 if not key:
                     if os.name == "nt":
                         auth = "sspi-kerberos"
                     else:
-                        raise TypeError(
+                        raise ValueError(
                             "You should provide a -p 'password' or a kerberos ticket"
-                            " via environment variable KRB5CCNAME=./myticket "
+                            " via '-k keyfile=./myticket' or environment variable KRB5CCNAME=./myticket "
                         )
+                else:
+                    auth = "kerberos-" + cnf.krbformat
+                    if cnf.format in ["b64", "hex"]:
+                        auth += cnf.format
 
         else:
             username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
@@ -83,23 +100,25 @@ class Ldap(MSLDAPClient):
                 auth = "ntlm-nt"
                 key = encoded_cnf["nthash"]
             else:
-                auth = "ntlm-password"
                 key = encoded_cnf["password"]
                 if not key:
                     if os.name == "nt":
                         auth = "sspi-ntlm"
                     else:
-                        raise TypeError("You should provide a -p 'password'")
+                        raise ValueError("You should provide a -p 'password'")
+                else:
+                    auth = "ntlm-pw"
+                    if cnf.format in ["b64", "hex"]:
+                        auth += cnf.format
 
         auth = "+" + auth if auth else ""
         creds = username if username else ""
         creds = creds + ":" + key if key else creds
         creds = creds + "@" if creds else ""
-        params = "/?" + params if params else ""
-        ldap_factory = LDAPConnectionFactory.from_url(
-            f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
-        )
-        # print(f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}")
+        params = "/?" + params
+        co_url = f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
+        LOG.debug(f"[+] Connection URL: {co_url}")
+        ldap_factory = LDAPConnectionFactory.from_url(co_url)
         super().__init__(ldap_factory.target, ldap_factory.credential, keepalive=True)
 
         # Connect function runs indefinitely waiting for I/O events so using asyncio.run will not allow us to reuse the connection
@@ -236,6 +255,7 @@ class Ldap(MSLDAPClient):
     @cached_property
     def is_gc(self):
         NTDSDSA_OPT_IS_GC = 1
+        # Sometimes raise an error, I don't know why, maybe race condition?
         nTDSDSA_options = next(
             self.bloodysearch(self._serverinfo["dsServiceName"], attr=["options"])
         )["options"]
