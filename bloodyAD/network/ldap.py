@@ -87,7 +87,7 @@ class Ldap(MSLDAPClient):
                     else:
                         raise ValueError(
                             "You should provide a -p 'password' or a kerberos ticket"
-                            " via '-k keyfile=./myticket' or environment variable KRB5CCNAME=./myticket "
+                            " via '-k <keyfile_type>=./myticket'"
                         )
                 else:
                     auth = "kerberos-" + cnf.krbformat
@@ -254,6 +254,10 @@ class Ldap(MSLDAPClient):
 
     @cached_property
     def is_gc(self):
+        # If we are in a gc connection we don't have the options attribute but we can check the scheme of our connection
+        if self.conf.scheme == "gc":
+            return True
+
         NTDSDSA_OPT_IS_GC = 1
         # Sometimes raise an error, I don't know why, maybe race condition?
         nTDSDSA_options = next(
