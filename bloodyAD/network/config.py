@@ -26,6 +26,7 @@ class Config:
     kdcc: str = ""
     realmc: str = ""
     krbformat: str = "ccache"
+    dns: str = ""
 
     def __post_init__(self):
         # Resolve dc ip
@@ -115,6 +116,7 @@ class ConnectionHandler:
                 certificate=args.certificate,
                 dcip=args.dc_ip,
                 format=args.format,
+                dns=args.dns,
             )
         else:
             cnf = config
@@ -123,12 +125,20 @@ class ConnectionHandler:
     @property
     def ldap(self):
         if not self._ldap:
-            self._ldap = Ldap(self.conf)
+            self._ldap = Ldap(self)
+        elif not self._ldap.isactive:
+            self._ldap = Ldap(self)
         return self._ldap
+
+    def closeLdap(self):
+        if not self._ldap:
+            return
+        self._ldap.close()
+        self._ldap = None
 
     def rebind(self):
         self._ldap.close()
-        self._ldap = Ldap(self.conf)
+        self._ldap = Ldap(self)
 
     def switchUser(self, username, password):
         self.conf.username = username

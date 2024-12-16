@@ -30,7 +30,6 @@ def main():
             "Enable Kerberos authentication. If '-p' is provided it will try to query a TGT with it. You can also provide a list of one or more optional keywords as '-k kdc=192.168.100.1 kdcc=192.168.150.1 realmc=foreign.realm.corp <keyfile_type>=/home/silver/Admin.ccache', <keyfile_type> being ccache, kirbi, keytab, pem or pfx, 'kdc' being the kerberos server for the keyfile provided and 'realmc' and 'kdcc' for cross realm (the realm of the '--host' provided)"
         ),
     )
-
     parser.add_argument(
         "-f",
         "--format",
@@ -60,6 +59,10 @@ def main():
     parser.add_argument(
         "--dc-ip",
         help="IP of the DC (useful if you provided a --host which can't resolve)",
+    )
+    parser.add_argument(
+        "--dns",
+        help="IP of the DNS to resolve AD names (useful for inter-domain functions)",
     )
     parser.add_argument(
         "--gc",
@@ -153,14 +156,13 @@ def main():
         i += 1
     # Detect if nargs options are at the end of options and place them at the beginning
     # We try only the following keywords even if actually it can take --kerb etc
-    if input_args[i - 1] in ["-k", "--kerberos", "-c", "--certificate"]:
+    if input_args and input_args[i - 1] in ["-k", "--kerberos", "-c", "--certificate"]:
         input_args = [input_args[i - 1]] + input_args[: i - 1] + input_args[i:]
-    args = parser.parse_args(input_args)
 
+    args = parser.parse_args(input_args)
     if "func" not in args:
         parser.print_help(sys.stderr)
         sys.exit(1)
-
     # Get the list of parameters to provide to the command
     param_names = args.func.__code__.co_varnames[1 : args.func.__code__.co_argcount]
     params = {param_name: vars(args)[param_name] for param_name in param_names}
