@@ -167,7 +167,7 @@ class Ldap(MSLDAPClient):
             self.schemaNC = self._serverinfo["schemaNamingContext"]
             self.appNCs = []
             for nc in self._serverinfo["namingContexts"]:
-                if nc == self.domainNC or nc == self.configNC or nc == self.schemaNC:
+                if nc in [self.domainNC, self.configNC, self.schemaNC]:
                     continue
                 self.appNCs.append(nc)
         except Exception as e:
@@ -360,7 +360,6 @@ class Ldap(MSLDAPClient):
             + accesscontrol.DACL_SECURITY_INFORMATION
         ),
         controls=None,
-        op_attr=False,
         raw=False,
     ):
         # Handles corner case where querying default partitions (no dn provided for that)
@@ -497,6 +496,7 @@ class Ldap(MSLDAPClient):
             host_params = await findReachableDomainServer(
                 domain_name,
                 newconn.ldap.current_site,
+                server_type="" if allow_gc else "ldap",
                 dns_addr=dns,
                 dc_dns=newconn.conf.dcip,
             )
@@ -531,23 +531,26 @@ class Ldap(MSLDAPClient):
                 "CN=Sites," + newconn.ldap.configNC,
                 "(|(objectClass=nTDSDSA)(objectClass=server))",
                 search_scope=Scope.SUBTREE,
-                attr=["msDS-HasDomainNCs", "dNSHostName"],
+                attr=["msDS-HasDomainNCs", "dNSHostName", "objectClass"],
             )
             # Put domain partitions and hostnames together by matching server distinguished name on them
             forest_servers = collections.defaultdict(dict)
             for entry in entries:
-                hostname = entry.get("dNSHostName")
-                if hostname:
-                    forest_servers[entry["distinguishedName"]]["host"] = hostname
-                elif "msDS-HasDomainNCs" in entry:
-                    parent_name = (entry["distinguishedName"]).split(",", 1)[1]
-                    forest_servers[parent_name]["partitions"] = entry[
-                        "msDS-HasDomainNCs"
-                    ]
+                if entry["objectClass"] == "server":
+                    try:
+                        forest_servers[entry["distinguishedName"]]["host"] = entry[
+                            "dNSHostName"
+                        ]
+                    except KeyError:
+                        LOG.warning(
+                            f"[!] No dNSHostName found for DC {entry['distinguishedName']}, the DC may have been demoted or have synchronization issues"
+                        )
                 else:
-                    LOG.warning(
-                        f"[!] No dNSHostName found for DC {entry['distinguishedName']}, the DC may have been demoted or have synchronization issues"
+                    parent_name = (entry["distinguishedName"]).split(",", 1)[1]
+                    forest_servers[parent_name]["partitions"] = entry.get(
+                        "msDS-HasDomainNCs"
                     )
+
             # Reorganize dict on domain so domain becomes the key containing the hosts
             forest_partitions = collections.defaultdict(list)
             for dn, attributes in forest_servers.items():

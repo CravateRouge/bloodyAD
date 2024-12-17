@@ -147,7 +147,11 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                             continue
 
                     yield yield_entry
-            except (NoResultError, LDAPSearchException):
+            except (NoResultError, LDAPSearchException) as e:
+                if type(e) is NoResultError:
+                    LOG.warning(f"[!] No readable record found in {nc}")
+                else:
+                    LOG.warning(f"[!] {nc} couldn't be read on {conn.conf.host}")
                 continue
         # List record names if we have list child right on dnsZone or MicrosoftDNS container but no READ_PROP on record object
         for nc in conn.ldap.appNCs:
@@ -189,7 +193,11 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                         domain_name = ".".join(decimals)
 
                     yield {"recordName": domain_name}
-            except (NoResultError, LDAPSearchException):
+            except (NoResultError, LDAPSearchException) as e:
+                if type(e) is NoResultError:
+                    LOG.warning(f"[!] No listable record found in {nc}")
+                else:
+                    LOG.warning(f"[!] {nc} couldn't be read on {conn.conf.host}")
                 continue
 
     # Used to avoid duplicate entries if there is the same record in multiple partitions
