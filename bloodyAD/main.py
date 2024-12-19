@@ -184,6 +184,7 @@ def main():
     exceptions.LOG.setLevel(getattr(logging, args.verbose))
     exceptions.LOG.propagate = False
     # We show msldap logs only if debug is enabled
+    # import msldap
     # if args.verbose == "DEBUG":
     #     msldap.logger.handlers = []
     #     handler = logging.StreamHandler(sys.stdout)
@@ -219,8 +220,7 @@ def main():
 
     # Close the connection properly anyway
     finally:
-        if conn._ldap:
-            conn.ldap.close()
+        conn.closeLdap()
 
 
 # Gets unparsed doc and returns a tuple of two values

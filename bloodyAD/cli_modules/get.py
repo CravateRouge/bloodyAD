@@ -204,8 +204,10 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
     record_dict = {}
     record_entries = []
     if transitive:
-        for trust_conn in conn.ldap.trustset:
-            record_entries.append(domainDnsDump(trust_conn, zone, no_detail))
+        trustmap = conn.ldap.getTrustMap()
+        for trust in trustmap.values():
+            if "conn" in trust:
+                record_entries.append(domainDnsDump(trust["conn"], zone, no_detail))
     else:
         record_entries.append(domainDnsDump(conn, zone, no_detail))
 

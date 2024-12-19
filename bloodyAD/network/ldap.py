@@ -22,6 +22,13 @@ class Change(enum.Enum):
     INCREMENT = "increment"
 
 
+class NCType(enum.IntFlag):
+    PARTIAL_DOM = 1
+    FULL_DOM = 2
+    APP = 4
+    ALL = PARTIAL_DOM | FULL_DOM | APP
+
+
 @lru_cache
 def phantomRoot():
     # [MS-ADTS] 3.1.1.3.4.1.12
@@ -42,7 +49,10 @@ class Ldap(MSLDAPClient):
     conf = None
     domainNC = None
     configNC = None
-    _trustset = set()
+    # Format: {<AD domain name>:{"conn":<ConnectionHandler obj>, "domsid":<domain sid>}}
+    # "conn" is optionnal
+    _trustmap = collections.defaultdict(dict)
+    conn = None
 
     def __init__(self, conn):
         self.conn = conn
@@ -191,8 +201,9 @@ class Ldap(MSLDAPClient):
         if not self.isactive:
             return
         self.isactive = False
-        for trust in self._trustset:
-            trust.closeLdap()
+        for trust in self._trustmap.values():
+            if "conn" in trust and trust["conn"] != self.conn:
+                trust["conn"].closeLdap()
         asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop).result()
         self.closeThread()
 
@@ -338,15 +349,35 @@ class Ldap(MSLDAPClient):
 
         return asyncio.run_coroutine_threadsafe(asyncPolicy(), self.loop).result()
 
-    @cached_property
-    def trustset(self):
-        trustmap = asyncio.get_event_loop().run_until_complete(
-            self.getTrusts(True, self.conf.dns)
+    def getTrustMap(self, nctype=NCType.ALL):
+        if self._trustmap and (self._nctype & nctype) == nctype:
+            return self._trustmap
+        asyncio.get_event_loop().run_until_complete(
+            self.getTrusts(
+                transitive=True,
+                dns=self.conf.dns,
+                allow_gc=(nctype == NCType.PARTIAL_DOM),
+            )
         )
-        for t_trusts in trustmap.values():
-            for trust_of_trust in t_trusts.values():
-                self._trustset.add(trust_of_trust["parent_conn"])
-        return self._trustset
+        return self._trustmap
+
+    async def interTrustOp(self, partition_map, op_params, op_name="bloodysearch"):
+        async def partitionOp(conn_list):
+            for conn in conn_list:
+                try:
+                    op_fn = getattr(conn.ldap, op_name)
+                    return op_fn(op_params)
+                except Exception as e:
+                    LOG.error(
+                        f"[!] Something went wrong when trying to perform '{op_name}' with '{op_params}' on {conn.conf.host} with the {conn.conf.scheme} protocol"
+                    )
+                    LOG.error(f"[!] Error {type(e).__name__}: {e}")
+
+        tasks = []
+        for pattr in partition_map.values():
+            tasks.append(partitionOp(pattr["conn_list"]))
+        op_results = await asyncio.gather(*tasks)
+        return op_results
 
     def bloodysearch(
         self,
@@ -406,7 +437,7 @@ class Ldap(MSLDAPClient):
         if isNul:
             raise NoResultError(base_dn, ldap_filter)
 
-    async def getTrusts(self, transitive=False, dns=""):
+    async def getTrusts(self, transitive=False, dns="", allow_gc=True):
         # forest_name = ""
         # forest_name = (
         #     ".".join(conn.ldap._serverinfo["rootDomainNamingContext"].split(",DC="))
@@ -414,7 +445,9 @@ class Ldap(MSLDAPClient):
 
         # We shouldn't need to make trust_dict async_safe cause there is no call to trust_dict before an await access it in fetchTrusts()
         trust_dict = {}
-        trust_to_explore = await self.fetchTrusts(self.conn, trust_dict, dns)
+        trust_to_explore = await self.fetchTrusts(
+            self.conn, trust_dict, dns, allow_gc=allow_gc
+        )
 
         # We don't do it on foreign trust because there is no transitivity between 3 forests (A<->B<->C) A doesn't have trust on C even if B has it
         if transitive:
@@ -435,7 +468,9 @@ class Ldap(MSLDAPClient):
                 tasks = []
                 for domain_name, parent_conn in trust_to_explore.items():
                     tasks.append(
-                        self.fetchTrusts(parent_conn, trust_dict, dns, domain_name)
+                        self.fetchTrusts(
+                            parent_conn, trust_dict, dns, domain_name, allow_gc=allow_gc
+                        )
                     )
                 await asyncio.gather(*tasks)
 
@@ -443,18 +478,26 @@ class Ldap(MSLDAPClient):
             LOG.warning("[!] No Trusts found")
         return trust_dict
 
-    async def fetchTrusts(self, conn, trust_dict, dns, domain_name=""):
+    async def fetchTrusts(self, conn, trust_dict, dns, domain_name="", allow_gc=True):
         # Search request to look into all available domain partitions on the dc for trusts relationships
         # We don't care if because of simultaneous dc search there are duplicates, the overhead is minor, trusts are not many
         search_params = {
             "base": "",
             "ldap_filter": "(objectClass=trustedDomain)",
-            "attr": ["trustDirection", "trustPartner", "trustAttributes", "trustType"],
+            "attr": [
+                "trustDirection",
+                "trustPartner",
+                "trustAttributes",
+                "trustType",
+                "securityIdentifier",
+            ],
             "search_scope": Scope.SUBTREE,
             "raw": True,
             "controls": [phantomRoot()],
         }
-        trusts = await self.searchInForest(conn, search_params, dns, domain_name)
+        trusts = await self.searchInForest(
+            conn, search_params, dns, domain_name, allow_gc
+        )
         # Tree root is the DC domain
         trust_to_explore = {}
         for trust in trusts:
@@ -466,6 +509,12 @@ class Ldap(MSLDAPClient):
             if already_in_tree not in trust_dict:
                 trust_dict[already_in_tree] = {}
             trust_dict[already_in_tree][trust["trustPartner"][0].decode()] = trust
+
+            # Let's not waste a run of fetchTrusts and keep active track of it so we can reuse it later
+            self._trustmap[already_in_tree]["conn"] = trust["parent_conn"]
+            self._trustmap[trust["trustPartner"][0].decode()]["domsid"] = trust[
+                "securityIdentifier"
+            ]
 
             # We already have access to all the partitions of the forest through the GC we don't need to connect to other forest DCs
             if (
@@ -517,7 +566,9 @@ class Ldap(MSLDAPClient):
         # dc is a gc for this forest, hosting every records we want, we don't need to look for other domain partitions on other dc
         # Except if we're looking for attributes no replicated in GC, then searchInForest must be called with allow_gc=False
         if newconn.ldap.is_gc and allow_gc:
-            search_results = await self.searchInPartition(newconn, search_params, dns)
+            search_results = await self.searchInPartition(
+                newconn, search_params, dns, allow_gc=allow_gc
+            )
             if newconn != conn and newconn._ldap:
                 newconn.ldap.close()
             return search_results
@@ -536,7 +587,7 @@ class Ldap(MSLDAPClient):
             # Put domain partitions and hostnames together by matching server distinguished name on them
             forest_servers = collections.defaultdict(dict)
             for entry in entries:
-                if entry["objectClass"] == "server":
+                if "server" in entry["objectClass"]:
                     try:
                         forest_servers[entry["distinguishedName"]]["host"] = entry[
                             "dNSHostName"
@@ -547,9 +598,12 @@ class Ldap(MSLDAPClient):
                         )
                 else:
                     parent_name = (entry["distinguishedName"]).split(",", 1)[1]
-                    forest_servers[parent_name]["partitions"] = entry.get(
-                        "msDS-HasDomainNCs"
-                    )
+                    try:
+                        forest_servers[parent_name]["partitions"] = entry[
+                            "msDS-HasDomainNCs"
+                        ]
+                    except:
+                        print("There was some error here")
 
             # Reorganize dict on domain so domain becomes the key containing the hosts
             forest_partitions = collections.defaultdict(list)
@@ -565,7 +619,9 @@ class Ldap(MSLDAPClient):
             tasks = []
             for p, hosts in forest_partitions.items():
                 tasks.append(
-                    self.searchInPartition(newconn, search_params, dns, p, hosts)
+                    self.searchInPartition(
+                        newconn, search_params, dns, p, hosts, allow_gc=allow_gc
+                    )
                 )
             search_results = await asyncio.gather(*tasks)
             search_results = [entry for entries in search_results for entry in entries]
@@ -580,12 +636,23 @@ class Ldap(MSLDAPClient):
             return search_results
 
     async def searchInPartition(
-        self, conn, bloodysearch_params, dns, partition="", host_records=[]
+        self,
+        conn,
+        bloodysearch_params,
+        dns,
+        partition="",
+        host_records=[],
+        allow_gc=True,
     ):
         schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
+        ports = [389, 636]
+        if allow_gc:
+            ports += [3268, 3269]
         # If host_records empty means the dc in "conn" is already the one we want to query
         if host_records:
-            host_params = await findReachableServer(host_records, dns, conn.conf.dcip)
+            host_params = await findReachableServer(
+                host_records, dns, conn.conf.dcip, ports=ports
+            )
             if not host_params:
                 LOG.warning(
                     f"[!] No reachable server found for {partition}, try to provide one"
@@ -623,16 +690,45 @@ class Ldap(MSLDAPClient):
             return search_result
 
 
-async def findReachableServer(record_list, dns_addr="", dc_dns=""):
+# Find LDAP or GC server based on current AD site
+async def findReachableDomainServer(
+    domain_or_forest_name, ad_site, server_type="", dns_addr="", dc_dns=""
+):
+    record_list = []
+    ports = []
+    if not server_type or server_type == "gc":
+        record_list += [
+            {
+                "type": ["SRV"],
+                "name": f"_gc._tcp.{ad_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": ["SRV"], "name": f"_gc._tcp.{domain_or_forest_name}"},
+        ]
+        ports += [3268, 3269]
+    if not server_type or server_type == "ldap":
+        record_list += [
+            {
+                "type": ["SRV"],
+                "name": f"_ldap._tcp.{ad_site}._sites.{domain_or_forest_name}",
+            },
+            {"type": ["SRV"], "name": f"_ldap._tcp.{domain_or_forest_name}"},
+        ]
+        ports += [389, 636]
+    host_params = await findReachableServer(record_list, dns_addr, dc_dns, ports)
+    return host_params
+
+
+# Do 389 even for GC because more probabilities to bypass fw
+# 389 LDAP, 636 LDAPS, 3268 GC, 3269 GCS
+async def findReachableServer(
+    record_list, dns_addr="", dc_dns="", ports=[389, 636, 3268, 3269]
+):
     nameservers = [] + (resolver.get_default_resolver()).nameservers
     if dc_dns:
         nameservers = [dc_dns] + nameservers
     if dns_addr:
         nameservers = [dns_addr] + nameservers
     LOG.debug(f"[+] Nameservers set to: {nameservers}")
-    # Do 389 even for GC because more probabilities to bypass fw
-    # 389 LDAP, 636 LDAPS, 3268 GC, 3269 GCS
-    ports = [389, 636, 3268, 3269]
 
     # Try to find a dc where we can connect asap
     resolve_tasks = []
@@ -643,31 +739,6 @@ async def findReachableServer(record_list, dns_addr="", dc_dns=""):
             )
 
     host_params = await wait_first(resolve_tasks)
-    return host_params
-
-
-# Find LDAP or GC server based on current AD site
-async def findReachableDomainServer(
-    domain_or_forest_name, ad_site, server_type="", dns_addr="", dc_dns=""
-):
-    record_list = []
-    if not server_type or server_type == "gc":
-        record_list += [
-            {
-                "type": ["SRV"],
-                "name": f"_gc._tcp.{ad_site}._sites.{domain_or_forest_name}",
-            },
-            {"type": ["SRV"], "name": f"_gc._tcp.{domain_or_forest_name}"},
-        ]
-    if not server_type or server_type == "ldap":
-        record_list += [
-            {
-                "type": ["SRV"],
-                "name": f"_ldap._tcp.{ad_site}._sites.{domain_or_forest_name}",
-            },
-            {"type": ["SRV"], "name": f"_ldap._tcp.{domain_or_forest_name}"},
-        ]
-    host_params = await findReachableServer(record_list, dns_addr, dc_dns)
     return host_params
 
 
