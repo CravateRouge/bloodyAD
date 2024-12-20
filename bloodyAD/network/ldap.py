@@ -618,9 +618,13 @@ class Ldap(MSLDAPClient):
                     )
             tasks = []
             for p, hosts in forest_partitions.items():
+                host_list = hosts
+                # if newconn already has this partition don't provide new hosts to connect to
+                if p in newconn.ldap._serverinfo["namingContexts"]:
+                    host_list = []
                 tasks.append(
                     self.searchInPartition(
-                        newconn, search_params, dns, p, hosts, allow_gc=allow_gc
+                        newconn, search_params, dns, p, host_list, allow_gc=allow_gc
                     )
                 )
             search_results = await asyncio.gather(*tasks)
