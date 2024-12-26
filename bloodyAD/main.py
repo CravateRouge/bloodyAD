@@ -91,7 +91,7 @@ def main():
         for function_name, function in inspect.getmembers(
             submodule, inspect.isfunction
         ):
-            function_doc, params_doc = doc_parser(function.__doc__)
+            function_doc, params_doc = doc_parser(inspect.getdoc(function))
             # This formatter class prints default values
             subsubparser = subsubparsers.add_parser(
                 function_name,
@@ -229,7 +229,7 @@ def main():
 # (other part of the string, one parameter description per line, starting with :param param_name:)
 def doc_parser(doc):
     doc_parsed = doc.splitlines()
-    return doc_parsed[1], doc_parsed[3:-1]
+    return doc_parsed[0], doc_parsed[2:]
 
 
 def print_entry(entryname, entry):
