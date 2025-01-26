@@ -12,13 +12,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from bloodyAD.exceptions import BloodyError
 
 
-def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU"):
+def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
     """
     Add new computer
 
     :param hostname: computer name (without trailing $)
     :param newpass: password for computer
     :param ou: Organizational Unit for computer
+    :param lifetime: lifetime of new computer in seconds, if non-zero creates it as a dynamic object
     """
 
     if ou == "DefaultOU":
@@ -60,6 +61,10 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU"):
         "sAMAccountName": f"{hostname}$",
         "unicodePwd": '"%s"' % newpass,
     }
+
+    if lifetime > 0:
+        attr["objectClass"].append("dynamicObject")
+        attr["entryTTL"] = lifetime
 
     conn.ldap.bloodyadd(computer_dn, attributes=attr)
     LOG.info(f"[+] {hostname} created")
