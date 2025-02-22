@@ -316,7 +316,7 @@ def trusts(conn, transitive: bool = False):
 
 
 def object(
-    conn, target: str, attr: str = "*", resolve_sd: bool = False, raw: bool = False
+    conn, target: str, attr: str = "*", resolve_sd: bool = False, raw: bool = False, transitive: bool = False
 ):
     """
     Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
@@ -325,12 +325,14 @@ def object(
     :param attr: attributes to retrieve separated by a comma, retrieves all the attributes by default
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
+    :param transitive: if set with "--resolve-sd", will try to resolve foreign SID by reaching trusts
     """
     attributesSD = [
         "nTSecurityDescriptor",
         "msDS-GroupMSAMembership",
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
+    conn.conf.transitive = transitive
     entries = conn.ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
@@ -354,6 +356,7 @@ def search(
     attr: str = "*",
     resolve_sd: bool = False,
     raw: bool = False,
+    transitive: bool = False
 ):
     """
     Search in LDAP database, binary data will be outputted in base64
@@ -363,12 +366,14 @@ def search(
     :param attr: attributes to retrieve separated by a comma
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
+    :param transitive: if set with "--resolve-sd", will try to resolve foreign SID by reaching trusts
     """
     attributesSD = [
         "nTSecurityDescriptor",
         "msDS-GroupMSAMembership",
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
+    conn.conf.transitive = transitive
     if base == "DOMAIN":
         base = conn.ldap.domainNC
     entries = conn.ldap.bloodysearch(
