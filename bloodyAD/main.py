@@ -67,7 +67,7 @@ def main():
     parser.add_argument(
         "-t",
         "--timeout",
-        help="Connction timeout in seconds",
+        help="Connection timeout in seconds",
     )
     parser.add_argument(
         "--gc",
