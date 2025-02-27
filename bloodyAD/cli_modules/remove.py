@@ -226,6 +226,25 @@ def rbcd(conn, target: str, service: str):
 
     LOG.info(f"[-] {service} can't impersonate users on {target} anymore")
 
+def spn(conn, target: str, service: str):
+    """
+    Remove an SPN from a target account (Requires "Write" permission on target's servicePrincipalName)
+
+    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param service: servicePrincipalName to remove (get object target --attr servicePrincipalName)
+    """
+    target_dn = conn.ldap.dnResolver(target)
+    spns = next(conn.ldap.bloodysearch(target, attr=["servicePrincipalName"]))["servicePrincipalName"]
+    
+    if service not in spns:
+        LOG.warning(f"[!] Target SPN not found on {target}")
+    else:
+        conn.ldap.bloodymodify(
+            target_dn,
+            {"servicePrincipalName": [(Change.DELETE.value, str(service))]},
+        )
+        LOG.info(f"[-] servicePrincipalName {service} removed from {target}")
+
 
 def shadowCredentials(conn, target: str, key: str = None):
     """
