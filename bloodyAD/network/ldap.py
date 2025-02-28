@@ -52,10 +52,10 @@ class Ldap(MSLDAPClient):
     configNC = None
     # Format: {<AD domain name>:{"conn":<ConnectionHandler obj>, "domsid":<domain sid>}}
     # "conn" is optional
-    _trustmap = collections.defaultdict(dict)
     conn = None
 
     def __init__(self, conn):
+        self._trustmap = collections.defaultdict(dict)
         self.conn = conn
         cnf = conn.conf
         self.conf = cnf
@@ -513,9 +513,9 @@ class Ldap(MSLDAPClient):
 
             # Let's not waste a run of fetchTrusts and keep active track of it so we can reuse it later
             self._trustmap[already_in_tree]["conn"] = trust["parent_conn"]
-            self._trustmap[trust["trustPartner"][0].decode()]["domsid"] = str(dtyp.sid.SID.from_bytes(trust[
-                "securityIdentifier"
-            ][0]))
+            self._trustmap[trust["trustPartner"][0].decode()]["domsid"] = str(
+                dtyp.sid.SID.from_bytes(trust["securityIdentifier"][0])
+            )
 
             # We already have access to all the partitions of the forest through the GC we don't need to connect to other forest DCs
             if (

@@ -316,7 +316,12 @@ def trusts(conn, transitive: bool = False):
 
 
 def object(
-    conn, target: str, attr: str = "*", resolve_sd: bool = False, raw: bool = False, transitive: bool = False
+    conn,
+    target: str,
+    attr: str = "*",
+    resolve_sd: bool = False,
+    raw: bool = False,
+    transitive: bool = False,
 ):
     """
     Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
@@ -356,7 +361,7 @@ def search(
     attr: str = "*",
     resolve_sd: bool = False,
     raw: bool = False,
-    transitive: bool = False
+    transitive: bool = False,
 ):
     """
     Search in LDAP database, binary data will be outputted in base64

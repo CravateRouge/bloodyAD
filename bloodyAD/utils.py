@@ -308,7 +308,7 @@ class LazyAdSchema:
                     filter_nb = 0
                 buffer_filter += f"(objectSid={sid})"
                 filter_nb += 1
-                
+
             if conn == self.conn:
                 for guid in self.guids:
                     if filter_nb > 511:
@@ -321,9 +321,11 @@ class LazyAdSchema:
                             for b in dtyp.guid.GUID().from_string(guid).to_bytes()
                         ]
                     )
-                    buffer_filter += f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
+                    buffer_filter += (
+                        f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
+                    )
                     filter_nb += 2
-                filters.append(buffer_filter)
+            filters.append(buffer_filter)
 
             # Search in all non application partitions
             for ldap_filter in filters:
@@ -363,12 +365,14 @@ class LazyAdSchema:
             for sid in self.sids:
                 for dom_params in trustmap.values():
                     if dom_params.get("conn") and sid.startswith(dom_params["domsid"]):
+                        if sid == "S-1-5-21-1394970401-3214794726-2504819329-1104":
+                            print("haha")
                         sidmap[dom_params["conn"]].append(sid)
             for conn, sidlist in sidmap.items():
                 domResolve(conn, sidlist)
         else:
             domResolve(self.conn, self.sids)
-        
+
         # Cleanup resolved ids from queues
         self.isResolved = True
         self.guids = set()
