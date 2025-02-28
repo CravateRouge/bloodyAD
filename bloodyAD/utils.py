@@ -5,7 +5,7 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope, phantomRoot
-import types, base64
+import types, base64, collections
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
@@ -296,64 +296,83 @@ class LazyAdSchema:
         if self.isResolved:
             return
 
-        # WARNING: only 512 filters max per request
-        filters = []
-        buffer_filter = ""
-        filter_nb = 0
-        for sid in self.sids:
-            if filter_nb > 511:
-                filters.append(buffer_filter)
-                buffer_filter = ""
-                filter_nb = 0
-            buffer_filter += f"(objectSid={sid})"
-            filter_nb += 1
-        for guid in self.guids:
-            if filter_nb > 511:
-                filters.append(buffer_filter)
-                buffer_filter = ""
-                filter_nb = 0
-            guid_bin_str = "\\" + "\\".join(
-                [
-                    "{:02x}".format(b)
-                    for b in dtyp.guid.GUID().from_string(guid).to_bytes()
-                ]
-            )
-            buffer_filter += f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
-            filter_nb += 2
-        filters.append(buffer_filter)
+        def domResolve(conn, sid_iter):
+            # WARNING: only 512 filters max per request
+            filters = []
+            buffer_filter = ""
+            filter_nb = 0
+            for sid in sid_iter:
+                if filter_nb > 511:
+                    filters.append(buffer_filter)
+                    buffer_filter = ""
+                    filter_nb = 0
+                buffer_filter += f"(objectSid={sid})"
+                filter_nb += 1
 
-        # Search in all non application partitions
-        # TODO: search in GC and add domain linked to it as DOMAIN\sAMAccountName, maybe try trusts in the future?
-        for ldap_filter in filters:
-            entries = self.conn.ldap.bloodysearch(
-                "",
-                ldap_filter=f"(|{ldap_filter})",
-                attr=[
-                    "name",
-                    "sAMAccountName",
-                    "objectSid",
-                    "rightsGuid",
-                    "schemaIDGUID",
-                ],
-                search_scope=Scope.SUBTREE,
-                controls=[phantomRoot()],
-            )
-            for entry in entries:
-                if entry.get("objectSid"):
-                    self.sid_dict[entry["objectSid"]] = (
-                        entry["sAMAccountName"]
-                        if entry.get("sAMAccountName")
-                        else entry["name"]
+            if conn == self.conn:
+                for guid in self.guids:
+                    if filter_nb > 511:
+                        filters.append(buffer_filter)
+                        buffer_filter = ""
+                        filter_nb = 0
+                    guid_bin_str = "\\" + "\\".join(
+                        [
+                            "{:02x}".format(b)
+                            for b in dtyp.guid.GUID().from_string(guid).to_bytes()
+                        ]
                     )
-                else:
-                    if entry.get("rightsGuid"):
-                        key = entry["rightsGuid"]
-                    elif entry.get("schemaIDGUID"):
-                        key = entry["schemaIDGUID"]
+                    buffer_filter += (
+                        f"(rightsGuid={str(guid)})(schemaIDGUID={guid_bin_str})"
+                    )
+                    filter_nb += 2
+            filters.append(buffer_filter)
+
+            # Search in all non application partitions
+            for ldap_filter in filters:
+                entries = conn.ldap.bloodysearch(
+                    "",
+                    ldap_filter=f"(|{ldap_filter})",
+                    attr=[
+                        "name",
+                        "sAMAccountName",
+                        "objectSid",
+                        "rightsGuid",
+                        "schemaIDGUID",
+                    ],
+                    search_scope=Scope.SUBTREE,
+                    controls=[phantomRoot()],
+                )
+                for entry in entries:
+                    if entry.get("objectSid"):
+                        self.sid_dict[entry["objectSid"]] = (
+                            entry["sAMAccountName"]
+                            if entry.get("sAMAccountName")
+                            else entry["name"]
+                        )
                     else:
-                        LOG.warning(f"[!] No guid/sid returned for {entry}")
-                        continue
-                    self.guid_dict[key] = entry["name"]
+                        if entry.get("rightsGuid"):
+                            key = entry["rightsGuid"]
+                        elif entry.get("schemaIDGUID"):
+                            key = entry["schemaIDGUID"]
+                        else:
+                            LOG.warning(f"[!] No guid/sid returned for {entry}")
+                            continue
+                        self.guid_dict[key] = entry["name"]
+
+        sidmap = collections.defaultdict(list)
+        if getattr(self.conn.conf, "transitive"):
+            trustmap = self.conn.ldap.getTrustMap()
+            for sid in self.sids:
+                for dom_params in trustmap.values():
+                    if dom_params.get("conn") and sid.startswith(dom_params["domsid"]):
+                        if sid == "S-1-5-21-1394970401-3214794726-2504819329-1104":
+                            print("haha")
+                        sidmap[dom_params["conn"]].append(sid)
+            for conn, sidlist in sidmap.items():
+                domResolve(conn, sidlist)
+        else:
+            domResolve(self.conn, self.sids)
+
         # Cleanup resolved ids from queues
         self.isResolved = True
         self.guids = set()
