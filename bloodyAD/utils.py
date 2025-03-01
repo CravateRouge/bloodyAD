@@ -365,8 +365,6 @@ class LazyAdSchema:
             for sid in self.sids:
                 for dom_params in trustmap.values():
                     if dom_params.get("conn") and sid.startswith(dom_params["domsid"]):
-                        if sid == "S-1-5-21-1394970401-3214794726-2504819329-1104":
-                            print("haha")
                         sidmap[dom_params["conn"]].append(sid)
             for conn, sidlist in sidmap.items():
                 domResolve(conn, sidlist)
