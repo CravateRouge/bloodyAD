@@ -39,7 +39,7 @@ def addRight(
             LOG.debug("[-] An interfering Access-Denied ACE has been removed:")
             LOG.debug(ace)
         # Adds ACE if not already added
-        elif mask.hasPriv(new_mask["Mask"]):
+        elif ace.hasFlag(new_ace["AceFlags"]) and mask.hasPriv(new_mask["Mask"]):
             hasPriv = True
             break
 

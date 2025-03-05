@@ -201,7 +201,7 @@ def dnsRecord(
 
 def genericAll(conn, target: str, trustee: str):
     """
-    Give full control to trustee on target (you must own the object or have WriteDacl)
+    Give full control to trustee on target and descendants (you must own the object or have WriteDacl)
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param trustee: sAMAccountName, DN, GUID or SID of the trustee which will have full control on target
