@@ -74,27 +74,7 @@ class Ldap(MSLDAPClient):
         key = ""
         params = "serverip=" + cnf.dcip
 
-        if cnf.certificate:
-            if cnf.certificate == "certstore":
-                if os.name == "nt":
-                    auth = "kerberos-certstore"
-                else:
-                    raise ValueError(
-                        "Certstore only available on Windows, --certstore can't be left empty here"
-                    )
-            elif cnf.crt:
-                auth = "ssl"
-                params += "&sslcert=" + encoded_cnf["crt"]
-                if cnf.key:
-                    params += "&sslkey=" + encoded_cnf["key"]
-                if cnf.password:
-                    params += "&sslpassword=" + encoded_cnf["password"]
-            else:
-                raise ValueError(
-                    "--certificate must have <cert_key>+':'+<cert> format, leave it empty to use the Windows certstore"
-                )
-
-        elif cnf.kerberos:
+        if cnf.kerberos:
             username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
             if cnf.dcip == cnf.host:
                 raise ValueError(
@@ -104,28 +84,60 @@ class Ldap(MSLDAPClient):
             params += "&dc=" + cnf.kdc
             if cnf.kdcc and cnf.realmc:
                 params += f"&dcc={cnf.kdcc}&realmc={cnf.realmc}"
-
-            if cnf.password:
-                if cnf.format in ["aes", "rc4"]:
-                    auth = "kerberos-" + cnf.format
+            auth = "kerberos-"
+            key = encoded_cnf["key"]
+            if cnf.crt:
+                file_extension = cnf.crt.rsplit('.',1)[1]
+                if file_extension in ["pfx", "p12"]:
+                    auth += "pfx"
+                elif file_extension == "pem":
+                    auth += "pem"
                 else:
-                    auth = "kerberos-password"
-                key = encoded_cnf["password"]
+                    LOG.warning("[!] No .pem/.pfx extension detected, will try .pem")
+                    auth += "pem"
+                params += "&certdata=" + encoded_cnf["crt"]
+                if cnf.key:
+                    params += "&keydata=" + key
+                    key = ""
+                if cnf.password:
+                    key = encoded_cnf["password"]
+            elif key:
+                auth += cnf.krbformat
+                if cnf.format in ["b64", "hex"]:
+                    auth += cnf.format
             else:
-                key = encoded_cnf["key"]
-                if not key:
+                if cnf.password:
+                    if cnf.format in ["aes", "rc4"]:
+                        auth += cnf.format
+                    else:
+                        auth += "password"
+                    key = encoded_cnf["password"]
+                else:
                     if os.name == "nt":
-                        auth = "sspi-kerberos"
+                        if cnf.certificate:
+                            auth += "certstore"
+                        else:
+                            auth = "sspi-kerberos"
                     else:
                         raise ValueError(
                             "You should provide a -p 'password' or a kerberos ticket"
                             " via '-k <keyfile_type>=./myticket'"
-                        )
+                        )                   
+        elif cnf.certificate:
+            if cnf.crt:
+                auth = "ssl"
+                params += "&sslcert=" + encoded_cnf["crt"]
+                if cnf.key:
+                    params += "&sslkey=" + encoded_cnf["key"]
+                if cnf.password:
+                    params += "&sslpassword=" + encoded_cnf["password"]
+            else:
+                if os.name == "nt":
+                    auth = "kerberos-certstore"
                 else:
-                    auth = "kerberos-" + cnf.krbformat
-                    if cnf.format in ["b64", "hex"]:
-                        auth += cnf.format
-
+                    raise ValueError(
+                        "Certstore only available on Windows, --certstore can't be left empty here"
+                    )
         else:
             username = "%s\\%s" % (encoded_cnf["domain"], encoded_cnf["username"])
             if cnf.nthash:

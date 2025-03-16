@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import bloodyAD.msldap_patch
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
 import sys, argparse, types, logging
 
@@ -19,7 +18,7 @@ def main():
         "--password",
         help=(
             "password or LMHASH:NTHASH for NTLM authentication, password or AES/RC4 key for kerberos, password for certificate"
-            "(Do not specify to trigger integrated windows authentication)"
+            " (Do not specify to trigger integrated windows authentication)"
         ),
     )
     parser.add_argument(
@@ -27,7 +26,7 @@ def main():
         "--kerberos",
         nargs="*",
         help=(
-            "Enable Kerberos authentication. If '-p' is provided it will try to query a TGT with it. You can also provide a list of one or more optional keywords as '-k kdc=192.168.100.1 kdcc=192.168.150.1 realmc=foreign.realm.corp <keyfile_type>=/home/silver/Admin.ccache', <keyfile_type> being ccache, kirbi, keytab, pem or pfx, 'kdc' being the kerberos server for the keyfile provided and 'realmc' and 'kdcc' for cross realm (the realm of the '--host' provided)"
+            "Enable Kerberos authentication. If '-p' is provided it will try to query a TGT with it. You can also provide a list of one or more optional keywords as '-k kdc=192.168.100.1 kdcc=192.168.150.1 realmc=foreign.realm.corp <keyfile_type>=/home/silver/Admin.ccache', <keyfile_type> being ccache, kirbi or keytab, 'kdc' being the kerberos server for the keyfile provided and 'realmc' and 'kdcc' for cross realm (the realm of the '--host' provided)"
         ),
     )
     parser.add_argument(
@@ -41,20 +40,19 @@ def main():
         "-c",
         "--certificate",
         nargs="?",
-        const="certstore",
-        default="",
-        help='Certificate authentication, e.g: "path/to/key:path/to/cert" (Use Windows Certstore with krb if left empty)',
+        help='Schannel authentication or krb pkinit if -k also provided, e.g: "path/to/key:path/to/cert" (Use Windows Certstore with krb if left empty)',
     )
     parser.add_argument(
         "-s",
         "--secure",
-        help="Try to use LDAP over TLS aka LDAPS (default is LDAP)",
+        help="Try to use LDAP/GC over TLS aka LDAPS/GCS (default is no TLS)",
         action="store_true",
         default=False,
     )
     parser.add_argument(
         "--host",
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
+        required=True
     )
     parser.add_argument(
         "--dc-ip",
@@ -152,19 +150,26 @@ def main():
             subsubparser.set_defaults(func=function)
 
     # Preprocess the input arguments because nargs ? and * can capture subparsers commands if put at the end
+    # So we always put the --host option at the end
     input_args = sys.argv[1:]
-    # Identify where options stop and where commands start
-    i = 0
+    isHost = False
+    parsed_args = []
+    host_arg = None
     for arg in input_args:
-        if arg in submodnames:
-            break
-        i += 1
-    # Detect if nargs options are at the end of options and place them at the beginning
-    # We try only the following keywords even if actually it can take --kerb etc
-    if input_args and input_args[i - 1] in ["-k", "--kerberos", "-c", "--certificate"]:
-        input_args = [input_args[i - 1]] + input_args[: i - 1] + input_args[i:]
+        if arg == "--host":
+            isHost = True
+        elif isHost:
+            isHost = False
+            host_arg = arg
+        elif arg in submodnames:
+            parsed_args.append("--host")
+            parsed_args.append(host_arg)
+            parsed_args.append(arg)
+        else:
+            parsed_args.append(arg)
+    print(parsed_args)
+    args = parser.parse_args(parsed_args)
 
-    args = parser.parse_args(input_args)
     if "func" not in args:
         parser.print_help(sys.stderr)
         sys.exit(1)

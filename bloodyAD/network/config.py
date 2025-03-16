@@ -53,13 +53,13 @@ class Config:
                     self.kdcc = value
                 elif key == "realmc":
                     self.realmc = value
-                elif key in ["ccache", "kirbi", "keytab", "pem", "pfx"]:
+                elif key in ["ccache", "kirbi", "keytab"]:
                     self.key = value
                     self.krbformat = key
                 else:
                     raise ValueError(f"{key} is not recognized as arg for --kerberos")
 
-            if not (self.key or self.password):
+            if not (self.key or self.password or self.certificate):
                 self.key = os.getenv("KRB5CCNAME")
 
             # If we have a kdc provided and user domain is different from dc domain we provide cross realm parameters
@@ -93,9 +93,11 @@ class Config:
                     self.lmhash, self.nthash = None, None
 
         # Handle case where certificate is provided
-        if ":" in self.certificate:
-            self.key, self.crt = self.certificate.split(":")
-
+        if self.certificate and isinstance(self.certificate, str):
+            if ":" in self.certificate:
+                self.key, self.crt = self.certificate.split(":")
+            else:
+                self.crt = self.certificate
 
 class ConnectionHandler:
     _ldap = None

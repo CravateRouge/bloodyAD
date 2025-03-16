@@ -10,7 +10,7 @@ name = "bloodyAD"
 authors = [
     { name="CravateRouge", email="baptiste@cravaterouge.com" },
 ]
-version = "2.1.9"
+version = "2.1.10"
 description = "AD Privesc Swiss Army Knife"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -20,13 +20,13 @@ classifiers = [
         "Operating System :: OS Independent",
 ]
 dependencies = [
-        "cryptography==44.0.1",
-        "msldap==0.5.14",
+        "cryptography==44.0.2",
+        "msldap-bAD",
         "winacl==0.1.9",
         "asn1crypto==1.5.1",
         "dnspython==2.7.0",
-        "minikerberos @ git+https://github.com/skelsec/minikerberos.git@b0de95f70a46ffd46dcaac4fd06348df7a884819",
-        "asyauth @ git+https://github.com/skelsec/asyauth.git@51f69e145ac0440e4d065c9c3dff27fd2971cecb"
+        "minikerberos-bAD",
+        "asyauth-bAD"
 ]
 
 [project.urls]
