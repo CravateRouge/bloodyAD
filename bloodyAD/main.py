@@ -167,7 +167,6 @@ def main():
             parsed_args.append(arg)
         else:
             parsed_args.append(arg)
-    print(parsed_args)
     args = parser.parse_args(parsed_args)
 
     if "func" not in args:
