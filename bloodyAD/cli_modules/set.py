@@ -2,9 +2,15 @@ from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
 from bloodyAD.network.ldap import Change
-import msldap
+from msldap.protocol import typeconversion
+from msldap.protocol.typeconversion import (
+    LDAP_WELL_KNOWN_ATTRS,
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
+)
 from datetime import datetime, timezone, timedelta
 import unicodedata
+
 
 
 def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
@@ -16,12 +22,36 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     :param raw: if set, will try to send the values provided as is, without any encoding
     """
+    if not raw:
+        # We change some encoding functions because for whatever reason some are marked as 'bytes' but are actually 'sd' so can take sddl string
+        # but we cannot directly change in msldap because it would break the ones passing directly multi_bytes
+        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = typeconversion.multi_sd
+        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["nTSecurityDescriptor"] = typeconversion.single_sd
+        norm_attr = attribute.lower()
+        lookup_table = None
+        # Order is very important cause there are overlapped with different encoding function values
+        for table in [MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC, MSLDAP_BUILTIN_ATTRIBUTE_TYPES, LDAP_WELL_KNOWN_ATTRS]:
+            for key in table:
+                if key.lower() == norm_attr:
+                    attribute = key
+                    lookup_table = table
+                    break
+            if lookup_table:
+                break
+
+        if lookup_table:
+            encoding_func = lookup_table[attribute]
+            str_support = ["utf16le","sid","str","int","guid","sd"]
+            encoding_type = encoding_func.__name__.split('_')[1]
+            if encoding_type not in str_support:
+                LOG.warning(f"[!] Attribute encoding not supported for {attribute} with {encoding_type} attribute type, using raw mode")
+                raw = True
+        else:
+            LOG.warning(f"[!] Attribute encoding not supported for {attribute}, using raw mode")
+            raw = True
     # Converting raw str into raw binary
     if raw:
-        tmp_v = []
-        for vstr in v:
-            tmp_v.add(vstr.encode())
-        v = tmp_v
+        v = [vstr.encode() for vstr in v]
 
     conn.ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)

