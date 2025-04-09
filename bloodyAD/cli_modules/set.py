@@ -1,3 +1,5 @@
+import msldap
+
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
