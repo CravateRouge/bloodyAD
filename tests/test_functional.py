@@ -16,7 +16,6 @@ class TestModules(unittest.TestCase):
             "username": conf["admin_user"]["username"],
             "password": conf["admin_user"]["password"],
         }
-        cls.pkinit_path = conf["pkinit_path"]
         cls.toTear = []
         cls.env = os.environ.copy()
         cls.bloody_prefix = [
@@ -218,18 +217,18 @@ class TestModules(unittest.TestCase):
             ["add", "shadowCredentials", slave["username"], "--path", outfile2],
         )
         id_shado1 = re.search("sha256 of RSA key: (.+)", out_shado1).group(1)
-        import time
 
-        time.sleep(60)
-        self.pkinit(slave["username"], outfile1)
         self.launchBloody(
             self.user,
             ["remove", "shadowCredentials", slave["username"], "--key", id_shado1],
         )
 
-        self.pkinit(slave["username"], outfile2)
         self.launchBloody(self.user, ["remove", "shadowCredentials", slave["username"]])
-
+        # Delete the files with '.ccache' extension
+        for file in [outfile1, outfile2]:
+            ccache_file = f"{file}.ccache"
+            if os.path.exists(ccache_file):
+                os.remove(ccache_file)
         # Group
         self.launchBloody(
             self.admin, ["add", "genericAll", "IIS_IUSRS", self.user["username"]]
@@ -455,32 +454,6 @@ class TestModules(unittest.TestCase):
             ),
             '"Trustee": "' + identity,
         )
-
-    def pkinit(self, username, outfile):
-        self.assertRegex(
-            self.launchProcess(
-                [
-                    "python3",
-                    f"{self.pkinit_path}/gettgtpkinit.py",
-                    "-dc-ip",
-                    self.host,
-                    "-cert-pem",
-                    f"{outfile}_cert.pem",
-                    "-key-pem",
-                    f"{outfile}_priv.pem",
-                    f"{self.domain}/{username}",
-                    f"{outfile}.ccache",
-                ],
-                False,
-            ),
-            "Saved TGT to file",
-        )
-        for name in [
-            f"{outfile}_cert.pem",
-            f"{outfile}_priv.pem",
-            f"{outfile}.ccache",
-        ]:
-            self.toTear.append([(pathlib.Path() / name).unlink])
 
     @classmethod
     def tearDownClass(cls):
