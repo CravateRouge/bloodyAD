@@ -419,11 +419,11 @@ def writable(
     ldap_filter = ""
     if otype == "USER":
         ldap_filter = "(sAMAccountType=805306368)"
+    elif otype == "OU":
+        ldap_filter = "(|(objectClass=container)(objectClass=organizationalUnit))"
     else:
         if otype == "ALL":
             objectClass = "*"
-        elif otype == "OU":
-            objectClass = "container"
         elif otype == "GPO":
             objectClass = "groupPolicyContainer"
         else:
