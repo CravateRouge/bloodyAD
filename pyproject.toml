@@ -10,7 +10,7 @@ name = "bloodyAD"
 authors = [
     { name="CravateRouge", email="baptiste@cravaterouge.com" },
 ]
-version = "2.1.15"
+version = "2.1.16"
 description = "AD Privesc Swiss Army Knife"
 readme = "README.md"
 requires-python = ">=3.8"
