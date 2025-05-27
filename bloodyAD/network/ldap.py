@@ -53,6 +53,7 @@ class Ldap(MSLDAPClient):
     # Format: {<AD domain name>:{"conn":<ConnectionHandler obj>, "domsid":<domain sid>}}
     # "conn" is optional
     conn = None
+    co_url = None
 
     def __init__(self, conn):
         self._trustmap = collections.defaultdict(dict)
@@ -163,9 +164,9 @@ class Ldap(MSLDAPClient):
         creds = creds + ":" + key if key else creds
         creds = creds + "@" if creds else ""
         params = "/?" + params
-        co_url = f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
-        LOG.debug(f"[+] Connection URL: {co_url}")
-        ldap_factory = LDAPConnectionFactory.from_url(co_url)
+        self.co_url = f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
+        LOG.debug(f"[+] Connection URL: {self.co_url}")
+        ldap_factory = LDAPConnectionFactory.from_url(self.co_url)
         super().__init__(ldap_factory.target, ldap_factory.credential, keepalive=True)
 
         # Connect function runs indefinitely waiting for I/O events so using asyncio.run will not allow us to reuse the connection

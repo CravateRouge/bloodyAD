@@ -534,3 +534,42 @@ def renderSearchResult(entries):
                 decoded_entry[attr_name] = decoded
         yield decoded_entry
         decoded_entry = {}
+
+
+def findCompatibleDC(conn, min_version, max_version, scope: str = "DOMAIN"):
+    """
+    Finds a compatible Domain Controller in the domain, forest or inter-forest.
+
+    Returns a list of hostnames with their IPs of compatible DCs.
+    """
+    if scope not in {"DOMAIN", "FOREST", "EXTERNAL"}:
+        raise ValueError("Invalid scope. Scope must be 'DOMAIN', 'FOREST', or 'EXTERNAL'.")
+
+    dc_dict = collections.defaultdict(dict)
+    base_dn = ""
+
+    # Check if KeyCredential is supported on current DC or find alternative DC
+    for dc_info in conn.ldap.bloodysearch(
+        base_dn,
+        "(|(objectClass=nTDSDSA)(objectClass=server))",
+        search_scope=Scope.SUBTREE,
+        attr=["msDS-Behavior-Version", "msDS-HasDomainNCs", "objectClass", "dNSHostName"],
+        raw=True,
+    ):
+        if b"nTDSDSA" in dc_info["objectClass"]:
+            parent_name = dc_info["distinguishedName"].split(",", 1)[1]
+            dc_dict[parent_name]["version"] = int(dc_info["msDS-Behavior-Version"][0])
+            dc_dict[parent_name]["domainNCs"] = dc_info["msDS-HasDomainNCs"]
+        elif b"server" in dc_info["objectClass"]:
+            dc_dict[dc_info["distinguishedName"]]["hostname"] = dc_info["dNSHostName"][0].decode()
+
+    has_KeyCredential = True
+    alt_servers = []
+    for dn, dc_info in dc_dict.items():
+        if dn == conn.ldap._serverinfo["serverName"]:
+            if dc_info["version"] < 7:
+                has_KeyCredential = False
+            else:
+                break
+        elif dc_info["version"] > 6 and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"):
+            alt_servers.append(dc_info["hostname"])

