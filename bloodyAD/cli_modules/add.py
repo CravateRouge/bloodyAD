@@ -215,7 +215,7 @@ def dcsync(conn, trustee: str):
     """
     Add DCSync right on domain to provided trustee (Requires to own or to have WriteDacl on domain object)
 
-    :param trustee: sAMAccountName, DN, GUID or SID of the trustee
+    :param trustee: sAMAccountName, DN or SID of the trustee
     """
     new_sd, _ = utils.getSD(conn, conn.ldap.domainNC)
     if "s-1-" in trustee.lower():
@@ -344,8 +344,8 @@ def genericAll(conn, target: str, trustee: str):
     """
     Give full control to trustee on target and descendants (you must own the object or have WriteDacl)
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
-    :param trustee: sAMAccountName, DN, GUID or SID of the trustee which will have full control on target
+    :param target: sAMAccountName, DN or SID of the target
+    :param trustee: sAMAccountName, DN or SID of the trustee which will have full control on target
     """
     new_sd, _ = utils.getSD(conn, target)
     if "s-1-" in trustee.lower():
@@ -374,8 +374,8 @@ def groupMember(conn, group: str, member: str):
     """
     Add a new member (user, group, computer) to group
 
-    :param group: sAMAccountName, DN, GUID or SID of the group
-    :param member: sAMAccountName, DN, GUID or SID of the member
+    :param group: sAMAccountName, DN or SID of the group
+    :param member: sAMAccountName, DN or SID of the member
     """
     # This is equivalent to classic add member,
     # see [MS-ADTS] - 3.1.1.3.1.2.4 Alternative Forms of DNs
@@ -395,8 +395,8 @@ def rbcd(conn, target: str, service: str):
     """
     Add Resource Based Constraint Delegation for service on target, used to impersonate a user on target with service (Requires "Write" permission on target's msDS-AllowedToActOnBehalfOfOtherIdentity and Windows Server >= 2012)
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
-    :param service: sAMAccountName, DN, GUID or SID of the service account
+    :param target: sAMAccountName, DN or SID of the target
+    :param service: sAMAccountName, DN or SID of the service account
     """
     control_flag = 0
     new_sd, _ = utils.getSD(
@@ -430,7 +430,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     """
     Add Key Credentials to target (try to find a suitable DC if provided DC is below Win2016), and use those credentials to retrieve a TGT and a NT hash using PKINIT.
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param path: filepath for the generated credentials (TGT ccache or pfx if PKINIT fails)
     """
 
@@ -565,7 +565,7 @@ def uac(conn, target: str, f: list = None):
     """
     Add property flags altering user/computer object behavior
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param f: name of property flag to add, can be called multiple times if multiple flags to add (e.g -f DONT_REQ_PREAUTH  -f DONT_EXPIRE_PASSWORD)
     """
     # TODO: Give scenarios with interesting account control flags

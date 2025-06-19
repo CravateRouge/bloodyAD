@@ -232,31 +232,27 @@ class Ldap(MSLDAPClient):
             raise err
 
     @lru_cache
-    def dnResolver(self, identity, objtype=None):
+    def dnResolver(self, identity):
         """
         Return the DN for the object based on the parameters identity
         Args:
-            identity: sAMAccountName, DN, GUID or SID of the user
-            objtype: None is default or GPO
+            identity: sAMAccountName, DN, GPO name or SID of the object
         """
 
-        async def asyncDnResolver(identity, objtype=None):
-            if "dc=" in identity.lower():
+        async def asyncDnResolver(identity):
+            if identity.lower().startswith(("dc=","cn=")):
                 # identity is a DN, return as is
                 # We do not try to validate it because it could be from another trusted domain
                 return identity
 
-            if "s-1-" in identity.lower():
+            if identity.lower().startswith("s-1-"):
                 # We assume identity is an SID
                 ldap_filter = f"(objectSid={identity})"
-            elif "{" in identity:
-                if objtype == "GPO":
-                    ldap_filter = (
-                        f"(&(objectClass=groupPolicyContainer)(name={identity}))"
-                    )
-                else:
-                    # We assume identity is a GUID
-                    ldap_filter = f"(objectGUID={identity})"
+            # For GPO name as GPO has no sAMAccountName
+            elif identity.startswith("{"):
+                ldap_filter = (
+                    f"(name={identity})"
+                )
             else:
                 # By default, we assume identity is a sam account name
                 ldap_filter = f"(sAMAccountName={identity})"
@@ -273,12 +269,25 @@ class Ldap(MSLDAPClient):
                 dn = entry["attributes"]["distinguishedName"]
 
             if not dn:
+                # Try ambiguous name resolution as last resort for debug
+                entries = self.pagedsearch(
+                f"(anr={identity})", ["distinguishedName"], tree=self.domainNC
+                )
+                anr_dn = []
+                async for entry, err in entries:
+                    if err:
+                        raise err
+                    anr_dn.append(entry["attributes"]["distinguishedName"])
+                if anr_dn:
+                    LOG.error(
+                        f"[!] No results found for '{identity}' but found entries that could match: {anr_dn}"
+                    )
                 raise NoResultError(self.domainNC, ldap_filter)
 
             return dn
 
         return asyncio.run_coroutine_threadsafe(
-            asyncDnResolver(identity, objtype), self.loop
+            asyncDnResolver(identity), self.loop
         ).result()
 
     def bloodymodify(self, target, changes, controls=None, encode=True):
@@ -407,7 +416,7 @@ class Ldap(MSLDAPClient):
             + accesscontrol.GROUP_SECURITY_INFORMATION
             + accesscontrol.DACL_SECURITY_INFORMATION
         ),
-        controls=None,
+        controls=[],
         raw=False,
     ):
         # Handles corner case where querying default partitions (no dn provided for that)
@@ -416,13 +425,12 @@ class Ldap(MSLDAPClient):
         else:
             base_dn = base
 
-        if not controls:
+        if control_flag:
             # Search control to request security descriptor parts
             req_flags = SDFlagsRequestValue({"Flags": control_flag})
-            controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
+            controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
 
         self.ldap_query_page_size = self.policy["MaxPageSize"]
-
         search_generator = self.pagedsearch(
             ldap_filter,
             attr,

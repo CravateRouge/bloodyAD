@@ -3,7 +3,7 @@ import msldap
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
-from bloodyAD.network.ldap import Change
+from bloodyAD.network.ldap import Change, Scope
 from msldap.protocol import typeconversion
 from msldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
@@ -19,7 +19,7 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
     """
     Add/Replace/Delete target's attribute
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param attribute: name of the attribute
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     :param raw: if set, will try to send the values provided as is, without any encoding
@@ -65,8 +65,8 @@ def owner(conn, target: str, owner: str):
     """
     Changes target ownership with provided owner (WriteOwner permission required)
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
-    :param owner: sAMAccountName, DN, GUID or SID of the new owner
+    :param target: sAMAccountName, DN or SID of the target
+    :param owner: sAMAccountName, DN or SID of the new owner
     """
     new_sid = next(conn.ldap.bloodysearch(owner, attr=["objectSid"]))["objectSid"]
 
@@ -100,7 +100,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
     """
     Change password of a user/computer
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param newpass: new password for the target
     :param oldpass: old password of the target, mandatory if you don't have "change password" permission on the target
     """
@@ -274,3 +274,51 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
 
     LOG.info("[+] Password changed successfully!")
     return True
+
+
+def restore(conn, target: str, newName: str = None, newParent: str = None):
+    """
+    Restore a deleted object
+
+    :param target: sAMAccountName (or name for GPO) or SID of the target (shouldn't be sAMAccountName if there is a duplicate)
+    :param newName: new name for the restored object (update also sAMAccountName, UPN, SPN...), if not provided will use the last known RDN
+    :param newParent: new parent for the restored object, if not provided will use the last known parent
+    """
+    if target.lower().startswith("s-1-"):
+        ldap_filter = f"(objectSid={target})"
+    elif target.startswith("{"):
+        ldap_filter = f"(name={target})"
+    else:
+        ldap_filter = f"(sAMAccountName={target})"
+    ldap_filter = f"(&{ldap_filter}(isDeleted=TRUE))"
+    entry = next(conn.ldap.bloodysearch(
+        "CN=Deleted Objects,"+conn.ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.417", True, None)]
+    ))# LDAP_SERVER_SHOW_DELETED_OID
+    
+    new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',entry['name'])},{newParent if newParent else entry['lastKnownParent']}"
+    attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
+    if newName:
+        attributes["name"] = [(Change.REPLACE.value, newName)]
+        attributes["displayName"] = [(Change.REPLACE.value, entry["displayName"].replace(entry["name"], newName))]
+        if entry.get("sAMAccountName"):
+            attributes["sAMAccountName"] = [(Change.REPLACE.value, newName+'$' if entry["sAMAccountName"][-1] == "$" else newName)]
+        if entry.get("servicePrincipalName"):
+            attributes["servicePrincipalName"] = [(Change.REPLACE.value, [v.replace(entry["name"],newName) for v in entry["servicePrincipalName"]])]
+        if entry.get("userPrincipalName"):
+            attributes["userPrincipalName"] = [(Change.REPLACE.value, newName + '@' + entry["userPrincipalName"].split('@')[-1])]
+        if entry.get("dNSHostName"):
+            attributes["dNSHostName"] = [(Change.REPLACE.value, newName + '.' + entry["dNSHostName"].split('.',1)[-1])]
+
+    try:
+        conn.ldap.bloodymodify(
+            entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.2064", True, None)]
+        )
+    except msldap.commons.exceptions.LDAPModifyException as e:
+        if "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19: # 19 is constraintViolation
+            LOG.error(
+                "[!] Operation failed, the userPrincipalName is probably already used by another non-deleted object, you have the change the other user UPN first (changing UPN of a deleted object is not allowed)"
+            )
+            return
+        raise e
+
+    LOG.info(f"[+] {target} has been restored successfully under {new_dn}")

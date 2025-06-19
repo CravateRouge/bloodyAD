@@ -12,7 +12,7 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
     """
     List children for a given target object
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
@@ -255,7 +255,7 @@ def membership(conn, target: str, no_recurse: bool = False):
     """
     Retrieve SID and SAM Account Names of all groups a target belongs to
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
     """
     ldap_filter = ""
@@ -326,7 +326,7 @@ def object(
     """
     Retrieve LDAP attributes for the target object provided, binary data will be outputted in base64
 
-    :param target: sAMAccountName, DN, GUID or SID of the target (if you give an empty string "" prints rootDSE)
+    :param target: sAMAccountName, DN or SID of the target (if you give an empty string "" prints rootDSE)
     :param attr: attributes to retrieve separated by a comma, retrieves all the attributes by default
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
@@ -362,6 +362,7 @@ def search(
     resolve_sd: bool = False,
     raw: bool = False,
     transitive: bool = False,
+    c: list = [],
 ):
     """
     Search in LDAP database, binary data will be outputted in base64
@@ -372,6 +373,7 @@ def search(
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     :param transitive: if set with "--resolve-sd", will try to resolve foreign SID by reaching trusts
+    :param c: if set, will use the controls for extended search operations, e.g. "-c 1.2.840.113556.1.4.2064 -c 1.2.840.113556.1.4.2065" to display tombstoned, deleted and recycled objects and their linked attributes
     """
     attributesSD = [
         "nTSecurityDescriptor",
@@ -381,8 +383,11 @@ def search(
     conn.conf.transitive = transitive
     if base == "DOMAIN":
         base = conn.ldap.domainNC
+    # RFC2251 4.1.12 Controls
+    # control ::= (controlType, criticality, controlValue)
+    controls = [(oid,True,None) for oid in c]
     entries = conn.ldap.bloodysearch(
-        base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), raw=raw
+        base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), raw=raw, controls=controls
     )
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:

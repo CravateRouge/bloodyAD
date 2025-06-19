@@ -12,7 +12,7 @@ def dcsync(conn, trustee: str):
     """
     Remove DCSync right for provided trustee
 
-    :param trustee: sAMAccountName, DN, GUID or SID of the trustee
+    :param trustee: sAMAccountName, DN or SID of the trustee
     """
     new_sd, _ = utils.getSD(conn, conn.ldap.domainNC)
     if "s-1-" in trustee.lower():
@@ -130,8 +130,8 @@ def genericAll(conn, target: str, trustee: str):
     """
     Remove full control of trustee on target
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
-    :param trustee: sAMAccountName, DN, GUID or SID of the trustee
+    :param target: sAMAccountName, DN or SID of the target
+    :param trustee: sAMAccountName, DN or SID of the trustee
     """
     new_sd, _ = utils.getSD(conn, target)
     if "s-1-" in trustee.lower():
@@ -160,8 +160,8 @@ def groupMember(conn, group: str, member: str):
     """
     Remove member (user, group, computer) from group
 
-    :param group: sAMAccountName, DN, GUID or SID of the group
-    :param member: sAMAccountName, DN, GUID or SID of the member
+    :param group: sAMAccountName, DN or SID of the group
+    :param member: sAMAccountName, DN or SID of the member
     """
     # This is equivalent to classic add member,
     # see [MS-ADTS] - 3.1.1.3.1.2.4 Alternative Forms of DNs
@@ -183,7 +183,7 @@ def object(conn, target: str):
     """
     Remove object (user, group, computer, organizational unit, etc)
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     """
     conn.ldap.bloodydelete(target)
     LOG.info(f"[-] {target} has been removed")
@@ -193,8 +193,8 @@ def rbcd(conn, target: str, service: str):
     """
     Remove Resource Based Constraint Delegation for service on target
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
-    :param service: sAMAccountName, DN, GUID or SID of the service account
+    :param target: sAMAccountName, DN or SID of the target
+    :param service: sAMAccountName, DN or SID of the service account
     """
     control_flag = 0
     new_sd, _ = utils.getSD(
@@ -231,7 +231,7 @@ def shadowCredentials(conn, target: str, key: str = None):
     """
     Remove Key Credentials from target
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param key: RSA key of Key Credentials to remove from the target, removes all if key not specified
     """
     keyCreds = next(
@@ -262,7 +262,7 @@ def uac(conn, target: str, f: list = None):
     """
     Remove property flags altering user/computer object behavior
 
-    :param target: sAMAccountName, DN, GUID or SID of the target
+    :param target: sAMAccountName, DN or SID of the target
     :param f: name of property flag to remove, can be called multiple times if multiple flags to remove (e.g -f LOCKOUT  -f ACCOUNTDISABLE)
     """
     uac = 0
