@@ -1,8 +1,10 @@
+import msldap
+
 from bloodyAD import utils, asciitree
 from bloodyAD.exceptions import LOG
 from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
-from bloodyAD.formatters import common
+from bloodyAD.formatters import accesscontrol, common
 from msldap.commons.exceptions import LDAPSearchException
 from typing import Literal
 import re, asyncio
@@ -362,6 +364,7 @@ def search(
     resolve_sd: bool = False,
     raw: bool = False,
     transitive: bool = False,
+    include_del: bool = False,
 ):
     """
     Search in LDAP database, binary data will be outputted in base64
@@ -372,6 +375,7 @@ def search(
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputed in base64
     :param transitive: if set with "--resolve-sd", will try to resolve foreign SID by reaching trusts
+    :param include_del: if set, include deleted objects
     """
     attributesSD = [
         "nTSecurityDescriptor",
@@ -381,8 +385,18 @@ def search(
     conn.conf.transitive = transitive
     if base == "DOMAIN":
         base = conn.ldap.domainNC
+    if include_del:
+        control_flag=(
+            accesscontrol.OWNER_SECURITY_INFORMATION
+            + accesscontrol.GROUP_SECURITY_INFORMATION
+            + accesscontrol.DACL_SECURITY_INFORMATION
+        )
+        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({"Flags" : control_flag})
+        controls = [("1.2.840.113556.1.4.801", True, req_flags.dump()),("1.2.840.113556.1.4.417", True, None),("1.2.840.113556.1.4.2065", True, None)]
+    else:
+        controls = None
     entries = conn.ldap.bloodysearch(
-        base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), raw=raw
+        base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), controls=controls, raw=raw
     )
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
@@ -405,6 +419,7 @@ def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
+    include_del: bool = False,
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -413,6 +428,7 @@ def writable(
     :param otype: type of writable object to retrieve
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
+    :param include_del: if set, include deleted objects
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -460,6 +476,17 @@ def writable(
             "lambda": genericReturn,
             "right": "CREATE_CHILD",
         }
+    
+    if include_del:
+        control_flag=(
+            accesscontrol.OWNER_SECURITY_INFORMATION
+            + accesscontrol.GROUP_SECURITY_INFORMATION
+            + accesscontrol.DACL_SECURITY_INFORMATION
+        )
+        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue({"Flags" : control_flag})
+        controls = [("1.2.840.113556.1.4.801", True, req_flags.dump()),("1.2.840.113556.1.4.417", True, None),("1.2.840.113556.1.4.2065", True, None)]
+    else:
+        controls = None
 
     searchbases = []
     # if partition == "DOMAIN":
@@ -471,7 +498,7 @@ def writable(
     right_entry = {}
     for searchbase in searchbases:
         for entry in conn.ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys()
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys(), controls=controls
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:
