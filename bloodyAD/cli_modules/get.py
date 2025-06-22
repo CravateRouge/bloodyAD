@@ -2,7 +2,6 @@ from bloodyAD import utils, asciitree
 from bloodyAD.exceptions import LOG
 from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
-from bloodyAD.formatters import common
 from msldap.commons.exceptions import LDAPSearchException
 from typing import Literal
 import re, asyncio
@@ -307,7 +306,7 @@ def trusts(conn, transitive: bool = False):
     )
 
     # Get the host domain as root for the trust tree
-    trust_root_domain = (".".join(conn.ldap.domainNC.split(",DC="))).split("DC=")[1]
+    trust_root_domain = conn.ldap.dc_domain
     if trust_dict:
         tree = {}
         asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
@@ -410,6 +409,7 @@ def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
+    include_del: bool = False,
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -418,6 +418,7 @@ def writable(
     :param otype: type of writable object to retrieve
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
+    :param include_del: if set, include deleted objects
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -465,6 +466,10 @@ def writable(
             "lambda": genericReturn,
             "right": "CREATE_CHILD",
         }
+    
+    controls = None
+    if include_del:
+        controls = [("1.2.840.113556.1.4.417", True, None),("1.2.840.113556.1.4.2065", True, None)]
 
     searchbases = []
     # if partition == "DOMAIN":
@@ -476,7 +481,7 @@ def writable(
     right_entry = {}
     for searchbase in searchbases:
         for entry in conn.ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys()
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys(), controls=controls
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:

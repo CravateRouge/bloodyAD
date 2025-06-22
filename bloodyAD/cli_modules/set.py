@@ -248,7 +248,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                     " protocol such as smbpasswd, server error may be more explicit."
                 )
             else:
-                print(pwdPolicy)
+
                 if pwdPolicy.get("pwdHistoryLength", 0) > 0:
                     if oldpass == newpass:
                         error_str = "New Password can't be identical to old password."

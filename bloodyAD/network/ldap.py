@@ -54,6 +54,7 @@ class Ldap(MSLDAPClient):
     # "conn" is optional
     conn = None
     co_url = None
+    dc_domain = None
 
     def __init__(self, conn):
         self._trustmap = collections.defaultdict(dict)
@@ -197,6 +198,7 @@ class Ldap(MSLDAPClient):
                 if nc in [self.domainNC, self.configNC, self.schemaNC]:
                     continue
                 self.appNCs.append(nc)
+            self.dc_domain = ('.'.join(self.domainNC.split(",DC="))).split("DC=")[1]
         except Exception as e:
             self.closeThread()
             raise e
@@ -240,7 +242,7 @@ class Ldap(MSLDAPClient):
         """
 
         async def asyncDnResolver(identity):
-            if identity.lower().startswith(("dc=","cn=")):
+            if ",dc=" in identity.lower():
                 # identity is a DN, return as is
                 # We do not try to validate it because it could be from another trusted domain
                 return identity
@@ -410,13 +412,13 @@ class Ldap(MSLDAPClient):
         base,
         ldap_filter="(objectClass=*)",
         search_scope=Scope.BASE,
-        attr=["*"],
+        attr=None,
         control_flag=(
             accesscontrol.OWNER_SECURITY_INFORMATION
             + accesscontrol.GROUP_SECURITY_INFORMATION
             + accesscontrol.DACL_SECURITY_INFORMATION
         ),
-        controls=[],
+        controls=None,
         raw=False,
     ):
         # Handles corner case where querying default partitions (no dn provided for that)
@@ -425,9 +427,14 @@ class Ldap(MSLDAPClient):
         else:
             base_dn = base
 
+        if attr is None:
+            attr = ["*"]
+
         if control_flag:
             # Search control to request security descriptor parts
             req_flags = SDFlagsRequestValue({"Flags": control_flag})
+            if controls is None:
+                controls = []
             controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
 
         self.ldap_query_page_size = self.policy["MaxPageSize"]
@@ -670,7 +677,7 @@ class Ldap(MSLDAPClient):
         bloodysearch_params,
         dns,
         partition="",
-        host_records=[],
+        host_records=None,
         allow_gc=True,
     ):
         schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
@@ -750,8 +757,10 @@ async def findReachableDomainServer(
 # Do 389 even for GC because more probabilities to bypass fw
 # 389 LDAP, 636 LDAPS, 3268 GC, 3269 GCS
 async def findReachableServer(
-    record_list, dns_addr="", dc_dns="", ports=[389, 636, 3268, 3269]
+    record_list, dns_addr="", dc_dns="", ports=None
 ):
+    if ports is None:
+        ports = [389, 636, 3268, 3269]
     nameservers = [] + (resolver.get_default_resolver()).nameservers
     if dc_dns:
         nameservers = [dc_dns] + nameservers

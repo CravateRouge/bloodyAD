@@ -262,6 +262,8 @@ class TestModules(unittest.TestCase):
             ["add", "genericAll", self.rootDomainNamingContext, self.user["username"]],
         )
         self.launchBloody(self.user, ["add", "dcsync", slave["username"]])
+        import time
+        time.sleep(120)
         self.assertRegex(
             self.launchProcess(
                 [
@@ -274,6 +276,7 @@ class TestModules(unittest.TestCase):
             "Kerberos keys grabbed",
         )
         self.launchBloody(self.user, ["remove", "dcsync", slave["username"]])
+        time.sleep(120)
         self.assertNotRegex(
             self.launchProcess(
                 [
