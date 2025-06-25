@@ -292,10 +292,10 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
         ldap_filter = f"(sAMAccountName={target})"
     ldap_filter = f"(&{ldap_filter}(isDeleted=TRUE))"
     entry = next(conn.ldap.bloodysearch(
-        "CN=Deleted Objects,"+conn.ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.417", True, None)]
+        "CN=Deleted Objects,"+conn.ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.2064", True, None)]
     ))# LDAP_SERVER_SHOW_DELETED_OID
-    
-    new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',entry['name'])},{newParent if newParent else entry['lastKnownParent']}"
+    old_name = entry['name'].splitlines()[0]
+    new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',old_name)},{newParent if newParent else entry['lastKnownParent']}"
     attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
     if newName:
         attributes["name"] = [(Change.REPLACE.value, newName)]

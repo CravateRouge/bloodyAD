@@ -161,6 +161,8 @@ class Ldap(MSLDAPClient):
             params += "&timeout=" + cnf.timeout
 
         auth = "+" + auth if auth else ""
+        # FOR DEBUG
+        # auth = "+simple"
         creds = username if username else ""
         creds = creds + ":" + key if key else creds
         creds = creds + "@" if creds else ""
