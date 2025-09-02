@@ -11,11 +11,9 @@ from msldap.protocol.typeconversion import (
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
 )
 from datetime import datetime, timezone, timedelta
-import unicodedata
+import unicodedata, base64
 
-
-
-def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
+def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False):
     """
     Add/Replace/Delete target's attribute
 
@@ -23,7 +21,9 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
     :param attribute: name of the attribute
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     :param raw: if set, will try to send the values provided as is, without any encoding
+    :param b64: expect base64 values in -v (available only with --raw)
     """
+
     if not raw:
         # We change some encoding functions because for whatever reason some are marked as 'bytes' but are actually 'sd' so can take sddl string
         # but we cannot directly change in msldap because it would break the ones passing directly multi_bytes
@@ -53,7 +53,10 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False):
             raw = True
     # Converting raw str into raw binary
     if raw:
-        v = [vstr.encode() for vstr in v]
+        if b64:
+            v = [base64.b64decode(vstr, validate=True) for vstr in v]
+        else:
+            v = [vstr.encode() for vstr in v]
 
     conn.ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
