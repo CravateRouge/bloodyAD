@@ -10,7 +10,7 @@ name = "bloodyAD"
 authors = [
     { name="CravateRouge", email="baptiste@cravaterouge.com" },
 ]
-version = "2.1.22"
+version = "2.1.23"
 description = "AD Privesc Swiss Army Knife"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -25,7 +25,7 @@ dependencies = [
         "winacl==0.1.9",
         "asn1crypto==1.5.1",
         "dnspython==2.7.0",
-        "minikerberos-bAD>=0.4.12"
+        "minikerberos-bAD>=0.4.13"
 ]
 
 [project.urls]
