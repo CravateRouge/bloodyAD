@@ -91,9 +91,9 @@ class TestBloodyADAuthentications(unittest.TestCase):
             cwd=cls.tmp_dir,
         )
 
-        # Retrieve ccache and kirbi files using minikerberos
+        # Retrieve ccache and kirbi files using kerbad
         cls.run_subprocess(
-            f"python3 /mnt/hgfs/bloodyAD-dev/minikerberos/minikerberos/examples/getTGT.py "
+            f"python3 /mnt/hgfs/bloodyAD-dev/kerbad/kerbad/examples/getTGT.py "
             f"'kerberos+password://{cls.domain}\\{cls.admin_user}:{cls.admin_password}@{cls.dc_ip}' "
             f"--ccache {cls.ccache_file} --kirbi {cls.kirbi_file}",
             cwd=cls.tmp_dir,

