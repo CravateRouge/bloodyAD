@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
-import sys, argparse, types, logging
+import sys, argparse, types, logging, json
 
 # For dynamic argparse
 import inspect, pkgutil, importlib
@@ -79,6 +79,12 @@ def main():
         help="Adjust output verbosity",
         choices=["QUIET", "INFO", "DEBUG"],
         default="INFO",
+    )
+    parser.add_argument(
+        "--json",
+        help="Output results in JSON format",
+        action="store_true",
+        default=False,
     )
 
     subparsers = parser.add_subparsers(title="Commands")
@@ -217,15 +223,31 @@ def main():
             return
 
         if output_type not in [list, dict, types.GeneratorType]:
-            print("\n" + output)
+            if args.json:
+                print(json.dumps({"result": str(output)}, indent=2))
+            else:
+                print("\n" + output)
             return
 
-        for entry in output:
-            print()
-            for attr_name, attr_val in entry.items():
-                entry_str = print_entry(attr_name, attr_val)
-                if not (entry_str is None or entry_str == ""):
-                    print(f"{attr_name}: {entry_str}")
+        # Collect all entries for JSON output
+        if args.json:
+            json_results = []
+            for entry in output:
+                json_results.append(json_serialize_entry(entry))
+            
+            # If only one result, output it directly without array wrapper
+            if len(json_results) == 1:
+                print(json.dumps(json_results[0], indent=2))
+            else:
+                print(json.dumps(json_results, indent=2))
+        else:
+            # Original human-readable output
+            for entry in output:
+                print()
+                for attr_name, attr_val in entry.items():
+                    entry_str = print_entry(attr_name, attr_val)
+                    if not (entry_str is None or entry_str == ""):
+                        print(f"{attr_name}: {entry_str}")
 
     # Close the connection properly anyway
     finally:
@@ -239,6 +261,19 @@ def main():
 def doc_parser(doc):
     doc_parsed = doc.splitlines()
     return doc_parsed[0], doc_parsed[2:]
+
+
+def json_serialize_entry(entry):
+    """
+    Convert an entry to JSON-serializable format by converting custom objects to strings
+    """
+    if isinstance(entry, dict):
+        return {k: json_serialize_entry(v) for k, v in entry.items()}
+    elif isinstance(entry, (list, set, types.GeneratorType)):
+        return [json_serialize_entry(v) for v in entry]
+    else:
+        # Convert custom objects to string representation
+        return str(entry)
 
 
 def print_entry(entryname, entry):
