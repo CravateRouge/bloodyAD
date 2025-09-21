@@ -74,8 +74,8 @@ class Config:
             if not self.kdc:
                 self.kdc = self.dcip
 
-        # Handle case where password is hashes
-        if self.password and ":" in self.password:
+        # Handle case where password is hashes for NTLM auth
+        if not self.kerberos and self.password and ":" in self.password:
             lmhash_maybe, nthash_maybe = self.password.split(":")
             try:
                 int(nthash_maybe, 16)
