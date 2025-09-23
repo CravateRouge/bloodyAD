@@ -5,7 +5,8 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope, phantomRoot
-import types, base64, collections
+from bloodyAD.network import ldap
+import types, base64, collections, asyncio
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
@@ -536,21 +537,19 @@ def renderSearchResult(entries):
         decoded_entry = {}
 
 
-def findCompatibleDC(conn, min_version, max_version, scope: str = "DOMAIN"):
+def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, scope: str = "DOMAIN"):
     """
-    Finds a compatible Domain Controller in the domain, forest or inter-forest.
+    Find a list of compatible Domain Controllers in the domain, forest.
 
-    Returns a list of hostnames with their IPs of compatible DCs.
+    Return a list of hostnames with their IPs of compatible DCs.
     """
-    if scope not in {"DOMAIN", "FOREST", "EXTERNAL"}:
-        raise ValueError("Invalid scope. Scope must be 'DOMAIN', 'FOREST', or 'EXTERNAL'.")
+    if scope not in {"DOMAIN", "FOREST"}:
+        raise ValueError("Invalid scope. Scope must be 'DOMAIN', 'FOREST'")
 
     dc_dict = collections.defaultdict(dict)
-    base_dn = ""
 
-    # Check if KeyCredential is supported on current DC or find alternative DC
     for dc_info in conn.ldap.bloodysearch(
-        base_dn,
+        "CN=Sites,"+conn.ldap.configNC,
         "(|(objectClass=nTDSDSA)(objectClass=server))",
         search_scope=Scope.SUBTREE,
         attr=["msDS-Behavior-Version", "msDS-HasDomainNCs", "objectClass", "dNSHostName"],
@@ -563,13 +562,35 @@ def findCompatibleDC(conn, min_version, max_version, scope: str = "DOMAIN"):
         elif b"server" in dc_info["objectClass"]:
             dc_dict[dc_info["distinguishedName"]]["hostname"] = dc_info["dNSHostName"][0].decode()
 
-    has_KeyCredential = True
-    alt_servers = []
-    for dn, dc_info in dc_dict.items():
-        if dn == conn.ldap._serverinfo["serverName"]:
-            if dc_info["version"] < 7:
-                has_KeyCredential = False
-            else:
-                break
-        elif dc_info["version"] > 6 and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"):
-            alt_servers.append(dc_info["hostname"])
+    compatible_dcs = []
+    for dc_info in dc_dict.values():
+        if min_version <= dc_info["version"] <= max_version and (scope == "FOREST" or (scope == "DOMAIN" and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"))):
+            compatible_dcs.append(dc_info["hostname"])
+    return compatible_dcs
+
+def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268, 3269]):
+    """
+    Connect to a reachable server from the provided list.
+
+    Return a connection object or a dict with connection information if protocol not supported.
+    """
+    record_list = []
+    new_conn = None
+    for srv_name in srv_names:
+        record_list.append({"type": ["A"], "name": srv_name})
+    host_params = asyncio.get_event_loop().run_until_complete(ldap.findReachableServer(record_list, conn.conf.dns, conn.conf.dcip, ports))
+    if host_params:
+        schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
+        if host_params["port"] not in schemes:
+            LOG.debug(f"[*] Protocol for port {host_params['port']} not supported, please open a connection manually")
+            return host_params
+        new_conn = conn.copy(
+            scheme=schemes[host_params["port"]],
+            host=host_params["name"],
+            dcip=host_params["ip"],
+        )
+    else:
+        LOG.warning(
+            f"[!] No reachable server found, try to provide one manually in --host or a dns server with --dns"
+        )
+    return new_conn

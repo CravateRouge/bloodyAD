@@ -21,11 +21,11 @@ classifiers = [
 ]
 dependencies = [
         "cryptography==44.0.2",
-        "msldap-bAD>=0.5.26",
+        "msldap-bAD>=0.5.27",
         "winacl==0.1.9",
         "asn1crypto==1.5.1",
         "dnspython==2.7.0",
-        "kerbad>=0.5.1"
+        "kerbad>=0.5.3"
 ]
 
 [project.urls]

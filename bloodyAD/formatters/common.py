@@ -39,6 +39,7 @@ SCHEMA_VERSION = {
     "69": "Windows Server 2012 R2",
     "87": "Windows Server 2016",
     "88": "Windows Server 2019/2022",
+    "91": "Windows Server 2025",
 }
 
 # https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/d7422d35-448a-451a-8846-6a7def0044df?redirectedfrom=MSDN
@@ -51,6 +52,7 @@ FUNCTIONAL_LEVEL = {
     "5": "DS_BEHAVIOR_WIN2012",
     "6": "DS_BEHAVIOR_WIN2012R2",
     "7": "DS_BEHAVIOR_WIN2016",
+    "10": "DS_BEHAVIOR_WIN2025",
 }
 
 # [MS-ADTS] - 6.1.1.4 Well-Known Objects
