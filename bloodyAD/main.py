@@ -198,17 +198,17 @@ def main():
     exceptions.LOG.addHandler(handler)
     exceptions.LOG.setLevel(getattr(logging, args.verbose))
     exceptions.LOG.propagate = False
-    # We show msldap logs only if debug is enabled
-    # import msldap
+    # We show badldap logs only if debug is enabled
+    # import badldap
     # if args.verbose == "DEBUG":
-    #     msldap.logger.handlers = []
+    #     badldap.logger.handlers = []
     #     handler = logging.StreamHandler(sys.stdout)
     #     handler.setLevel(logging.DEBUG)
-    #     formatter = logging.Formatter('[msldap] %(message)s')
+    #     formatter = logging.Formatter('[badldap] %(message)s')
     #     handler.setFormatter(formatter)
-    #     msldap.logger.addHandler(handler)
-    #     msldap.logger.setLevel(logging.DEBUG)
-    #     msldap.logger.propagate = False
+    #     badldap.logger.addHandler(handler)
+    #     badldap.logger.setLevel(logging.DEBUG)
+    #     badldap.logger.propagate = False
 
     # Launch the command
     conn = ConnectionHandler(args=args)

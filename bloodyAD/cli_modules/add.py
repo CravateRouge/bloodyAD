@@ -8,7 +8,7 @@ from bloodyAD.formatters import accesscontrol, common, cryptography, dns
 from bloodyAD.network.ldap import Change, Scope
 from bloodyAD.exceptions import BloodyError
 from bloodyAD.cli_modules import set as bloodySet
-import msldap
+import badldap
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -263,7 +263,7 @@ def dcsync(conn, trustee: str):
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.addRight(new_sd, trustee_sid, access_mask)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+    req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
         {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
@@ -392,7 +392,7 @@ def genericAll(conn, target: str, trustee: str):
         ]
     utils.addRight(new_sd, trustee_sid)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+    req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
         {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]

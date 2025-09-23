@@ -1,6 +1,6 @@
 import binascii
 from typing import Literal
-import msldap
+import badldap
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, dns, cryptography
@@ -24,7 +24,7 @@ def dcsync(conn, trustee: str):
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.delRight(new_sd, trustee_sid, access_mask)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+    req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
         {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
@@ -142,7 +142,7 @@ def genericAll(conn, target: str, trustee: str):
         ]
     utils.delRight(new_sd, trustee_sid)
 
-    req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+    req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
         {"Flags": accesscontrol.DACL_SECURITY_INFORMATION}
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]

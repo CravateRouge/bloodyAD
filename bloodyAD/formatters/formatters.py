@@ -90,7 +90,7 @@ def formatKeyCredentialLink(key_dnbinary):
     ).toDict()
 
 
-from msldap.protocol.typeconversion import (
+from badldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
     single_guid,

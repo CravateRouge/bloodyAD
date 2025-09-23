@@ -2,7 +2,7 @@ from bloodyAD import utils, asciitree
 from bloodyAD.exceptions import LOG
 from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
-from msldap.commons.exceptions import LDAPSearchException
+from badldap.commons.exceptions import LDAPSearchException
 from typing import Literal
 import re, asyncio
 

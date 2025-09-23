@@ -4,9 +4,9 @@ import re, os, enum, asyncio, threading, urllib, collections, ssl
 from functools import cached_property, lru_cache
 from asn1crypto import core
 from dns import resolver, rdatatype
-from msldap.client import MSLDAPClient
-from msldap.commons.factory import LDAPConnectionFactory
-from msldap.wintypes.asn1.sdflagsrequest import SDFlagsRequestValue
+from badldap.client import MSLDAPClient
+from badldap.commons.factory import LDAPConnectionFactory
+from badldap.wintypes.asn1.sdflagsrequest import SDFlagsRequestValue
 from winacl import dtyp
 
 
@@ -62,7 +62,7 @@ class Ldap(MSLDAPClient):
         cnf = conn.conf
         self.conf = cnf
 
-        # Because msldap uses a url format we have to encode everything properly
+        # Because badldap uses a url format we have to encode everything properly
         encoded_cnf = {}
         for attr_name, attr_value in vars(cnf).items():
             if type(attr_value) is str:

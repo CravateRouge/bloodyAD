@@ -1,11 +1,11 @@
-import msldap
+import badldap
 
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
 from bloodyAD.network.ldap import Change, Scope
-from msldap.protocol import typeconversion
-from msldap.protocol.typeconversion import (
+from badldap.protocol import typeconversion
+from badldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
@@ -26,7 +26,7 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b
 
     if not raw:
         # We change some encoding functions because for whatever reason some are marked as 'bytes' but are actually 'sd' so can take sddl string
-        # but we cannot directly change in msldap because it would break the ones passing directly multi_bytes
+        # but we cannot directly change in badldap because it would break the ones passing directly multi_bytes
         MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = typeconversion.multi_sd
         MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["nTSecurityDescriptor"] = typeconversion.single_sd
         norm_attr = attribute.lower()
@@ -83,7 +83,7 @@ def owner(conn, target: str, owner: str):
     else:
         new_sd["OwnerSid"].fromCanonical(new_sid)
 
-        req_flags = msldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
+        req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
             {"Flags": accesscontrol.OWNER_SECURITY_INFORMATION}
         )
         controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
@@ -120,7 +120,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
     try:
         conn.ldap.bloodymodify(target, {"unicodePwd": op_list})
 
-    except msldap.commons.exceptions.LDAPModifyException as e:
+    except badldap.commons.exceptions.LDAPModifyException as e:
         # Let's check if we comply to pwd policy
         entry = next(
             conn.ldap.bloodysearch(
@@ -272,7 +272,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                     )
 
         # We can't modify the object on the fly so let's do it on the class :D
-        msldap.commons.exceptions.LDAPModifyException.__str__ = lambda self: error_str
+        badldap.commons.exceptions.LDAPModifyException.__str__ = lambda self: error_str
         raise e
 
     LOG.info("[+] Password changed successfully!")
@@ -316,7 +316,7 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
         conn.ldap.bloodymodify(
             entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.2064", True, None)]
         )
-    except msldap.commons.exceptions.LDAPModifyException as e:
+    except badldap.commons.exceptions.LDAPModifyException as e:
         if "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19: # 19 is constraintViolation
             LOG.error(
                 "[!] Operation failed, the userPrincipalName is probably already used by another non-deleted object, you have the change the other user UPN first (changing UPN of a deleted object is not allowed)"
