@@ -223,8 +223,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                     error_str = (
                         f"{tmp_err} The password must contains characters from three of"
                         " the following categories: Uppercase, Lowercase, Digits,"
-                        " Special, Unicode Alphabetic not included in Uppercase and"
-                        " Lowercase"
+                        " Special"
                     )
         # Pwd length check
         if len(newpass) < pwdPolicy.get("minPwdLength", 0):

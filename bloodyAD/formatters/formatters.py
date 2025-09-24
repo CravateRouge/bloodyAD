@@ -112,53 +112,54 @@ def formatFactory(format_func, origin_format):
     return genericFormat
 
 
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
-    multi_bytes
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"] = formatFactory(
-    formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"]
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
-    formatFactory(formatSD, multi_bytes)
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"] = formatFactory(
-    formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"]
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"] = formatFactory(
-    formatGMSApass, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"]
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"] = formatFactory(
-    formatAccountControl, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"]
-)
-LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"] = formatFactory(
-    formatAccountControl, LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"]
-)
-LDAP_WELL_KNOWN_ATTRS["trustDirection"] = formatFactory(
-    formatTrustDirection, LDAP_WELL_KNOWN_ATTRS["trustDirection"]
-)
-LDAP_WELL_KNOWN_ATTRS["trustAttributes"] = formatFactory(
-    formatTrustAttributes, LDAP_WELL_KNOWN_ATTRS["trustAttributes"]
-)
-LDAP_WELL_KNOWN_ATTRS["trustType"] = formatFactory(
-    formatTrustType, LDAP_WELL_KNOWN_ATTRS["trustType"]
-)
-MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"] = formatFactory(
-    formatFunctionalLevel, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"]
-)
-LDAP_WELL_KNOWN_ATTRS["objectVersion"] = formatFactory(
-    formatSchemaVersion, LDAP_WELL_KNOWN_ATTRS["objectVersion"]
-)
-LDAP_WELL_KNOWN_ATTRS["dnsRecord"] = formatFactory(
-    formatDnsRecord, LDAP_WELL_KNOWN_ATTRS["dnsRecord"]
-)
-LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"] = formatFactory(
-    formatKeyCredentialLink, LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"]
-)
-LDAP_WELL_KNOWN_ATTRS["attributeSecurityGUID"] = single_guid
-LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"] = formatFactory(
-    formatWellKnownObjects, LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"]
-)
-LDAP_WELL_KNOWN_ATTRS["msDS-MinimumPasswordAge"] = int2timedelta
+def enableFormatOutput():
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
+        multi_bytes
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"] = formatFactory(
+        formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"]
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
+        formatFactory(formatSD, multi_bytes)
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"] = formatFactory(
+        formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"]
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"] = formatFactory(
+        formatGMSApass, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"]
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"] = formatFactory(
+        formatAccountControl, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"] = formatFactory(
+        formatAccountControl, LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["trustDirection"] = formatFactory(
+        formatTrustDirection, LDAP_WELL_KNOWN_ATTRS["trustDirection"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["trustAttributes"] = formatFactory(
+        formatTrustAttributes, LDAP_WELL_KNOWN_ATTRS["trustAttributes"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["trustType"] = formatFactory(
+        formatTrustType, LDAP_WELL_KNOWN_ATTRS["trustType"]
+    )
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"] = formatFactory(
+        formatFunctionalLevel, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["objectVersion"] = formatFactory(
+        formatSchemaVersion, LDAP_WELL_KNOWN_ATTRS["objectVersion"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["dnsRecord"] = formatFactory(
+        formatDnsRecord, LDAP_WELL_KNOWN_ATTRS["dnsRecord"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"] = formatFactory(
+        formatKeyCredentialLink, LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["attributeSecurityGUID"] = single_guid
+    LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"] = formatFactory(
+        formatWellKnownObjects, LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"]
+    )
+    LDAP_WELL_KNOWN_ATTRS["msDS-MinimumPasswordAge"] = int2timedelta
 
 from winacl.dtyp.ace import (
     SYSTEM_AUDIT_OBJECT_ACE,

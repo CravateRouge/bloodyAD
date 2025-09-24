@@ -151,7 +151,7 @@ class ConnectionHandler:
 
     # kwargs takes the same arguments as the Config Class
     def copy(self, **kwargs):
-        # If it's krb creds and the new host hasn't the same REALM as the previous connection we'll have to request a ticket for the new REALM from the previous kdcc if there is one, if not from the previous dc ip possible
+        # If it's krb creds and the new host hasn't the same REALM as the previous connection we'll have to request a ticket for the new REALM from the previous kdcc if there is one, if not from the previous dc ip if possible
         if (
             self.conf.kerberos
             and kwargs.get("host")

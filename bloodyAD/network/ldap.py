@@ -1,4 +1,4 @@
-from bloodyAD.formatters import accesscontrol, common
+from bloodyAD.formatters import accesscontrol, common, formatters
 from bloodyAD.exceptions import NoResultError, TooManyResultsError, LOG
 import re, os, enum, asyncio, threading, urllib, collections, ssl
 from functools import cached_property, lru_cache
@@ -54,7 +54,7 @@ class Ldap(MSLDAPClient):
     # "conn" is optional
     conn = None
     co_url = None
-    dc_domain = None
+    is_prettified = False
 
     def __init__(self, conn):
         self._trustmap = collections.defaultdict(dict)
@@ -200,7 +200,6 @@ class Ldap(MSLDAPClient):
                 if nc in [self.domainNC, self.configNC, self.schemaNC]:
                     continue
                 self.appNCs.append(nc)
-            self.dc_domain = ('.'.join(self.domainNC.split(",DC="))).split("DC=")[1]
         except Exception as e:
             self.closeThread()
             raise e
@@ -423,6 +422,11 @@ class Ldap(MSLDAPClient):
         controls=None,
         raw=False,
     ):
+        # Because when calling badldap high-level functions it doesn't handle prettify so we call prettify only if ldap is used
+        # (hoping badldap will not be called after)
+        if self.is_prettified is False:
+            formatters.enableFormatOutput()
+            self.is_prettified = True
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
             base_dn = self.dnResolver(base)
@@ -787,6 +791,8 @@ async def findReachableServer(
 async def asyncResolveAndConnect(ns, r, ports):
     custom_resolver = resolver.Resolver()
     custom_resolver.nameservers = [ns]
+    custom_resolver.timeout = 600
+    custom_resolver.lifetime = 600
     target_srvs = collections.defaultdict(list)
     answer = None
     LOG.debug(f"[*] Resolving {r}...")

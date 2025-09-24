@@ -7,6 +7,23 @@ from typing import Literal
 import re, asyncio
 
 
+def bloodhound(conn, follow_trusts: bool = False, path: str = "CurrentPath"):
+    """
+    BloodHound CE collector (WARNING: This script is still in development. It only provides the basics - ADCS ESC and other complex nodes aren't supported yet)
+
+    :param follow_trusts: if set, will try to reach trusts to have more complete results (you should start from a dc of your user domain to have more complete results)
+    :param path: filepath for the generated zip file
+    """
+    from badldap import bloodhound
+
+    output_path = None
+    if path != "CurrentPath":
+        output_path = path
+    bh = bloodhound.MSLDAPDump2Bloodhound(conn.ldap.co_url, follow_trusts=follow_trusts, output_path=output_path)
+    asyncio.get_event_loop().run_until_complete(
+        bh.run()
+    )
+
 def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
     """
     List children for a given target object
@@ -306,7 +323,7 @@ def trusts(conn, transitive: bool = False):
     )
 
     # Get the host domain as root for the trust tree
-    trust_root_domain = conn.ldap.dc_domain
+    trust_root_domain = conn.ldap.domainname
     if trust_dict:
         tree = {}
         asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
