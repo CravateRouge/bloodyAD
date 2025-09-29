@@ -7,11 +7,11 @@ from typing import Literal
 import re, asyncio
 
 
-def bloodhound(conn, follow_trusts: bool = False, path: str = "CurrentPath"):
+def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
     """
     BloodHound CE collector (WARNING: This script is still in development. It only provides the basics - ADCS ESC and other complex nodes aren't supported yet)
 
-    :param follow_trusts: if set, will try to reach trusts to have more complete results (you should start from a dc of your user domain to have more complete results)
+    :param transitive: if set, will try to reach trusts to have more complete results (you should start from a dc of your user domain to have more complete results)
     :param path: filepath for the generated zip file
     """
     from badldap import bloodhound
@@ -19,7 +19,7 @@ def bloodhound(conn, follow_trusts: bool = False, path: str = "CurrentPath"):
     output_path = None
     if path != "CurrentPath":
         output_path = path
-    bh = bloodhound.MSLDAPDump2Bloodhound(conn.ldap.co_url, follow_trusts=follow_trusts, output_path=output_path)
+    bh = bloodhound.MSLDAPDump2Bloodhound(conn.ldap.co_url, follow_trusts=transitive, output_path=output_path)
     asyncio.get_event_loop().run_until_complete(
         bh.run()
     )
@@ -159,15 +159,15 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                                     }
                                 )
                         except KeyError:
-                            LOG.error("[-] KeyError for record: " + record)
+                            LOG.error("KeyError for record: " + record)
                             continue
 
                     yield yield_entry
             except (NoResultError, LDAPSearchException) as e:
                 if type(e) is NoResultError:
-                    LOG.warning(f"[!] No readable record found in {nc}")
+                    LOG.warning(f"No readable record found in {nc}")
                 else:
-                    LOG.warning(f"[!] {nc} couldn't be read on {conn.conf.host}")
+                    LOG.warning(f"{nc} couldn't be read on {conn.conf.host}")
                 continue
         # List record names if we have list child right on dnsZone or MicrosoftDNS container but no READ_PROP on record object
         for nc in conn.ldap.appNCs:
@@ -211,9 +211,9 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                     yield {"recordName": domain_name}
             except (NoResultError, LDAPSearchException) as e:
                 if type(e) is NoResultError:
-                    LOG.warning(f"[!] No listable record found in {nc}")
+                    LOG.warning(f"No listable record found in {nc}")
                 else:
-                    LOG.warning(f"[!] {nc} couldn't be read on {conn.conf.host}")
+                    LOG.warning(f"{nc} couldn't be read on {conn.conf.host}")
                 continue
 
     # Used to avoid duplicate entries if there is the same record in multiple partitions
@@ -281,7 +281,7 @@ def membership(conn, target: str, no_recurse: bool = False):
             for group in entry.get("memberOf", []):
                 ldap_filter += f"(distinguishedName={group})"
         if not ldap_filter:
-            LOG.warning("[!] No direct group membership found")
+            LOG.warning("No direct group membership found")
             return []
     else:
         # [MS-ADTS] 3.1.1.4.5.19 tokenGroups, tokenGroupsNoGCAcceptable
@@ -292,7 +292,7 @@ def membership(conn, target: str, no_recurse: bool = False):
                 for groupSID in entry[attr]:
                     ldap_filter += f"(objectSID={groupSID})"
             except KeyError:
-                LOG.warning("[!] No membership found")
+                LOG.warning("No membership found")
                 return []
         if not ldap_filter:
             LOG.warning("no GC Server available, the set of groups might be incomplete")

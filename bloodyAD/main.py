@@ -42,13 +42,15 @@ def main():
         nargs="?",
         help='Schannel authentication or krb pkinit if -k also provided, e.g: "path/to/key:path/to/cert" (Use Windows Certstore with krb if left empty)',
     )
+    
     parser.add_argument(
         "-s",
         "--secure",
-        help="Try to use LDAP/GC over TLS aka LDAPS/GCS (default is no TLS)",
-        action="store_true",
-        default=False,
+        help="Use LDAP/GC over TLS (LDAPS/GCS). Use -ss to remove all encryption/signing (useful for debug).",
+        action="count",
+        default=0,
     )
+
     parser.add_argument(
         "--host",
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
@@ -77,7 +79,7 @@ def main():
         "-v",
         "--verbose",
         help="Adjust output verbosity",
-        choices=["QUIET", "INFO", "DEBUG"],
+        choices=["QUIET", "INFO", "DEBUG", "TRACE"],
         default="INFO",
     )
     parser.add_argument(
@@ -191,13 +193,7 @@ def main():
     # # WARNING: operation below is not thread safe!
     # logging.getLogger().handlers = []
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(message)s")
-    handler.setFormatter(formatter)
-    exceptions.LOG.addHandler(handler)
-    exceptions.LOG.setLevel(getattr(logging, args.verbose))
-    exceptions.LOG.propagate = False
+    exceptions.enableCliLogger(level=args.verbose)
     # We show badldap logs only if debug is enabled
     # import badldap
     # if args.verbose == "DEBUG":

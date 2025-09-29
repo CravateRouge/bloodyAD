@@ -46,10 +46,10 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b
             str_support = ["utf16le","sid","str","int","guid","sd"]
             encoding_type = encoding_func.__name__.split('_')[1]
             if encoding_type not in str_support:
-                LOG.warning(f"[!] Attribute encoding not supported for {attribute} with {encoding_type} attribute type, using raw mode")
+                LOG.warning(f"Attribute encoding not supported for {attribute} with {encoding_type} attribute type, using raw mode")
                 raw = True
         else:
-            LOG.warning(f"[!] Attribute encoding not supported for {attribute}, using raw mode")
+            LOG.warning(f"Attribute encoding not supported for {attribute}, using raw mode")
             raw = True
     # Converting raw str into raw binary
     if raw:
@@ -61,7 +61,7 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b
     conn.ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
     )
-    LOG.info(f"[+] {target}'s {attribute} has been updated")
+    LOG.info(f"{target}'s {attribute} has been updated")
 
 
 def owner(conn, target: str, owner: str):
@@ -79,7 +79,7 @@ def owner(conn, target: str, owner: str):
 
     old_sid = new_sd["OwnerSid"].formatCanonical()
     if old_sid == new_sid:
-        LOG.warning(f"[!] {old_sid} is already the owner, no modification will be made")
+        LOG.warning(f"{old_sid} is already the owner, no modification will be made")
     else:
         new_sd["OwnerSid"].fromCanonical(new_sid)
 
@@ -94,7 +94,7 @@ def owner(conn, target: str, owner: str):
             controls,
         )
 
-        LOG.info(f"[+] Old owner {old_sid} is now replaced by {owner} on {target}")
+        LOG.info(f"Old owner {old_sid} is now replaced by {owner} on {target}")
 
 
 # Full info on what you can do:
@@ -274,7 +274,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
         badldap.commons.exceptions.LDAPModifyException.__str__ = lambda self: error_str
         raise e
 
-    LOG.info("[+] Password changed successfully!")
+    LOG.info("Password changed successfully!")
     return True
 
 
@@ -323,4 +323,4 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
             return
         raise e
 
-    LOG.info(f"[+] {target} has been restored successfully under {new_dn}")
+    LOG.info(f"{target} has been restored successfully under {new_dn}")

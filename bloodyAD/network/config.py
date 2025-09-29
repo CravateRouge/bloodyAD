@@ -28,6 +28,7 @@ class Config:
     krbformat: str = "ccache"
     dns: str = ""
     timeout: int = 0
+    auth: str = ""
 
     def __post_init__(self):
         # Resolve dc ip
@@ -61,18 +62,21 @@ class Config:
 
             if not (self.key or self.password or self.certificate):
                 self.key = os.getenv("KRB5CCNAME")
-
-            # If we have a kdc provided and user domain is different from dc domain we provide cross realm parameters
-            if self.kdc and self.domain not in self.host:
-                # If cross realm and no kdcc we consider it's the dc
-                if not self.kdcc:
-                    self.kdcc = self.dcip
+            
+            if self.domain in self.host:
+                # If kdc hasn't been set we consider the ldap dc provided as kdc
+                if not self.kdc:
+                    self.kdc = self.dcip
+            # If user domain is different from dc domain, we provide cross realm parameters
+            else:
+                if not self.kdc:
+                    self.kdc = self.domain
                 # If cross realm and no realmc we consider it's the host suffix
                 if not self.realmc:
                     self.realmc = self.host.split(".", 1)[1]
-            # If kdc hasn't been set we consider the ldap dc provided as kdc
-            if not self.kdc:
-                self.kdc = self.dcip
+                # If kdcc hasn't been set we consider the ldap dc provided as kdc
+                if not self.kdcc:
+                    self.kdcc = self.dcip
 
         # Handle case where password is hashes for NTLM auth
         if not self.kerberos and self.password and ":" in self.password:
@@ -103,12 +107,17 @@ class ConnectionHandler:
     _ldap = None
 
     def __init__(self, args=None, config=None):
+        auth = ""
         if args:
             scheme = "ldap"
             if args.gc:
                 scheme = "gc"
             elif args.secure:
-                scheme = "ldaps"
+                if args.secure == 1:
+                    scheme = "ldaps"
+                elif args.secure >= 2:
+                    auth = "simple"
+                    
             cnf = Config(
                 domain=args.domain,
                 username=args.username,
@@ -121,6 +130,7 @@ class ConnectionHandler:
                 format=args.format,
                 dns=args.dns,
                 timeout=args.timeout,
+                auth=auth
             )
         else:
             cnf = config

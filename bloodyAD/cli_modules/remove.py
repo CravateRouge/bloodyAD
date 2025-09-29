@@ -35,7 +35,7 @@ def dcsync(conn, trustee: str):
         controls,
     )
 
-    LOG.info(f"[-] {trustee} can't DCSync anymore")
+    LOG.info(f"{trustee} can't DCSync anymore")
 
 
 def dnsRecord(
@@ -113,7 +113,7 @@ def dnsRecord(
             break
 
     if not record_to_remove:
-        LOG.warning("[!] Record not found")
+        LOG.warning("Record not found")
         return
 
     if len(dns_list) > 1:
@@ -123,7 +123,7 @@ def dnsRecord(
     else:
         conn.ldap.bloodydelete(record_dn)
 
-    LOG.info(f"[-] Given record has been successfully removed from {name}")
+    LOG.info(f"Given record has been successfully removed from {name}")
 
 
 def genericAll(conn, target: str, trustee: str):
@@ -153,7 +153,7 @@ def genericAll(conn, target: str, trustee: str):
         controls,
     )
 
-    LOG.info(f"[-] {trustee} doesn't have GenericAll on {target} anymore")
+    LOG.info(f"{trustee} doesn't have GenericAll on {target} anymore")
 
 
 def groupMember(conn, group: str, member: str):
@@ -176,7 +176,7 @@ def groupMember(conn, group: str, member: str):
     conn.ldap.bloodymodify(
         group, {"member": [(Change.DELETE.value, member_transformed)]}
     )
-    LOG.info(f"[-] {member} removed from {group}")
+    LOG.info(f"{member} removed from {group}")
 
 
 def object(conn, target: str):
@@ -186,7 +186,7 @@ def object(conn, target: str):
     :param target: sAMAccountName, DN or SID of the target
     """
     conn.ldap.bloodydelete(target)
-    LOG.info(f"[-] {target} has been removed")
+    LOG.info(f"{target} has been removed")
 
 
 def rbcd(conn, target: str, service: str):
@@ -224,7 +224,7 @@ def rbcd(conn, target: str, service: str):
         },
     )
 
-    LOG.info(f"[-] {service} can't impersonate users on {target} anymore")
+    LOG.info(f"{service} can't impersonate users on {target} anymore")
 
 
 def shadowCredentials(conn, target: str, key: str = None):
@@ -246,16 +246,16 @@ def shadowCredentials(conn, target: str, key: str = None):
             newKeyCreds.append(keyCred.decode())
         else:
             isFound = True
-            LOG.debug("[*] Key to delete found")
+            LOG.debug("Key to delete found")
 
     if not isFound:
-        LOG.warning("[!] No key found")
+        LOG.warning("No key found")
     conn.ldap.bloodymodify(
         target, {"msDS-KeyCredentialLink": [(Change.REPLACE.value, newKeyCreds)]}
     )
 
     str_key = key if key else "All keys"
-    LOG.info(f"[-] {str_key} removed")
+    LOG.info(f"{str_key} removed")
 
 
 def uac(conn, target: str, f: list = None):
@@ -289,4 +289,4 @@ def uac(conn, target: str, f: list = None):
         target, {"userAccountControl": [(Change.REPLACE.value, uac)]}
     )
 
-    LOG.info(f"[-] {f} property flags removed from {target}'s userAccountControl")
+    LOG.info(f"{f} property flags removed from {target}'s userAccountControl")

@@ -5,10 +5,10 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope, phantomRoot
-from bloodyAD.network import ldap
 import types, base64, collections, asyncio
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
+from badldap.network import reacher
 
 
 def addRight(
@@ -37,7 +37,7 @@ def addRight(
         # Removes Access-Denied ACEs interfering
         if ace["AceType"] == access_denied_type and new_mask.hasPriv(mask["Mask"]):
             sd["Dacl"].aces.remove(ace)
-            LOG.debug("[-] An interfering Access-Denied ACE has been removed:")
+            LOG.debug("An interfering Access-Denied ACE has been removed:")
             LOG.debug(ace)
         # Adds ACE if not already added
         elif ace.hasFlag(new_ace["AceFlags"]) and mask.hasPriv(new_mask["Mask"]):
@@ -45,7 +45,7 @@ def addRight(
             break
 
     if hasPriv:
-        LOG.debug("[!] This right already exists")
+        LOG.debug("This right already exists")
     else:
         sd["Dacl"].aces.append(new_ace)
 
@@ -75,13 +75,13 @@ def delRight(
         mask = ace["Ace"]["Mask"]
         if ace["AceType"] == access_allowed_type and mask.hasPriv(access_mask):
             mask.removePriv(access_mask)
-            LOG.debug("[-] Privilege Removed")
+            LOG.debug("Privilege Removed")
             if mask["Mask"] == 0:
                 sd["Dacl"].aces.remove(ace)
             isRemoved = True
 
     if not isRemoved:
-        LOG.debug("[!] No right to remove")
+        LOG.debug("No right to remove")
     return isRemoved
 
 
@@ -356,7 +356,7 @@ class LazyAdSchema:
                         elif entry.get("schemaIDGUID"):
                             key = entry["schemaIDGUID"]
                         else:
-                            LOG.warning(f"[!] No guid/sid returned for {entry}")
+                            LOG.warning(f"No guid/sid returned for {entry}")
                             continue
                         self.guid_dict[key] = entry["name"]
 
@@ -578,11 +578,11 @@ def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268, 3269]
     new_conn = None
     for srv_name in srv_names:
         record_list.append({"type": ["A"], "name": srv_name})
-    host_params = asyncio.get_event_loop().run_until_complete(ldap.findReachableServer(record_list, conn.conf.dns, conn.conf.dcip, ports))
+    host_params = asyncio.get_event_loop().run_until_complete(reacher.findReachableServer(record_list, conn.conf.dns, conn.conf.dcip, ports))
     if host_params:
         schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
         if host_params["port"] not in schemes:
-            LOG.debug(f"[*] Protocol for port {host_params['port']} not supported, please open a connection manually")
+            LOG.debug(f"Protocol for port {host_params['port']} not supported, please open a connection manually")
             return host_params
         new_conn = conn.copy(
             scheme=schemes[host_params["port"]],

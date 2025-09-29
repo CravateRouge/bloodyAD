@@ -1,7 +1,33 @@
-import logging
+import logging, sys
 
-LOG = logging.getLogger("bloodyAD")
+LOG = logging.getLogger('bloodyAD')
 
+def enableCliLogger(level="DEBUG"):
+    # If we want to get the logs of every library we used (and which properly defined their loggers)
+    if level == "TRACE":
+        # logging.basicConfig(
+        #         level=logging.DEBUG,
+        #         #format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        #     )
+        logging.getLogger().setLevel(logging.DEBUG)
+        level = "DEBUG"
+    LOG.propagate = False
+    LOG.setLevel("DEBUG")
+    handler = logging.StreamHandler(sys.stdout)
+    class SymbolFormatter(logging.Formatter):
+        LEVEL_SYMBOLS = {
+            logging.DEBUG: '[*]',
+            logging.INFO: '[+]',
+            logging.WARNING: '[!]',
+            logging.ERROR: '[-]',
+            logging.CRITICAL: '[X]',
+        }
+        def format(self, record):
+            symbol = self.LEVEL_SYMBOLS.get(record.levelno, '[?]')
+            return f"{symbol} {record.getMessage()}"
+    handler.setFormatter(SymbolFormatter())
+    handler.setLevel(getattr(logging, level))
+    LOG.addHandler(handler)
 
 class BloodyError(Exception):
     pass
