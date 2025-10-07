@@ -297,7 +297,7 @@ class Ldap(MSLDAPClient):
                     anr_dn.append(entry["attributes"]["distinguishedName"])
                 if anr_dn:
                     LOG.error(
-                        f"[!] No results found for '{identity}' but found entries that could match: {anr_dn}"
+                        f"No results found for '{identity}' but found entries that could match: {anr_dn}"
                     )
                 raise NoResultError(self.domainNC, ldap_filter)
 
@@ -412,7 +412,7 @@ class Ldap(MSLDAPClient):
                     return op_fn(op_params)
                 except Exception as e:
                     LOG.error(
-                        f"[!] Something went wrong when trying to perform '{op_name}' with '{op_params}' on {conn.conf.host} with the {conn.conf.scheme} protocol"
+                        f"Something went wrong when trying to perform '{op_name}' with '{op_params}' on {conn.conf.host} with the {conn.conf.scheme} protocol"
                     )
                     LOG.error(f"Error {type(e).__name__}: {e}")
 
@@ -505,17 +505,17 @@ class Ldap(MSLDAPClient):
         if transitive:
             if not self.conf.domain:
                 LOG.warning(
-                    "[!] No domain (-d, --domain) provided, transitive trust search will not be"
+                    "No domain (-d, --domain) provided, transitive trust search will not be"
                     " performed"
                 )
             elif self.conf.domain not in trust_dict:
                 LOG.warning(
-                    "[!] User doesn't belong to this forest, transitive trust search will not be"
+                    "User doesn't belong to this forest, transitive trust search will not be"
                     " performed"
                 )
             else:
                 LOG.info(
-                    "[+] Forest trusts fetched, performing transitive trust search"
+                    "Forest trusts fetched, performing transitive trust search"
                 )
                 tasks = []
                 for domain_name, parent_conn in trust_to_explore.items():
@@ -603,7 +603,7 @@ class Ldap(MSLDAPClient):
             )
             if not host_params:
                 LOG.warning(
-                    f"[!] No reachable server found for {domain_name}, try to provide one"
+                    f"No reachable server found for {domain_name}, try to provide one"
                     " manually in --host"
                 )
                 return {}
@@ -646,7 +646,7 @@ class Ldap(MSLDAPClient):
                         ]
                     except KeyError:
                         LOG.warning(
-                            f"[!] No dNSHostName found for DC {entry['distinguishedName']}, the DC may have been demoted or have synchronization issues"
+                            f"No dNSHostName found for DC {entry['distinguishedName']}, the DC may have been demoted or have synchronization issues"
                         )
                 else:
                     parent_name = (entry["distinguishedName"]).split(",", 1)[1]
@@ -662,7 +662,7 @@ class Ldap(MSLDAPClient):
             for dn, attributes in forest_servers.items():
                 if "host" not in attributes:
                     LOG.warning(
-                        f"[!] No dNSHostName found for DC {dn}, the DC may have been demoted or have synchronization issues"
+                        f"No dNSHostName found for DC {dn}, the DC may have been demoted or have synchronization issues"
                     )
                 for p in attributes.get("partitions"):
                     forest_partitions[p].append(
@@ -683,7 +683,7 @@ class Ldap(MSLDAPClient):
             search_results = [entry for entries in search_results for entry in entries]
         except Exception as e:
             LOG.error(
-                f"[!] Something went wrong when trying to perform searchInForest for {domain_name}"
+                f"Something went wrong when trying to perform searchInForest for {domain_name}"
             )
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:
@@ -711,7 +711,7 @@ class Ldap(MSLDAPClient):
             )
             if not host_params:
                 LOG.warning(
-                    f"[!] No reachable server found for {partition}, try to provide one"
+                    f"No reachable server found for {partition}, try to provide one"
                     " manually in --host"
                 )
                 return {}
@@ -737,7 +737,7 @@ class Ldap(MSLDAPClient):
             ]
         except Exception as e:
             LOG.error(
-                f"[!] Something went wrong when trying to perform this ldap search: {bloodysearch_params} on {newconn.conf.host} with the {newconn.conf.scheme} protocol"
+                f"Something went wrong when trying to perform this ldap search: {bloodysearch_params} on {newconn.conf.host} with the {newconn.conf.scheme} protocol"
             )
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
-import sys, argparse, types, logging, json
+import sys, argparse, types, json
 
 # For dynamic argparse
 import inspect, pkgutil, importlib
@@ -52,11 +52,13 @@ def main():
     )
 
     parser.add_argument(
+        "-H",
         "--host",
         help="Hostname or IP of the DC (ex: my.dc.local or 172.16.1.3)",
         required=True
     )
     parser.add_argument(
+        "-i",
         "--dc-ip",
         help="IP of the DC (useful if you provided a --host which can't resolve)",
     )
@@ -123,7 +125,7 @@ def main():
                 try:
                     param_doc = param_doc.split(f":param {param_name}: ")[1]
                 except IndexError:
-                    print(f"[-] param_name '{param_name}' doesn't match '{param_doc}'")
+                    print(f"param_name '{param_name}' doesn't match '{param_doc}'")
                     raise
                 parser_args["help"] = param_doc
 

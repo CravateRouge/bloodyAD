@@ -236,7 +236,7 @@ def shadowCredentials(conn, target: str, key: str = None):
     """
     keyCreds = next(
         conn.ldap.bloodysearch(target, attr=["msDS-KeyCredentialLink"], raw=True)
-    )["msDS-KeyCredentialLink"]
+    ).get("msDS-KeyCredentialLink", [])
     newKeyCreds = []
     isFound = False
     for keyCred in keyCreds:
@@ -250,10 +250,11 @@ def shadowCredentials(conn, target: str, key: str = None):
 
     if not isFound:
         LOG.warning("No key found")
+        return
+       
     conn.ldap.bloodymodify(
         target, {"msDS-KeyCredentialLink": [(Change.REPLACE.value, newKeyCreds)]}
     )
-
     str_key = key if key else "All keys"
     LOG.info(f"{str_key} removed")
 

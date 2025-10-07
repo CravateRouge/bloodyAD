@@ -318,7 +318,7 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
     except badldap.commons.exceptions.LDAPModifyException as e:
         if "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19: # 19 is constraintViolation
             LOG.error(
-                "[!] Operation failed, the userPrincipalName is probably already used by another non-deleted object, you have the change the other user UPN first (changing UPN of a deleted object is not allowed)"
+                "Operation failed, the userPrincipalName is probably already used by another non-deleted object, you have the change the other user UPN first (changing UPN of a deleted object is not allowed)"
             )
             return
         raise e
