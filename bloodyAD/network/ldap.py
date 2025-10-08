@@ -282,7 +282,7 @@ class Ldap(MSLDAPClient):
                 anr_dn.append(entry["attributes"]["distinguishedName"])
             if anr_dn:
                 LOG.error(
-                    f"[!] No results found for '{identity}' but found entries that could match: {anr_dn}"
+                    f"No results found for '{identity}' but found entries that could match: {anr_dn}"
                 )
             raise NoResultError(self.domainNC, ldap_filter)
 
