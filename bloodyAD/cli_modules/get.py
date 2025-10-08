@@ -7,7 +7,7 @@ from typing import Literal
 import re, asyncio
 
 
-def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
+async def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
     """
     BloodHound CE collector (WARNING: This script is still in development. It only provides the basics - ADCS ESC and other complex nodes aren't supported yet)
 
@@ -19,12 +19,11 @@ def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
     output_path = None
     if path != "CurrentPath":
         output_path = path
-    bh = bloodhound.MSLDAPDump2Bloodhound(conn.ldap.co_url, follow_trusts=transitive, output_path=output_path)
-    asyncio.get_event_loop().run_until_complete(
-        bh.run()
-    )
+    ldap = await conn.ldap
+    bh = bloodhound.MSLDAPDump2Bloodhound(ldap.co_url, follow_trusts=transitive, output_path=output_path)
+    await bh.run()
 
-def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
+async def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = False):
     """
     List children for a given target object
 
@@ -32,22 +31,24 @@ def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool = Fals
     :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
+    ldap = await conn.ldap
     if target == "DOMAIN":
-        target = conn.ldap.domainNC
+        target = ldap.domainNC
     scope = Scope.LEVEL if direct else Scope.SUBTREE
     if otype == "useronly":
         otype_filter = "sAMAccountType=805306368"
     else:
         otype_filter = f"objectClass={otype}"
-    return conn.ldap.bloodysearch(
+    async for entry in ldap.bloodysearch(
         target,
         f"(&({otype_filter})(!(distinguishedName={target})))",
         search_scope=scope,
         attr=["distinguishedName"],
-    )
+    ):
+        yield entry
 
 
-def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = False):
+async def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = False):
     """
     Retrieve DNS records of the Active Directory readable/listable by the user
 
@@ -56,7 +57,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
     :param transitive: if set, try to fetch dns records in AD trusts (you should start from a DC of your user domain to have exhaustive results)
     """
 
-    def domainDnsDump(conn, zone=None, no_detail=False):
+    async def domainDnsDump(conn, zone=None, no_detail=False):
         entries = None
         filter = "(|(objectClass=dnsNode)(objectClass=dnsZone))"
         prefix_blacklist = [
@@ -78,16 +79,17 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                 prefix_filter += f"(!(name={prefix}))"
             filter = f"(&{filter}{prefix_filter})"
 
+        ldap = await conn.ldap
         dnsZones = []
-        for nc in conn.ldap.appNCs + [conn.ldap.domainNC]:
+        for nc in ldap.appNCs + [ldap.domainNC]:
             try:
-                entries = conn.ldap.bloodysearch(
+                entries = ldap.bloodysearch(
                     nc,
                     filter,
                     search_scope=Scope.SUBTREE,
                     attr=["dnsRecord", "name", "objectClass"],
                 )
-                for entry in entries:
+                async for entry in entries:
                     domain_suffix = entry["distinguishedName"].split(",")[1]
                     domain_suffix = domain_suffix.split("=")[1]
 
@@ -170,18 +172,18 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
                     LOG.warning(f"{nc} couldn't be read on {conn.conf.host}")
                 continue
         # List record names if we have list child right on dnsZone or MicrosoftDNS container but no READ_PROP on record object
-        for nc in conn.ldap.appNCs:
+        for nc in ldap.appNCs:
             dnsZones.append(f"CN=MicrosoftDNS,{nc}")
-        dnsZones.append(f"CN=MicrosoftDNS,CN=System,{conn.ldap.domainNC}")
+        dnsZones.append(f"CN=MicrosoftDNS,CN=System,{ldap.domainNC}")
         for searchbase in dnsZones:
             try:
-                entries = conn.ldap.bloodysearch(
+                entries = ldap.bloodysearch(
                     searchbase,
                     "(objectClass=*)",
                     search_scope=Scope.SUBTREE,
                     attr=["objectClass"],
                 )
-                for entry in entries:
+                async for entry in entries:
                     # If we can get objectClass it means we have a READ_PROP on the record object so we already found it before
                     if (
                         entry.get("objectClass")
@@ -219,8 +221,9 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
     # Used to avoid duplicate entries if there is the same record in multiple partitions
     record_dict = {}
     record_entries = []
+    ldap = await conn.ldap
     if transitive:
-        trustmap = conn.ldap.getTrustMap()
+        trustmap = await ldap.getTrustMap()
         for trust in trustmap.values():
             if "conn" in trust:
                 record_entries.append(domainDnsDump(trust["conn"], zone, no_detail))
@@ -229,7 +232,7 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
 
     basic_records = []
     for records in record_entries:
-        for r in records:
+        async for r in records:
             keyName = "recordName" if "recordName" in r else "zoneName"
             # If it's a record with only the record name returns it later and only if we didn't find another record with more info
             if len(r) == 1 and keyName == "recordName":
@@ -267,63 +270,63 @@ def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: bool = 
         yield basic_r
 
 
-def membership(conn, target: str, no_recurse: bool = False):
+async def membership(conn, target: str, no_recurse: bool = False):
     """
     Retrieve SID and SAM Account Names of all groups a target belongs to
 
     :param target: sAMAccountName, DN or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
     """
+    ldap = await conn.ldap
     ldap_filter = ""
     if no_recurse:
-        entries = conn.ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
-        for entry in entries:
+        entries = ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
+        async for entry in entries:
             for group in entry.get("memberOf", []):
                 ldap_filter += f"(distinguishedName={group})"
         if not ldap_filter:
             LOG.warning("No direct group membership found")
-            return []
+            return
     else:
         # [MS-ADTS] 3.1.1.4.5.19 tokenGroups, tokenGroupsNoGCAcceptable
         attr = "tokenGroups"
-        entries = conn.ldap.bloodysearch(target, attr=[attr])
-        for entry in entries:
+        entries = ldap.bloodysearch(target, attr=[attr])
+        async for entry in entries:
             try:
                 for groupSID in entry[attr]:
                     ldap_filter += f"(objectSID={groupSID})"
             except KeyError:
                 LOG.warning("No membership found")
-                return []
+                return
         if not ldap_filter:
             LOG.warning("no GC Server available, the set of groups might be incomplete")
             attr = "tokenGroupsNoGCAcceptable"
-            entries = conn.ldap.bloodysearch(target, attr=[attr])
-            for entry in entries:
+            entries = ldap.bloodysearch(target, attr=[attr])
+            async for entry in entries:
                 for groupSID in entry[attr]:
                     ldap_filter += f"(objectSID={groupSID})"
 
-    entries = conn.ldap.bloodysearch(
-        conn.ldap.domainNC,
+    entries = ldap.bloodysearch(
+        ldap.domainNC,
         f"(|{ldap_filter})",
         search_scope=Scope.SUBTREE,
         attr=["objectSID", "sAMAccountName"],
     )
-    return entries
+    async for entry in entries:
+        yield entry
 
 
-def trusts(conn, transitive: bool = False):
+async def trusts(conn, transitive: bool = False):
     """
     Display trusts in an ascii tree starting from the DC domain as tree root. A->B means A can auth on B and A-<B means B can auth on A, A-<>B means bidirectional
 
     :param transitive: Try to fetch transitive trusts (you should start from a dc of your user domain to have more complete results)
     """
-
-    trust_dict = asyncio.get_event_loop().run_until_complete(
-        conn.ldap.getTrusts(transitive, conn.conf.dns)
-    )
+    ldap = await conn.ldap
+    trust_dict = await ldap.getTrusts(transitive, conn.conf.dns)
 
     # Get the host domain as root for the trust tree
-    trust_root_domain = conn.ldap.domainname
+    trust_root_domain = ldap.domainname
     if trust_dict:
         tree = {}
         asciitree.branchFactory({":" + trust_root_domain: tree}, [], trust_dict)
@@ -331,7 +334,7 @@ def trusts(conn, transitive: bool = False):
         print(tree_printer({trust_root_domain: tree}))
 
 
-def object(
+async def object(
     conn,
     target: str,
     attr: str = "*",
@@ -354,23 +357,25 @@ def object(
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
     conn.conf.transitive = transitive
-    entries = conn.ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
+    ldap = await conn.ldap
+    entries = ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
-        for entry in rendered_entries:
+        async for entry in rendered_entries:
             for attrSD in attributesSD:
                 if attrSD in entry:
                     e = entry[attrSD]
                     if not isinstance(e, list):
-                        entry[attrSD] = utils.renderSD(e, conn)
+                        entry[attrSD] = await utils.renderSD(e, conn)
                     else:
-                        entry[attrSD] = [utils.renderSD(sd, conn) for sd in e]
+                        entry[attrSD] = [await utils.renderSD(sd, conn) for sd in e]
             yield entry
     else:
-        yield from rendered_entries
+        async for entry in rendered_entries:
+            yield entry
 
 
-def search(
+async def search(
     conn,
     base: str = "DOMAIN",
     filter: str = "(objectClass=*)",
@@ -397,27 +402,29 @@ def search(
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
     conn.conf.transitive = transitive
+    ldap = await conn.ldap
     if base == "DOMAIN":
-        base = conn.ldap.domainNC
+        base = ldap.domainNC
     # RFC2251 4.1.12 Controls
     # control ::= (controlType, criticality, controlValue)
     controls = [(oid,True,None) for oid in c]
-    entries = conn.ldap.bloodysearch(
+    entries = ldap.bloodysearch(
         base, filter, search_scope=Scope.SUBTREE, attr=attr.split(","), raw=raw, controls=controls
     )
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
-        for entry in rendered_entries:
+        async for entry in rendered_entries:
             for attrSD in attributesSD:
                 if attrSD in entry:
                     e = entry[attrSD]
                     if not isinstance(e, list):
-                        entry[attrSD] = utils.renderSD(e, conn)
+                        entry[attrSD] = await utils.renderSD(e, conn)
                     else:
-                        entry[attrSD] = [utils.renderSD(sd, conn) for sd in e]
+                        entry[attrSD] = [await utils.renderSD(sd, conn) for sd in e]
             yield entry
     else:
-        yield from rendered_entries
+        async for entry in rendered_entries:
+            yield entry
 
 
 # TODO: Search writable for application partitions too?

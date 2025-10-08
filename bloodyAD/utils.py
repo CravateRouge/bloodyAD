@@ -85,17 +85,20 @@ def delRight(
     return isRemoved
 
 
-def getSD(
+async def getSD(
     conn,
     object_id,
     ldap_attribute="nTSecurityDescriptor",
     control_flag=accesscontrol.DACL_SECURITY_INFORMATION,
 ):
-    sd_data = next(
-        conn.ldap.bloodysearch(
+    ldap = await conn.ldap
+    entry = None
+    async for e in ldap.bloodysearch(
             object_id, attr=[ldap_attribute], control_flag=control_flag, raw=True
-        )
-    ).get(ldap_attribute, [])
+        ):
+        entry = e
+        break
+    sd_data = entry.get(ldap_attribute, []) if entry else []
     if len(sd_data) < 1:
         LOG.warning(
             "[!] No security descriptor has been returned, a new one will be created"
@@ -293,11 +296,11 @@ class LazyAdSchema:
     # We resolve every guid/sid in one request to be more efficient
     # Put the load on the server instead of the client
     # Perfect in case of bad network
-    def _resolveAll(self):
+    async def _resolveAll(self):
         if self.isResolved:
             return
 
-        def domResolve(conn, sid_iter):
+        async def domResolve(conn, sid_iter):
             # WARNING: only 512 filters max per request
             filters = []
             buffer_filter = ""
@@ -330,7 +333,8 @@ class LazyAdSchema:
 
             # Search in all non application partitions
             for ldap_filter in filters:
-                entries = conn.ldap.bloodysearch(
+                ldap = await conn.ldap
+                entries = ldap.bloodysearch(
                     "",
                     ldap_filter=f"(|{ldap_filter})",
                     attr=[
@@ -343,7 +347,7 @@ class LazyAdSchema:
                     search_scope=Scope.SUBTREE,
                     controls=[phantomRoot()],
                 )
-                for entry in entries:
+                async for entry in entries:
                     if entry.get("objectSid"):
                         self.sid_dict[entry["objectSid"]] = (
                             entry["sAMAccountName"]
@@ -362,15 +366,16 @@ class LazyAdSchema:
 
         sidmap = collections.defaultdict(list)
         if getattr(self.conn.conf, "transitive"):
-            trustmap = self.conn.ldap.getTrustMap()
+            ldap = await self.conn.ldap
+            trustmap = await ldap.getTrustMap()
             for sid in self.sids:
                 for dom_params in trustmap.values():
                     if dom_params.get("conn") and sid.startswith(dom_params["domsid"]):
                         sidmap[dom_params["conn"]].append(sid)
             for conn, sidlist in sidmap.items():
-                domResolve(conn, sidlist)
+                await domResolve(conn, sidlist)
         else:
-            domResolve(self.conn, self.sids)
+            await domResolve(self.conn, self.sids)
 
         # Cleanup resolved ids from queues
         self.isResolved = True
@@ -388,24 +393,24 @@ class LazyAdSchema:
             self.sids.add(sid)
 
     # Return name mapped to the guid
-    def getguid(self, guid):
+    async def getguid(self, guid):
         try:
             return self.guid_dict[guid]
         except KeyError:
             if not self.isResolved:
-                self._resolveAll()
-                return self.getguid(guid)
+                await self._resolveAll()
+                return await self.getguid(guid)
             else:
                 return guid
 
     # Return name mapped to the sid
-    def getsid(self, sid):
+    async def getsid(self, sid):
         try:
             return self.sid_dict[sid]
         except KeyError:
             if not self.isResolved:
-                self._resolveAll()
-                return self.getsid(sid)
+                await self._resolveAll()
+                return await self.getsid(sid)
             else:
                 return sid
 
@@ -417,18 +422,36 @@ class LazyGuid:
     def __init__(self, guid):
         self.guid = guid
         global_lazy_adschema.addguid(guid)
+        self._resolved = None
+
+    async def resolve(self):
+        if self._resolved is None:
+            self._resolved = await global_lazy_adschema.getguid(self.guid)
+        return self._resolved
 
     def __str__(self):
-        return global_lazy_adschema.getguid(self.guid)
+        # Return cached resolution if available, otherwise return the raw guid
+        if self._resolved is not None:
+            return self._resolved
+        return self.guid
 
 
 class LazySid:
     def __init__(self, sid):
         self.sid = sid
         global_lazy_adschema.addsid(sid)
+        self._resolved = None
+
+    async def resolve(self):
+        if self._resolved is None:
+            self._resolved = await global_lazy_adschema.getsid(self.sid)
+        return self._resolved
 
     def __str__(self):
-        return global_lazy_adschema.getsid(self.sid)
+        # Return cached resolution if available, otherwise return the raw sid
+        if self._resolved is not None:
+            return self._resolved
+        return self.sid
 
 
 def aceFactory(k, a):
@@ -444,7 +467,7 @@ def aceFactory(k, a):
         return a
 
 
-def renderSD(sddl, conn):
+async def renderSD(sddl, conn):
     global_lazy_adschema.conn = conn
     sd = SECURITY_DESCRIPTOR.from_sddl(sddl)
     # We don't print Revision because it's always 1,
@@ -481,6 +504,8 @@ def renderSD(sddl, conn):
         ["ObjectType", "Trustee", "Flags", "InheritedObjectType", "Right"],
     )
     typed_aces = []
+    lazy_objects = [renderedSD["Owner"]]  # Collect all lazy objects for resolution
+    
     for ace in grouped_aces:
         typed_ace = {}
         for k, v in ace.items():
@@ -489,11 +514,19 @@ def renderSD(sddl, conn):
             try:
                 typed_ace[k] = []
                 for a in v:  # If it's a set of guids/sids
-                    typed_ace[k].append(aceFactory(k, a))
+                    obj = aceFactory(k, a)
+                    typed_ace[k].append(obj)
+                    if isinstance(obj, (LazyGuid, LazySid)):
+                        lazy_objects.append(obj)
             except TypeError:  # If it's a mask
                 typed_ace[k] = aceFactory(k, v)
 
         typed_aces.append(typed_ace)
+
+    # Resolve all lazy objects
+    for obj in lazy_objects:
+        if isinstance(obj, (LazyGuid, LazySid)):
+            await obj.resolve()
 
     renderedSD["ACL"] = typed_aces
 
@@ -537,7 +570,7 @@ def renderSearchResult(entries):
         decoded_entry = {}
 
 
-def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, scope: str = "DOMAIN"):
+async def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, scope: str = "DOMAIN"):
     """
     Find a list of compatible Domain Controllers in the domain, forest.
 
@@ -547,9 +580,10 @@ def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, scope:
         raise ValueError("Invalid scope. Scope must be 'DOMAIN', 'FOREST'")
 
     dc_dict = collections.defaultdict(dict)
+    ldap = await conn.ldap
 
-    for dc_info in conn.ldap.bloodysearch(
-        "CN=Sites,"+conn.ldap.configNC,
+    async for dc_info in ldap.bloodysearch(
+        "CN=Sites,"+ldap.configNC,
         "(|(objectClass=nTDSDSA)(objectClass=server))",
         search_scope=Scope.SUBTREE,
         attr=["msDS-Behavior-Version", "msDS-HasDomainNCs", "objectClass", "dNSHostName"],
@@ -564,11 +598,11 @@ def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, scope:
 
     compatible_dcs = []
     for dc_info in dc_dict.values():
-        if min_version <= dc_info["version"] <= max_version and (scope == "FOREST" or (scope == "DOMAIN" and conn.ldap.domainNC.encode() in dc_info.get("domainNCs"))):
+        if min_version <= dc_info["version"] <= max_version and (scope == "FOREST" or (scope == "DOMAIN" and ldap.domainNC.encode() in dc_info.get("domainNCs"))):
             compatible_dcs.append(dc_info["hostname"])
     return compatible_dcs
 
-def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268, 3269]):
+async def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268, 3269]):
     """
     Connect to a reachable server from the provided list.
 
@@ -578,7 +612,7 @@ def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268, 3269]
     new_conn = None
     for srv_name in srv_names:
         record_list.append({"type": ["A"], "name": srv_name})
-    host_params = asyncio.get_event_loop().run_until_complete(reacher.findReachableServer(record_list, conn.conf.dns, conn.conf.dcip, ports))
+    host_params = await reacher.findReachableServer(record_list, conn.conf.dns, conn.conf.dcip, ports)
     if host_params:
         schemes = {389: "ldap", 636: "ldaps", 3268: "gc", 3269: "gc-ssl"}
         if host_params["port"] not in schemes:
