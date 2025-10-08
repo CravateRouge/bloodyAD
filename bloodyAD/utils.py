@@ -101,7 +101,7 @@ async def getSD(
     sd_data = entry.get(ldap_attribute, []) if entry else []
     if len(sd_data) < 1:
         LOG.warning(
-            "[!] No security descriptor has been returned, a new one will be created"
+            "No security descriptor has been returned, a new one will be created"
         )
         sd = accesscontrol.createEmptySD()
     else:
@@ -625,6 +625,6 @@ async def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268,
         )
     else:
         LOG.warning(
-            f"[!] No reachable server found, try to provide one manually in --host or a dns server with --dns"
+            "No reachable server found, try to provide one manually in --host or a dns server with --dns"
         )
     return new_conn

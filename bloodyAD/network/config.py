@@ -36,12 +36,7 @@ class Config:
             try:
                 self.dcip = socket.gethostbyname(self.host)
             except socket.gaierror as e:
-                if e.errno == -5:
-                    raise socket.gaierror(
-                        "Can't resolve hostname provided in --host"
-                    ) from e
-                else:
-                    raise
+                pass
 
         # Parse krb args
         if self.krb_args is not None:
@@ -64,9 +59,18 @@ class Config:
                 self.key = os.getenv("KRB5CCNAME")
             
             if self.domain in self.host:
-                # If kdc hasn't been set we consider the ldap dc provided as kdc
-                if not self.kdc:
+                # --host no resolvable so we consider the KDC ip to also be the AD DS
+                if self.kdc and not self.dcip:
+                    try:
+                        self.dcip = socket.gethostbyname(self.kdc)
+                    except socket.gaierror as e:
+                        raise socket.gaierror(
+                            "Can't resolve host provided in -k kdc=<host>"
+                        ) from e
+                # -k kdc=<host> no provided so we consider the AD DS to also be a KDC
+                elif not self.kdc and self.dcip:
                     self.kdc = self.dcip
+                    
             # If user domain is different from dc domain, we provide cross realm parameters
             else:
                 if not self.kdc:
@@ -75,8 +79,17 @@ class Config:
                 if not self.realmc:
                     self.realmc = self.host.split(".", 1)[1]
                 # If kdcc hasn't been set we consider the ldap dc provided as kdc
-                if not self.kdcc:
+                if not self.kdcc and self.dcip:
                     self.kdcc = self.dcip
+                elif self.kdcc and not self.dcip:
+                    try:
+                        self.dcip = socket.gethostbyname(self.kdcc)
+                    except socket.gaierror as e:
+                        raise socket.gaierror(
+                            "Can't resolve host provided in -k kdcc=<host>"
+                        ) from e
+        if not self.dcip:
+            raise socket.gaierror("host in --host couldn't be resolved, provide one in --dc-ip")
 
         # Handle case where password is hashes for NTLM auth
         if not self.kerberos and self.password and ":" in self.password:

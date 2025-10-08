@@ -43,16 +43,16 @@ class ResultError(LDAPError):
 
         if self.result["result"] == 50:
             self.message = (
-                "[-] Could not modify object, the server reports insufficient rights: "
+                "Could not modify object, the server reports insufficient rights: "
                 + self.result["message"]
             )
         elif self.result["result"] == 19:
             self.message = (
-                "[-] Could not modify object, the server reports a constrained"
+                "Could not modify object, the server reports a constrained"
                 " violation: " + self.result["message"]
             )
         else:
-            self.message = "[-] The server returned an error: " + self.result["message"]
+            self.message = "The server returned an error: " + self.result["message"]
 
         super().__init__(self.message)
 
@@ -61,7 +61,7 @@ class NoResultError(LDAPError):
     def __init__(self, search_base, ldap_filter):
         self.filter = ldap_filter
         self.base = search_base
-        self.message = f"[-] No object found in {self.base} with filter: {self.filter}"
+        self.message = f"No object found in {self.base} with filter: {self.filter}"
         super().__init__(self.message)
 
 
@@ -75,7 +75,7 @@ class TooManyResultsError(LDAPError):
         if len(self.entries) <= self.limit:
             self.results = "\n".join(entry["dn"] for entry in entries)
             self.message = (
-                f"[-] {len(self.entries)} objects found in {self.base} with"
+                f"{len(self.entries)} objects found in {self.base} with"
                 f" filter: {ldap_filter}\n"
             )
             self.message += "\tPlease put the full target DN\n"
