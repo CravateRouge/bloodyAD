@@ -48,7 +48,7 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
         # First we try to find a OU where we can add a child object
         # If we don't find one, we will use the first one where we have DACL write on
         # If we don't find one, we will use the first one where we have ownership write on
-        ldap = await conn.ldap
+        ldap = await conn.getLdap()
         ou = None
         writable_ou = []
         writable_nt_ou = []
@@ -88,7 +88,7 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
                 raise BloodyError("No suitable OU found for adding the DMSA object")
         return ou, compatible_dcs
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if not ou:
         ou,compatible_dcs = await getWeakOU(conn)
         
@@ -201,7 +201,7 @@ async def computer(conn: ConnectionHandler, hostname: str, newpass: str, ou: str
     :param lifetime: lifetime of new computer in seconds, if non-zero creates it as a dynamic object
     """
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if ou == "DefaultOU":
         container = None
         entry = None
@@ -261,7 +261,7 @@ async def dcsync(conn: ConnectionHandler, trustee: str):
 
     :param trustee: sAMAccountName, DN or SID of the trustee
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     new_sd, _ = await utils.getSD(conn, ldap.domainNC)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
@@ -320,7 +320,7 @@ async def dnsRecord(
     # RANK_ZONE - The record comes from an authoritative zone
     rank = 0xF0
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     naming_context = "," + ldap.domainNC
     if zone == "CurrentDomain":
         zone = ""
@@ -395,7 +395,7 @@ async def genericAll(conn: ConnectionHandler, target: str, trustee: str):
     :param target: sAMAccountName, DN or SID of the target
     :param trustee: sAMAccountName, DN or SID of the trustee which will have full control on target
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     new_sd, _ = await utils.getSD(conn, target)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
@@ -432,7 +432,7 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
     # see [MS-ADTS] - 3.1.1.3.1.2.4 Alternative Forms of DNs
     # But <SID='sid'> also has the advantage of being compatible with foreign security principals,
     # see [MS-ADTS] - 3.1.1.5.3.3 Processing Specifics
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if "s-1-" in member.lower():
         # We assume member is an SID
         member_transformed = f"<SID={member}>"
@@ -450,7 +450,7 @@ async def rbcd(conn: ConnectionHandler, target: str, service: str):
     :param target: sAMAccountName, DN or SID of the target
     :param service: sAMAccountName, DN or SID of the service account
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     control_flag = 0
     new_sd, _ = await utils.getSD(
         conn, target, "msDS-AllowedToActOnBehalfOfOtherIdentity", control_flag
@@ -490,7 +490,7 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
     """
 
     # We scope on the domain of the target
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     compatible_dcs = await utils.findCompatibleDC(conn, min_version=7, scope="DOMAIN")
 
     if ldap._serverinfo["dnsHostName"] not in compatible_dcs:
@@ -609,7 +609,7 @@ async def uac(conn: ConnectionHandler, target: str, f: list = None):
     # Privileges needed for TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION,TRUSTED_FOR_DELEGATION,PASSWD_NOTREQD,DONT_EXPIRE_PASSWD,ENCRYPTED_TEXT_PASSWORD_ALLOWED,SERVER_TRUST_ACCOUNT:
     # https://learn.microsoft.com/en-us/windows/win32/api/lmaccess/nf-lmaccess-netusersetinfo#remarks
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     uac = 0
     for flag in f:
         uac |= accesscontrol.ACCOUNT_FLAGS[flag]
@@ -649,7 +649,7 @@ async def user(conn: ConnectionHandler, sAMAccountName: str, newpass: str, ou: s
     :param ou: Organizational Unit for new user
     :param lifetime: lifetime of new user in seconds, if non-zero creates it as a dynamic object
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if ou == "DefaultOU":
         container = None
         entry = None

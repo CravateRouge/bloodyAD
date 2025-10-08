@@ -91,7 +91,7 @@ async def getSD(
     ldap_attribute="nTSecurityDescriptor",
     control_flag=accesscontrol.DACL_SECURITY_INFORMATION,
 ):
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(
             object_id, attr=[ldap_attribute], control_flag=control_flag, raw=True
@@ -333,7 +333,7 @@ class LazyAdSchema:
 
             # Search in all non application partitions
             for ldap_filter in filters:
-                ldap = await conn.ldap
+                ldap = await conn.getLdap()
                 entries = ldap.bloodysearch(
                     "",
                     ldap_filter=f"(|{ldap_filter})",
@@ -366,7 +366,7 @@ class LazyAdSchema:
 
         sidmap = collections.defaultdict(list)
         if getattr(self.conn.conf, "transitive"):
-            ldap = await self.conn.ldap
+            ldap = await self.conn.getLdap()
             trustmap = await ldap.getTrustMap()
             for sid in self.sids:
                 for dom_params in trustmap.values():
@@ -580,7 +580,7 @@ async def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, 
         raise ValueError("Invalid scope. Scope must be 'DOMAIN', 'FOREST'")
 
     dc_dict = collections.defaultdict(dict)
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
 
     async for dc_info in ldap.bloodysearch(
         "CN=Sites,"+ldap.configNC,

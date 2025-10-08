@@ -14,7 +14,7 @@ async def dcsync(conn: ConnectionHandler, trustee: str):
 
     :param trustee: sAMAccountName, DN or SID of the trustee
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     new_sd, _ = await utils.getSD(conn, ldap.domainNC)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
@@ -69,7 +69,7 @@ async def dnsRecord(
     :param forest: if set, will fetch the dns record in forest instead of domain
     """
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     naming_context = "," + ldap.domainNC
     if zone == "CurrentDomain":
         zone = ""
@@ -139,7 +139,7 @@ async def genericAll(conn: ConnectionHandler, target: str, trustee: str):
     :param target: sAMAccountName, DN or SID of the target
     :param trustee: sAMAccountName, DN or SID of the trustee
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     new_sd, _ = await utils.getSD(conn, target)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
@@ -176,7 +176,7 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
     # see [MS-ADTS] - 3.1.1.3.1.2.4 Alternative Forms of DNs
     # But <SID='sid'> also has the advantage of being compatible with foreign security principals,
     # see [MS-ADTS] - 3.1.1.5.3.3 Processing Specifics
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if "s-1-" in member.lower():
         # We assume member is an SID
         member_transformed = f"<SID={member}>"
@@ -195,7 +195,7 @@ async def object(conn: ConnectionHandler, target: str):
 
     :param target: sAMAccountName, DN or SID of the target
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     await ldap.bloodydelete(target)
     LOG.info(f"{target} has been removed")
 
@@ -207,7 +207,7 @@ async def rbcd(conn: ConnectionHandler, target: str, service: str):
     :param target: sAMAccountName, DN or SID of the target
     :param service: sAMAccountName, DN or SID of the service account
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     control_flag = 0
     new_sd, _ = await utils.getSD(
         conn, target, "msDS-AllowedToActOnBehalfOfOtherIdentity", control_flag
@@ -248,7 +248,7 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, key: str = Non
     :param target: sAMAccountName, DN or SID of the target
     :param key: RSA key of Key Credentials to remove from the target, removes all if key not specified
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(target, attr=["msDS-KeyCredentialLink"], raw=True):
         entry = e
@@ -283,7 +283,7 @@ async def uac(conn: ConnectionHandler, target: str, f: list = None):
     :param target: sAMAccountName, DN or SID of the target
     :param f: name of property flag to remove, can be called multiple times if multiple flags to remove (e.g -f LOCKOUT  -f ACCOUNTDISABLE)
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     uac = 0
     for flag in f:
         uac |= accesscontrol.ACCOUNT_FLAGS[flag]

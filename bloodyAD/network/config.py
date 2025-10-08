@@ -149,8 +149,7 @@ class ConnectionHandler:
             cnf = config
         self.conf = cnf
 
-    @property
-    async def ldap(self):
+    async def getLdap(self):
         if not self._ldap:
             self._ldap = await Ldap.create(self)
         elif not self._ldap.isactive:

@@ -58,7 +58,7 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
         else:
             v = [vstr.encode() for vstr in v]
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     await ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
     )
@@ -72,7 +72,7 @@ async def owner(conn, target: str, owner: str):
     :param target: sAMAccountName, DN or SID of the target
     :param owner: sAMAccountName, DN or SID of the new owner
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(owner, attr=["objectSid"]):
         entry = e
@@ -123,7 +123,7 @@ async def password(conn, target: str, newpass: str, oldpass: str = None):
     else:
         op_list = [(Change.REPLACE.value, encoded_new_password)]
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     try:
         await ldap.bloodymodify(target, {"unicodePwd": op_list})
 
@@ -303,7 +303,7 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     else:
         ldap_filter = f"(sAMAccountName={target})"
     ldap_filter = f"(&{ldap_filter}(isDeleted=TRUE))"
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(
         "CN=Deleted Objects,"+ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.2064", True, None)]

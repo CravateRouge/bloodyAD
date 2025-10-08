@@ -19,7 +19,7 @@ async def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
     output_path = None
     if path != "CurrentPath":
         output_path = path
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     bh = bloodhound.MSLDAPDump2Bloodhound(ldap.co_url, follow_trusts=transitive, output_path=output_path)
     await bh.run()
 
@@ -31,7 +31,7 @@ async def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool 
     :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
     :param direct: Fetch only direct children of target
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if target == "DOMAIN":
         target = ldap.domainNC
     scope = Scope.LEVEL if direct else Scope.SUBTREE
@@ -79,7 +79,7 @@ async def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: b
                 prefix_filter += f"(!(name={prefix}))"
             filter = f"(&{filter}{prefix_filter})"
 
-        ldap = await conn.ldap
+        ldap = await conn.getLdap()
         dnsZones = []
         for nc in ldap.appNCs + [ldap.domainNC]:
             try:
@@ -221,7 +221,7 @@ async def dnsDump(conn, zone: str = None, no_detail: bool = False, transitive: b
     # Used to avoid duplicate entries if there is the same record in multiple partitions
     record_dict = {}
     record_entries = []
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if transitive:
         trustmap = await ldap.getTrustMap()
         for trust in trustmap.values():
@@ -277,7 +277,7 @@ async def membership(conn, target: str, no_recurse: bool = False):
     :param target: sAMAccountName, DN or SID of the target
     :param no_recurse: if set, doesn't retrieve groups where target isn't a direct member
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     ldap_filter = ""
     if no_recurse:
         entries = ldap.bloodysearch(target, attr=["objectSid", "memberOf"])
@@ -322,7 +322,7 @@ async def trusts(conn, transitive: bool = False):
 
     :param transitive: Try to fetch transitive trusts (you should start from a dc of your user domain to have more complete results)
     """
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     trust_dict = await ldap.getTrusts(transitive, conn.conf.dns)
 
     # Get the host domain as root for the trust tree
@@ -357,7 +357,7 @@ async def object(
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
     conn.conf.transitive = transitive
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     entries = ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
@@ -402,7 +402,7 @@ async def search(
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
     conn.conf.transitive = transitive
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     if base == "DOMAIN":
         base = ldap.domainNC
     # RFC2251 4.1.12 Controls
@@ -495,7 +495,7 @@ async def writable(
     if include_del:
         controls = [("1.2.840.113556.1.4.417", True, None)]
 
-    ldap = await conn.ldap
+    ldap = await conn.getLdap()
     searchbases = []
     # if partition == "DOMAIN":
     searchbases.append(ldap.domainNC)
