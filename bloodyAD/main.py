@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
-import sys, argparse, types, logging, json
+import sys, argparse, types, logging, json, asyncio
 
 # For dynamic argparse
 import inspect, pkgutil, importlib
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="AD Privesc Swiss Army Knife")
 
     parser.add_argument("-d", "--domain", help="Domain used for NTLM authentication")
@@ -209,7 +209,7 @@ def main():
     # Launch the command
     conn = ConnectionHandler(args=args)
     try:
-        output = args.func(conn, **params)
+        output = await args.func(conn, **params)
 
         # Prints output, will print it directly if it's not an iterable
         # Output is expected to be of type [{name:[members]},{...}...]
@@ -247,7 +247,7 @@ def main():
 
     # Close the connection properly anyway
     finally:
-        conn.closeLdap()
+        await conn.closeLdap()
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -301,4 +301,4 @@ def print_entry(entryname, entry):
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
