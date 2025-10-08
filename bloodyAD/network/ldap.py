@@ -569,7 +569,7 @@ class Ldap(MSLDAPClient):
         # If domain_name is provided it means we try to reach a domain outside of current "conn" forest so we have to find a server that we can reach for this outsider domain and then we search the entire forest related to this outsider domain
         newconn = conn
         if domain_name:
-            ldap_conn = await newconn.ldap
+            ldap_conn = await newconn.getLdap()
             host_params = await reacher.findReachableDomainServer(
                 domain_name,
                 ldap_conn.current_site,
@@ -593,12 +593,13 @@ class Ldap(MSLDAPClient):
         search_results = []
         # dc is a gc for this forest, hosting every records we want, we don't need to look for other domain partitions on other dc
         # Except if we're looking for attributes no replicated in GC, then searchInForest must be called with allow_gc=False
-        if (await newconn.ldap).is_gc and allow_gc:
+        newconn_ldap = await newconn.getLdap()
+        if newconn_ldap.is_gc and allow_gc:
             search_results = await self.searchInPartition(
                 newconn, search_params, dns, allow_gc=allow_gc
             )
             if newconn != conn and newconn._ldap:
-                await (await newconn.ldap).close()
+                await newconn._ldap.close()
             return search_results
 
         # Find all domain partitions in the forest and dc hosting them
@@ -606,7 +607,7 @@ class Ldap(MSLDAPClient):
             # Get all domain partitions in the forest
             # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objectClass=crossRef)(systemFlags=3))", attr=["nCName"])
             # Find nTDSDSA objects containing msDS-HasDomainNCs and server objects parents containing dNSHostname
-            ldap_conn = await newconn.ldap
+            ldap_conn = await newconn.getLdap()
             entries = ldap_conn.bloodysearch(
                 "CN=Sites," + ldap_conn.configNC,
                 "(|(objectClass=nTDSDSA)(objectClass=server))",
@@ -665,7 +666,7 @@ class Ldap(MSLDAPClient):
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:
             if newconn != conn and newconn._ldap:
-                await (await newconn.ldap).close()
+                await newconn._ldap.close()
             return search_results
 
     async def searchInPartition(
@@ -703,14 +704,15 @@ class Ldap(MSLDAPClient):
 
         search_result = []
         try:
+            newconn_ldap = await newconn.getLdap()
             if bloodysearch_params["base"] == "domainNC":
                 # The directory can be handled by others instances of the function so we have to duplicate it before modifying it
                 bloodysearch_params = dict(bloodysearch_params)
-                bloodysearch_params["base"] = (await newconn.ldap).domainNC
+                bloodysearch_params["base"] = newconn_ldap.domainNC
             # We add parent_conn to know which conn has the trust, useful for krb cross realm
             search_result = [
                 {"parent_conn": newconn, **entry}
-                async for entry in (await newconn.ldap).bloodysearch(**bloodysearch_params)
+                async for entry in newconn_ldap.bloodysearch(**bloodysearch_params)
             ]
         except Exception as e:
             LOG.error(
@@ -719,7 +721,7 @@ class Ldap(MSLDAPClient):
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:
             if newconn != conn and newconn._ldap:
-                await (await newconn.ldap).close()
+                await newconn._ldap.close()
             return search_result
 
 
