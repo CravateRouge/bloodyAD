@@ -428,7 +428,7 @@ async def search(
 
 
 # TODO: Search writable for application partitions too?
-def writable(
+async def writable(
     conn,
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
@@ -495,16 +495,17 @@ def writable(
     if include_del:
         controls = [("1.2.840.113556.1.4.417", True, None)]
 
+    ldap = await conn.ldap
     searchbases = []
     # if partition == "DOMAIN":
-    searchbases.append(conn.ldap.domainNC)
+    searchbases.append(ldap.domainNC)
     # elif partition == "DNS":
-    #     searchbases.append(conn.ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
+    #     searchbases.append(ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
     # else:
-    #     searchbases.append(conn.ldap.NCs) # A definir
+    #     searchbases.append(ldap.NCs) # A definir
     right_entry = {}
     for searchbase in searchbases:
-        for entry in conn.ldap.bloodysearch(
+        async for entry in ldap.bloodysearch(
             searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys(), controls=controls
         ):
             for attr_name in entry:

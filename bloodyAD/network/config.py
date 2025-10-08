@@ -180,7 +180,7 @@ class ConnectionHandler:
             and kwargs.get("host")
             and self.conf.domain not in kwargs.get("host")
         ):
-            kirbi_tgt = self.ldap._con.auth.selected_authentication_context.kc.ccache.get_all_tgt_kirbis()[
+            kirbi_tgt = self._ldap._con.auth.selected_authentication_context.kc.ccache.get_all_tgt_kirbis()[
                 0
             ]
             kwargs["key"] = kirbi_tgt.to_b64()
