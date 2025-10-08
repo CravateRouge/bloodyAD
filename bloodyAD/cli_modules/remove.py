@@ -1,26 +1,29 @@
 import binascii
 from typing import Literal
 import badldap
-from bloodyAD import utils
+from bloodyAD import utils, ConnectionHandler
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, dns, cryptography
 from bloodyAD.exceptions import BloodyError
 from bloodyAD.network.ldap import Change
 
 
-def dcsync(conn, trustee: str):
+async def dcsync(conn: ConnectionHandler, trustee: str):
     """
     Remove DCSync right for provided trustee
 
     :param trustee: sAMAccountName, DN or SID of the trustee
     """
-    new_sd, _ = utils.getSD(conn, conn.ldap.domainNC)
+    ldap = await conn.ldap
+    new_sd, _ = await utils.getSD(conn, ldap.domainNC)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
-            "objectSid"
-        ]
+        entry = None
+        async for e in ldap.bloodysearch(trustee, attr=["objectSid"]):
+            entry = e
+            break
+        trustee_sid = entry["objectSid"]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.delRight(new_sd, trustee_sid, access_mask)
 
@@ -29,8 +32,8 @@ def dcsync(conn, trustee: str):
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
-    conn.ldap.bloodymodify(
-        conn.ldap.domainNC,
+    await ldap.bloodymodify(
+        ldap.domainNC,
         {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
     )
@@ -38,8 +41,8 @@ def dcsync(conn, trustee: str):
     LOG.info(f"{trustee} can't DCSync anymore")
 
 
-def dnsRecord(
-    conn,
+async def dnsRecord(
+    conn: ConnectionHandler,
     name: str,
     data: str,
     dnstype: Literal["A", "AAAA", "CNAME", "MX", "PTR", "SRV", "TXT"] = "A",
@@ -66,7 +69,8 @@ def dnsRecord(
     :param forest: if set, will fetch the dns record in forest instead of domain
     """
 
-    naming_context = "," + conn.ldap.domainNC
+    ldap = await conn.ldap
+    naming_context = "," + ldap.domainNC
     if zone == "CurrentDomain":
         zone = ""
         for label in naming_context.split(",DC="):
@@ -88,9 +92,11 @@ def dnsRecord(
     record_dn = f"DC={name}{zone_dn}"
 
     record_to_remove = None
-    dns_list = next(conn.ldap.bloodysearch(record_dn, attr=["dnsRecord"], raw=True))[
-        "dnsRecord"
-    ]
+    entry = None
+    async for e in ldap.bloodysearch(record_dn, attr=["dnsRecord"], raw=True):
+        entry = e
+        break
+    dns_list = entry["dnsRecord"]
     for raw_record in dns_list:
         record = dns.Record(raw_record)
         tmp_record = dns.Record()
@@ -117,29 +123,32 @@ def dnsRecord(
         return
 
     if len(dns_list) > 1:
-        conn.ldap.bloodymodify(
+        await ldap.bloodymodify(
             record_dn, {"dnsRecord": [(Change.DELETE.value, record_to_remove)]}
         )
     else:
-        conn.ldap.bloodydelete(record_dn)
+        await ldap.bloodydelete(record_dn)
 
     LOG.info(f"Given record has been successfully removed from {name}")
 
 
-def genericAll(conn, target: str, trustee: str):
+async def genericAll(conn: ConnectionHandler, target: str, trustee: str):
     """
     Remove full control of trustee on target
 
     :param target: sAMAccountName, DN or SID of the target
     :param trustee: sAMAccountName, DN or SID of the trustee
     """
-    new_sd, _ = utils.getSD(conn, target)
+    ldap = await conn.ldap
+    new_sd, _ = await utils.getSD(conn, target)
     if "s-1-" in trustee.lower():
         trustee_sid = trustee
     else:
-        trustee_sid = next(conn.ldap.bloodysearch(trustee, attr=["objectSid"]))[
-            "objectSid"
-        ]
+        entry = None
+        async for e in ldap.bloodysearch(trustee, attr=["objectSid"]):
+            entry = e
+            break
+        trustee_sid = entry["objectSid"]
     utils.delRight(new_sd, trustee_sid)
 
     req_flags = badldap.wintypes.asn1.sdflagsrequest.SDFlagsRequestValue(
@@ -147,7 +156,7 @@ def genericAll(conn, target: str, trustee: str):
     )
     controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
-    conn.ldap.bloodymodify(
+    await ldap.bloodymodify(
         target,
         {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
         controls,
@@ -156,7 +165,7 @@ def genericAll(conn, target: str, trustee: str):
     LOG.info(f"{trustee} doesn't have GenericAll on {target} anymore")
 
 
-def groupMember(conn, group: str, member: str):
+async def groupMember(conn: ConnectionHandler, group: str, member: str):
     """
     Remove member (user, group, computer) from group
 
@@ -167,52 +176,57 @@ def groupMember(conn, group: str, member: str):
     # see [MS-ADTS] - 3.1.1.3.1.2.4 Alternative Forms of DNs
     # But <SID='sid'> also has the advantage of being compatible with foreign security principals,
     # see [MS-ADTS] - 3.1.1.5.3.3 Processing Specifics
+    ldap = await conn.ldap
     if "s-1-" in member.lower():
         # We assume member is an SID
         member_transformed = f"<SID={member}>"
     else:
-        member_transformed = conn.ldap.dnResolver(member)
+        member_transformed = ldap.dnResolver(member)
 
-    conn.ldap.bloodymodify(
+    await ldap.bloodymodify(
         group, {"member": [(Change.DELETE.value, member_transformed)]}
     )
     LOG.info(f"{member} removed from {group}")
 
 
-def object(conn, target: str):
+async def object(conn: ConnectionHandler, target: str):
     """
     Remove object (user, group, computer, organizational unit, etc)
 
     :param target: sAMAccountName, DN or SID of the target
     """
-    conn.ldap.bloodydelete(target)
+    ldap = await conn.ldap
+    await ldap.bloodydelete(target)
     LOG.info(f"{target} has been removed")
 
 
-def rbcd(conn, target: str, service: str):
+async def rbcd(conn: ConnectionHandler, target: str, service: str):
     """
     Remove Resource Based Constraint Delegation for service on target
 
     :param target: sAMAccountName, DN or SID of the target
     :param service: sAMAccountName, DN or SID of the service account
     """
+    ldap = await conn.ldap
     control_flag = 0
-    new_sd, _ = utils.getSD(
+    new_sd, _ = await utils.getSD(
         conn, target, "msDS-AllowedToActOnBehalfOfOtherIdentity", control_flag
     )
     if "s-1-" in service.lower():
         service_sid = service
     else:
-        service_sid = next(conn.ldap.bloodysearch(service, attr=["objectSid"]))[
-            "objectSid"
-        ]
+        entry = None
+        async for e in ldap.bloodysearch(service, attr=["objectSid"]):
+            entry = e
+            break
+        service_sid = entry["objectSid"]
     access_mask = accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     utils.delRight(new_sd, service_sid, access_mask)
 
     attr_values = []
     if len(new_sd["Dacl"].aces) > 0:
         attr_values = new_sd.getData()
-    conn.ldap.bloodymodify(
+    await ldap.bloodymodify(
         target,
         {
             "msDS-AllowedToActOnBehalfOfOtherIdentity": [
@@ -227,16 +241,19 @@ def rbcd(conn, target: str, service: str):
     LOG.info(f"{service} can't impersonate users on {target} anymore")
 
 
-def shadowCredentials(conn, target: str, key: str = None):
+async def shadowCredentials(conn: ConnectionHandler, target: str, key: str = None):
     """
     Remove Key Credentials from target
 
     :param target: sAMAccountName, DN or SID of the target
     :param key: RSA key of Key Credentials to remove from the target, removes all if key not specified
     """
-    keyCreds = next(
-        conn.ldap.bloodysearch(target, attr=["msDS-KeyCredentialLink"], raw=True)
-    ).get("msDS-KeyCredentialLink", [])
+    ldap = await conn.ldap
+    entry = None
+    async for e in ldap.bloodysearch(target, attr=["msDS-KeyCredentialLink"], raw=True):
+        entry = e
+        break
+    keyCreds = entry.get("msDS-KeyCredentialLink", [])
     newKeyCreds = []
     isFound = False
     for keyCred in keyCreds:
@@ -252,32 +269,37 @@ def shadowCredentials(conn, target: str, key: str = None):
         LOG.warning("No key found")
         return
        
-    conn.ldap.bloodymodify(
+    await ldap.bloodymodify(
         target, {"msDS-KeyCredentialLink": [(Change.REPLACE.value, newKeyCreds)]}
     )
     str_key = key if key else "All keys"
     LOG.info(f"{str_key} removed")
 
 
-def uac(conn, target: str, f: list = None):
+async def uac(conn: ConnectionHandler, target: str, f: list = None):
     """
     Remove property flags altering user/computer object behavior
 
     :param target: sAMAccountName, DN or SID of the target
     :param f: name of property flag to remove, can be called multiple times if multiple flags to remove (e.g -f LOCKOUT  -f ACCOUNTDISABLE)
     """
+    ldap = await conn.ldap
     uac = 0
     for flag in f:
         uac |= accesscontrol.ACCOUNT_FLAGS[flag]
 
     try:
-        old_uac = next(
-            conn.ldap.bloodysearch(target, attr=["userAccountControl"], raw=True)
-        )["userAccountControl"][0]
+        entry = None
+        async for e in ldap.bloodysearch(target, attr=["userAccountControl"], raw=True):
+            entry = e
+            break
+        old_uac = entry["userAccountControl"][0]
     except IndexError as e:
-        for allowed in next(conn.ldap.bloodysearch(target, attr=["allowedAttributes"]))[
-            "allowedAttributes"
-        ]:
+        entry = None
+        async for e in ldap.bloodysearch(target, attr=["allowedAttributes"]):
+            entry = e
+            break
+        for allowed in entry["allowedAttributes"]:
             if "userAccountControl" in allowed:
                 raise BloodyError(
                     "Current user doesn't have the right to read userAccountControl on"
@@ -286,7 +308,7 @@ def uac(conn, target: str, f: list = None):
         raise BloodyError(f"{target} doesn't have userAccountControl attribute") from e
 
     uac = int(old_uac) & ~uac
-    conn.ldap.bloodymodify(
+    await ldap.bloodymodify(
         target, {"userAccountControl": [(Change.REPLACE.value, uac)]}
     )
 

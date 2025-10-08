@@ -388,7 +388,8 @@ class Ldap(MSLDAPClient):
         async def partitionOp(conn_list):
             for conn in conn_list:
                 try:
-                    op_fn = getattr(conn.ldap, op_name)
+                    ldap = await conn.ldap
+                    op_fn = getattr(ldap, op_name)
                     return op_fn(op_params)
                 except Exception as e:
                     LOG.error(
@@ -568,9 +569,10 @@ class Ldap(MSLDAPClient):
         # If domain_name is provided it means we try to reach a domain outside of current "conn" forest so we have to find a server that we can reach for this outsider domain and then we search the entire forest related to this outsider domain
         newconn = conn
         if domain_name:
+            ldap_conn = await newconn.ldap
             host_params = await reacher.findReachableDomainServer(
                 domain_name,
-                newconn.ldap.current_site,
+                ldap_conn.current_site,
                 server_type="" if allow_gc else "ldap",
                 dns_addr=dns,
                 dc_dns=newconn.conf.dcip,
