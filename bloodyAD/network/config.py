@@ -149,28 +149,27 @@ class ConnectionHandler:
             cnf = config
         self.conf = cnf
 
-    @property
-    def ldap(self):
+    async def getLdap(self):
         if not self._ldap:
-            self._ldap = Ldap(self)
+            self._ldap = await Ldap.create(self)
         elif not self._ldap.isactive:
-            self._ldap = Ldap(self)
+            self._ldap = await Ldap.create(self)
         return self._ldap
 
-    def closeLdap(self):
+    async def closeLdap(self):
         if not self._ldap:
             return
-        self._ldap.close()
+        await self._ldap.close()
         self._ldap = None
 
-    def rebind(self):
-        self._ldap.close()
-        self._ldap = Ldap(self)
+    async def rebind(self):
+        await self._ldap.close()
+        self._ldap = await Ldap.create(self)
 
-    def switchUser(self, username, password):
+    async def switchUser(self, username, password):
         self.conf.username = username
         self.conf.password = password
-        self.rebind()
+        await self.rebind()
 
     # kwargs takes the same arguments as the Config Class
     def copy(self, **kwargs):
@@ -180,7 +179,7 @@ class ConnectionHandler:
             and kwargs.get("host")
             and self.conf.domain not in kwargs.get("host")
         ):
-            kirbi_tgt = self.ldap._con.auth.selected_authentication_context.kc.ccache.get_all_tgt_kirbis()[
+            kirbi_tgt = self._ldap._con.auth.selected_authentication_context.kc.ccache.get_all_tgt_kirbis()[
                 0
             ]
             kwargs["key"] = kirbi_tgt.to_b64()

@@ -1,6 +1,6 @@
 import unittest
 import subprocess
-import os
+import asyncio
 import sys
 import json
 from pathlib import Path
@@ -105,7 +105,7 @@ class TestBloodyADAuthentications(unittest.TestCase):
         """
         sys.argv = ["bloodyAD.py"] + args.split()
         try:
-            bloodyAD_main()
+            asyncio.run(bloodyAD_main())
         except SystemExit as e:
             if e.code != 0:
                 print(f"Command failed: {' '.join(sys.argv)}")

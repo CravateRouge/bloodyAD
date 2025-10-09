@@ -27,6 +27,8 @@ class TestModules(unittest.TestCase):
             cls.domain,
             "--dc-ip",
             cls.host,
+            "-t",
+            300
         ]
         cls.user = {"username": "stan.dard", "password": "Password1123!"}
 
@@ -51,10 +53,16 @@ class TestModules(unittest.TestCase):
         self.env["KRB5CCNAME"] = f"{self.admin['username']}.ccache"
         krb = ["-k"]
 
+        certname = "bloodytest"
+        full_certname = certname + ".pfx"
+        if os.path.exists(full_certname):
+            os.remove(full_certname)
         self.launchProcess(
             [
                 "certipy",
                 "req",
+                "-dc-host",
+                self.host,
                 "-target",
                 self.host,
                 "-ca",
@@ -67,25 +75,25 @@ class TestModules(unittest.TestCase):
                 "-u",
                 f"{self.admin['username']}@{self.domain}",
                 "-out",
-                "bloodytest",
+                certname,
             ],
             ignoreErr=True,
         )
 
-        self.launchProcess(
-            [
-                "openssl",
-                "pkcs12",
-                "-in",
-                "bloodytest.pfx",
-                "-out",
-                "bloodytest.pem",
-                "-nodes",
-                "-passin",
-                "pass:",
-            ]
-        )
-        cert = ["-c", ":bloodytest.pem"]
+        # self.launchProcess(
+        #     [
+        #         "openssl",
+        #         "pkcs12",
+        #         "-in",
+        #         "bloodytest.pfx",
+        #         "-out",
+        #         "bloodytest.pem",
+        #         "-nodes",
+        #         "-passin",
+        #         "pass:",
+        #     ]
+        # )
+        cert = ["-c", ':'+full_certname]
 
         auths = [cleartext, ntlm, krb, cert]
         for auth in auths:

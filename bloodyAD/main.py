@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+from bloodyAD.patch import *
 from bloodyAD import cli_modules, ConnectionHandler, exceptions
-import sys, argparse, types, json
+import sys, argparse, types, json, asyncio
 
 # For dynamic argparse
 import inspect, pkgutil, importlib
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="AD Privesc Swiss Army Knife")
 
     parser.add_argument("-d", "--domain", help="Domain used for NTLM authentication")
@@ -113,9 +114,10 @@ def main():
             )
             # Gets function signature to extract parameters default values
             func_signature = inspect.signature(function)
+            function_annotations = {pname: pval for pname, pval in function.__annotations__.items() if pname != "conn"}
             for param_name, param_value, param_doc in zip(
-                function.__annotations__.keys(),
-                function.__annotations__.values(),
+                function_annotations.keys(),
+                function_annotations.values(),
                 params_doc,
             ):
                 parser_args = {}
@@ -124,9 +126,8 @@ def main():
                 # name in param_doc, raises exception
                 try:
                     param_doc = param_doc.split(f":param {param_name}: ")[1]
-                except IndexError:
-                    print(f"param_name '{param_name}' doesn't match '{param_doc}'")
-                    raise
+                except IndexError as e:
+                    raise IndexError(f"param_name '{param_name}' doesn't match '{param_doc}'") from e
                 parser_args["help"] = param_doc
 
                 # If parameter has a default value, then it will be an optional argument
@@ -166,7 +167,7 @@ def main():
     parsed_args = []
     host_arg = None
     for arg in input_args:
-        if arg == "--host":
+        if arg in ["-H", "--host"]:
             isHost = True
         elif isHost:
             isHost = False
@@ -211,45 +212,62 @@ def main():
     # Launch the command
     conn = ConnectionHandler(args=args)
     try:
-        output = args.func(conn, **params)
+        result = args.func(conn, **params)
+        # Helper functions for output
+        def print_human_entry(entry):
+            print()
+            for attr_name, attr_val in entry.items():
+                entry_str = print_entry(attr_name, attr_val)
+                if not (entry_str is None or entry_str == ""):
+                    print(f"{attr_name}: {entry_str}")
 
-        # Prints output, will print it directly if it's not an iterable
-        # Output is expected to be of type [{name:[members]},{...}...]
-        # If it's not, will print it raw
-        output_type = type(output)
-        if not output or output_type == bool:
-            return
+        def print_json_stream(entries):
+            first = True
+            print('[', end='')
+            for entry in entries:
+                if not first:
+                    print(',', end='')
+                print(json.dumps(json_serialize_entry(entry), indent=2), end='')
+                first = False
+            print(']')
 
-        if output_type not in [list, dict, types.GeneratorType]:
+        # Handle async generator, regular generator, coroutine, or other
+        if hasattr(result, "__aiter__"):
+            # Async generator
             if args.json:
-                print(json.dumps({"result": str(output)}, indent=2))
+                async def json_async_stream():
+                    first = True
+                    print('[', end='')
+                    async for entry in result:
+                        if not first:
+                            print(',', end='')
+                        print(json.dumps(json_serialize_entry(entry), indent=2), end='')
+                        first = False
+                    print(']')
+                await json_async_stream()
             else:
-                print("\n" + output)
-            return
-
-        # Collect all entries for JSON output
-        if args.json:
-            json_results = []
-            for entry in output:
-                json_results.append(json_serialize_entry(entry))
-            
-            # If only one result, output it directly without array wrapper
-            if len(json_results) == 1:
-                print(json.dumps(json_results[0], indent=2))
-            else:
-                print(json.dumps(json_results, indent=2))
+                async for entry in result:
+                    print_human_entry(entry)
         else:
-            # Original human-readable output
-            for entry in output:
-                print()
-                for attr_name, attr_val in entry.items():
-                    entry_str = print_entry(attr_name, attr_val)
-                    if not (entry_str is None or entry_str == ""):
-                        print(f"{attr_name}: {entry_str}")
+            # Coroutine or other
+            output = await result
+            output_type = type(output)
+            if not output or output_type == bool:
+                return
+            if output_type not in [list, dict, types.GeneratorType]:
+                if args.json:
+                    print(json.dumps({"result": str(output)}, indent=2))
+                else:
+                    print("\n" + str(output))
+                return
+            if args.json:
+                print_json_stream(output)
+            else:
+                for entry in output:
+                    print_human_entry(entry)
 
-    # Close the connection properly anyway
     finally:
-        conn.closeLdap()
+        await conn.closeLdap()
 
 
 # Gets unparsed doc and returns a tuple of two values
@@ -303,4 +321,4 @@ def print_entry(entryname, entry):
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

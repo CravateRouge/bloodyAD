@@ -13,7 +13,7 @@ from badldap.protocol.typeconversion import (
 from datetime import datetime, timezone, timedelta
 import unicodedata, base64
 
-def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False):
+async def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False):
     """
     Add/Replace/Delete target's attribute
 
@@ -58,22 +58,28 @@ def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b
         else:
             v = [vstr.encode() for vstr in v]
 
-    conn.ldap.bloodymodify(
+    ldap = await conn.getLdap()
+    await ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
     )
     LOG.info(f"{target}'s {attribute} has been updated")
 
 
-def owner(conn, target: str, owner: str):
+async def owner(conn, target: str, owner: str):
     """
     Changes target ownership with provided owner (WriteOwner permission required)
 
     :param target: sAMAccountName, DN or SID of the target
     :param owner: sAMAccountName, DN or SID of the new owner
     """
-    new_sid = next(conn.ldap.bloodysearch(owner, attr=["objectSid"]))["objectSid"]
+    ldap = await conn.getLdap()
+    entry = None
+    async for e in ldap.bloodysearch(owner, attr=["objectSid"]):
+        entry = e
+        break
+    new_sid = entry["objectSid"] if entry else None
 
-    new_sd, _ = utils.getSD(
+    new_sd, _ = await utils.getSD(
         conn, target, "nTSecurityDescriptor", accesscontrol.OWNER_SECURITY_INFORMATION
     )
 
@@ -88,7 +94,7 @@ def owner(conn, target: str, owner: str):
         )
         controls = [("1.2.840.113556.1.4.801", True, req_flags.dump())]
 
-        conn.ldap.bloodymodify(
+        await ldap.bloodymodify(
             target,
             {"nTSecurityDescriptor": [(Change.REPLACE.value, new_sd.getData())]},
             controls,
@@ -99,7 +105,7 @@ def owner(conn, target: str, owner: str):
 
 # Full info on what you can do:
 # https://learn.microsoft.com/en-us/troubleshoot/windows-server/identity/change-windows-active-directory-user-password
-def password(conn, target: str, newpass: str, oldpass: str = None):
+async def password(conn, target: str, newpass: str, oldpass: str = None):
     """
     Change password of a user/computer
 
@@ -117,13 +123,14 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
     else:
         op_list = [(Change.REPLACE.value, encoded_new_password)]
 
+    ldap = await conn.getLdap()
     try:
-        conn.ldap.bloodymodify(target, {"unicodePwd": op_list})
+        await ldap.bloodymodify(target, {"unicodePwd": op_list})
 
     except badldap.commons.exceptions.LDAPModifyException as e:
         # Let's check if we comply to pwd policy
-        entry = next(
-            conn.ldap.bloodysearch(
+        entry = None
+        async for e in ldap.bloodysearch(
                 target,
                 attr=[
                     "msDS-ResultantPSO",
@@ -132,14 +139,15 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                     "sAMAccountName",
                     "sAMAccountType",
                 ],
-            )
-        )
+            ):
+            entry = e
+            break
         pwdLastSet = entry.get("pwdLastSet", 0)
         pwdPolicy = None
         error_str = ""
         if "msDS-ResultantPSO" in entry:
-            tmpPolicy = next(
-                conn.ldap.bloodysearch(
+            tmpPolicy = None
+            async for p in ldap.bloodysearch(
                     entry["msDS-ResultantPSO"],
                     attr=[
                         "msDS-MinimumPasswordAge",
@@ -148,8 +156,9 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                         "msDS-PasswordComplexityEnabled",
                         "name",
                     ],
-                )
-            )
+                ):
+                tmpPolicy = p
+                break
             pwdPolicy = {
                 "minPwdAge": tmpPolicy.get("msDS-MinimumPasswordAge", timedelta()),
                 "minPwdLength": tmpPolicy.get("msDS-MinimumPasswordLength", 0),
@@ -164,17 +173,18 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
                     " more restrictive than the default one."
                 )
         else:
-            pwdPolicy = next(
-                conn.ldap.bloodysearch(
-                    conn.ldap.domainNC,
+            pwdPolicy = None
+            async for p in ldap.bloodysearch(
+                    ldap.domainNC,
                     attr=[
                         "minPwdAge",
                         "minPwdLength",
                         "pwdHistoryLength",
                         "pwdProperties",
                     ],
-                )
-            )
+                ):
+                pwdPolicy = p
+                break
             pwdPolicy["pwdComplexity"] = (pwdPolicy["pwdProperties"] & 1) > 0
 
         # Complexity check
@@ -278,7 +288,7 @@ def password(conn, target: str, newpass: str, oldpass: str = None):
     return True
 
 
-def restore(conn, target: str, newName: str = None, newParent: str = None):
+async def restore(conn, target: str, newName: str = None, newParent: str = None):
     """
     Restore a deleted object
 
@@ -293,9 +303,13 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
     else:
         ldap_filter = f"(sAMAccountName={target})"
     ldap_filter = f"(&{ldap_filter}(isDeleted=TRUE))"
-    entry = next(conn.ldap.bloodysearch(
-        "CN=Deleted Objects,"+conn.ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.2064", True, None)]
-    ))# LDAP_SERVER_SHOW_DELETED_OID
+    ldap = await conn.getLdap()
+    entry = None
+    async for e in ldap.bloodysearch(
+        "CN=Deleted Objects,"+ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.2064", True, None)]
+    ):
+        entry = e
+        break# LDAP_SERVER_SHOW_DELETED_OID
     old_name = entry['name'].splitlines()[0]
     new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',old_name)},{newParent if newParent else entry['lastKnownParent']}"
     attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
@@ -312,7 +326,7 @@ def restore(conn, target: str, newName: str = None, newParent: str = None):
             attributes["dNSHostName"] = [(Change.REPLACE.value, newName + '.' + entry["dNSHostName"].split('.',1)[-1])]
 
     try:
-        conn.ldap.bloodymodify(
+        await ldap.bloodymodify(
             entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.2064", True, None)]
         )
     except badldap.commons.exceptions.LDAPModifyException as e:

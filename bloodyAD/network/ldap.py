@@ -1,6 +1,6 @@
 from bloodyAD.formatters import accesscontrol, common, formatters
 from bloodyAD.exceptions import NoResultError, TooManyResultsError, LOG
-import re, os, enum, asyncio, threading, urllib, collections
+import re, os, enum, asyncio, urllib, collections
 from functools import cached_property, lru_cache
 from asn1crypto import core
 from badldap.client import MSLDAPClient
@@ -56,11 +56,18 @@ class Ldap(MSLDAPClient):
     co_url = None
     is_prettified = False
 
-    def __init__(self, conn):
+    def __init__(self, conn, target, credential):
         self._trustmap = collections.defaultdict(dict)
         self.conn = conn
+        self.conf = conn.conf
+        self.co_url = None
+        super().__init__(target, credential, keepalive=True)
+        self.isactive = False
+
+    @classmethod
+    async def create(cls, conn):
+        """Async factory method to create and initialize an Ldap instance"""
         cnf = conn.conf
-        self.conf = cnf
 
         # Because badldap uses a url format we have to encode everything properly
         encoded_cnf = {}
@@ -170,44 +177,36 @@ class Ldap(MSLDAPClient):
         creds = creds + ":" + key if key else creds
         creds = creds + "@" if creds else ""
         params = "/?" + params
-        self.co_url = f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
-        LOG.debug(f"Connection URL: {self.co_url}")
-        ldap_factory = LDAPConnectionFactory.from_url(self.co_url)
-        super().__init__(ldap_factory.target, ldap_factory.credential, keepalive=True)
-
-        # Connect function runs indefinitely waiting for I/O events so using asyncio.run will not allow us to reuse the connection
-        # To avoid it, we launch it in another thread and we control it using a defined event_loop
-        self.loop = asyncio.new_event_loop()
-        connect_task = self.loop.create_task(self.connect())
-        self.thread = threading.Thread(target=self.loop.run_forever)
-        self.thread.start()
-
-        # Using an async function to await connect_task because connect_task.result doesn't work
-        async def getServerInfo(task):
-            return await task
-
+        co_url = f"{cnf.scheme}{auth}://{creds}{encoded_cnf['host']}{params}"
+        LOG.debug(f"Connection URL: {co_url}")
+        ldap_factory = LDAPConnectionFactory.from_url(co_url)
+        
+        # Create instance
+        instance = cls(conn, ldap_factory.target, ldap_factory.credential)
+        instance.co_url = co_url
+        
+        # Connect asynchronously
         try:
-            LOG.debug(f"Trying to connect to {self.conf.host}...")
-            _, err = asyncio.run_coroutine_threadsafe(
-                getServerInfo(connect_task), self.loop
-            ).result()
+            LOG.debug(f"Trying to connect to {cnf.host}...")
+            _, err = await instance.connect()
             if err:
                 raise err
             LOG.debug("Connection successful")
-            self.isactive = True
-            self.domainNC = self._serverinfo["defaultNamingContext"]
-            self.configNC = self._serverinfo["configurationNamingContext"]
-            self.schemaNC = self._serverinfo["schemaNamingContext"]
-            self.appNCs = []
-            for nc in self._serverinfo["namingContexts"]:
-                if nc in [self.domainNC, self.configNC, self.schemaNC]:
+            instance.isactive = True
+            instance.domainNC = instance._serverinfo["defaultNamingContext"]
+            instance.configNC = instance._serverinfo["configurationNamingContext"]
+            instance.schemaNC = instance._serverinfo["schemaNamingContext"]
+            instance.appNCs = []
+            for nc in instance._serverinfo["namingContexts"]:
+                if nc in [instance.domainNC, instance.configNC, instance.schemaNC]:
                     continue
-                self.appNCs.append(nc)
+                instance.appNCs.append(nc)
         except Exception as e:
-            self.closeThread()
             raise e
+        
+        return instance
 
-    def bloodyadd(self, target, controls=None, **kwargs):
+    async def bloodyadd(self, target, controls=None, **kwargs):
         if controls is not None:
             t = []
             for control in controls:
@@ -219,95 +218,77 @@ class Ldap(MSLDAPClient):
                     }
                 )
             controls = t
-        _, err = asyncio.run_coroutine_threadsafe(
-            self.add(self.dnResolver(target), controls=controls, **kwargs), self.loop
-        ).result()
+        _, err = await self.add(await self.dnResolver(target), controls=controls, **kwargs)
         if err:
             raise err
 
-    def closeThread(self):
-        for task in asyncio.all_tasks(self.loop):
-            task.cancel()
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self.thread.join(0)
-
-    def close(self):
+    async def close(self):
         if not self.isactive:
             return
         self.isactive = False
         for trust in self._trustmap.values():
             if "conn" in trust and trust["conn"] != self.conn:
-                trust["conn"].closeLdap()
-        asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop).result()
-        self.closeThread()
+                await trust["conn"].closeLdap()
+        await self.disconnect()
 
-    def bloodydelete(self, target, *args):
-        _, err = asyncio.run_coroutine_threadsafe(
-            self.delete(self.dnResolver(target), *args), self.loop
-        ).result()
+    async def bloodydelete(self, target, *args):
+        _, err = await self.delete(await self.dnResolver(target), *args)
         if err:
             raise err
 
-    @lru_cache
-    def dnResolver(self, identity):
+    async def dnResolver(self, identity):
         """
         Return the DN for the object based on the parameters identity
         Args:
             identity: sAMAccountName, DN, GPO name or SID of the object
         """
+        if ",dc=" in identity.lower():
+            # identity is a DN, return as is
+            # We do not try to validate it because it could be from another trusted domain
+            return identity
 
-        async def asyncDnResolver(identity):
-            if ",dc=" in identity.lower():
-                # identity is a DN, return as is
-                # We do not try to validate it because it could be from another trusted domain
-                return identity
-
-            if identity.lower().startswith("s-1-"):
-                # We assume identity is an SID
-                ldap_filter = f"(objectSid={identity})"
-            # For GPO name as GPO has no sAMAccountName
-            elif identity.startswith("{"):
-                ldap_filter = (
-                    f"(name={identity})"
-                )
-            else:
-                # By default, we assume identity is a sam account name
-                ldap_filter = f"(sAMAccountName={identity})"
-
-            dn = ""
-            entries = self.pagedsearch(
-                ldap_filter, ["distinguishedName"], tree=self.domainNC
+        if identity.lower().startswith("s-1-"):
+            # We assume identity is an SID
+            ldap_filter = f"(objectSid={identity})"
+        # For GPO name as GPO has no sAMAccountName
+        elif identity.startswith("{"):
+            ldap_filter = (
+                f"(name={identity})"
             )
+        else:
+            # By default, we assume identity is a sam account name
+            ldap_filter = f"(sAMAccountName={identity})"
+
+        dn = ""
+        entries = self.pagedsearch(
+            ldap_filter, ["distinguishedName"], tree=self.domainNC
+        )
+        async for entry, err in entries:
+            if err:
+                raise err
+            if dn:
+                raise TooManyResultsError(self.domainNC, ldap_filter, entries)
+            dn = entry["attributes"]["distinguishedName"]
+
+        if not dn:
+            # Try ambiguous name resolution as last resort for debug
+            entries = self.pagedsearch(
+            f"(anr={identity})", ["distinguishedName"], tree=self.domainNC
+            )
+            anr_dn = []
             async for entry, err in entries:
                 if err:
                     raise err
-                if dn:
-                    raise TooManyResultsError(self.domainNC, ldap_filter, entries)
-                dn = entry["attributes"]["distinguishedName"]
-
-            if not dn:
-                # Try ambiguous name resolution as last resort for debug
-                entries = self.pagedsearch(
-                f"(anr={identity})", ["distinguishedName"], tree=self.domainNC
+                anr_dn.append(entry["attributes"]["distinguishedName"])
+            if anr_dn:
+                LOG.error(
+                    f"No results found for '{identity}' but found entries that could match: {anr_dn}"
                 )
-                anr_dn = []
-                async for entry, err in entries:
-                    if err:
-                        raise err
-                    anr_dn.append(entry["attributes"]["distinguishedName"])
-                if anr_dn:
-                    LOG.error(
-                        f"No results found for '{identity}' but found entries that could match: {anr_dn}"
-                    )
-                raise NoResultError(self.domainNC, ldap_filter)
+            raise NoResultError(self.domainNC, ldap_filter)
 
-            return dn
+        return dn
 
-        return asyncio.run_coroutine_threadsafe(
-            asyncDnResolver(identity), self.loop
-        ).result()
-
-    def bloodymodify(self, target, changes, controls=None, encode=True):
+    async def bloodymodify(self, target, changes, controls=None, encode=True):
         if controls is not None:
             t = []
             for control in controls:
@@ -320,10 +301,7 @@ class Ldap(MSLDAPClient):
                 )
             controls = t
 
-        _, err = asyncio.run_coroutine_threadsafe(
-            self.modify(self.dnResolver(target), changes, controls, encode=encode),
-            self.loop,
-        ).result()
+        _, err = await self.modify(await self.dnResolver(target), changes, controls, encode=encode)
         if err:
             raise err
 
@@ -333,74 +311,76 @@ class Ldap(MSLDAPClient):
             ",CN=Servers,CN="
         )[1]
 
-    @cached_property
-    def is_gc(self):
+    async def get_is_gc(self):
         # If we are in a gc connection we don't have the options attribute but we can check the scheme of our connection
         if self.conf.scheme == "gc":
             return True
 
         NTDSDSA_OPT_IS_GC = 1
         # Sometimes raise an error, I don't know why, maybe race condition?
-        nTDSDSA_options = next(
-            self.bloodysearch(self._serverinfo["dsServiceName"], attr=["options"])
-        )["options"]
-        return nTDSDSA_options & NTDSDSA_OPT_IS_GC
+        entry = None
+        async for e in self.bloodysearch(self._serverinfo["dsServiceName"], attr=["options"]):
+            entry = e
+            break
+        if entry:
+            nTDSDSA_options = entry["options"]
+            return nTDSDSA_options & NTDSDSA_OPT_IS_GC
+        return False
+    
+    @property
+    def is_gc(self):
+        # Provide a synchronous property for backward compatibility where possible
+        # This will be called from synchronous code that doesn't need the actual value
+        return self.conf.scheme == "gc"
 
-    @cached_property
-    def policy(self):
+    async def get_policy(self):
         """
         [MS-ADTS] - 3.1.1.3.4.6 LDAP Policies
         """
+        dict_policy = {"MaxPageSize": 1000}
 
-        async def asyncPolicy():
-            dict_policy = {"MaxPageSize": 1000}
+        nTDSDSA_dn = self._serverinfo["dsServiceName"]
+        site_match = re.search("[^,]+,CN=Sites.+", nTDSDSA_dn)
+        nTDSSiteSettings_filter = ""
+        if site_match:
+            nTDSSiteSettings_dn = "CN=NTDS Site Settings," + site_match.group()
+            nTDSSiteSettings_filter = f"(distinguishedName={nTDSSiteSettings_dn})"
+        default_policy_dn = (
+            "CN=Default Query Policy,CN=Query-Policies,CN=Directory"
+            " Service,CN=Windows NT,CN=Services," + self.configNC
+        )
+        ldap_filter = f"(|(distinguishedName={nTDSDSA_dn}){nTDSSiteSettings_filter}(distinguishedName={default_policy_dn}))"
+        raw_policy = ""
 
-            nTDSDSA_dn = self._serverinfo["dsServiceName"]
-            site_match = re.search("[^,]+,CN=Sites.+", nTDSDSA_dn)
-            nTDSSiteSettings_filter = ""
-            if site_match:
-                nTDSSiteSettings_dn = "CN=NTDS Site Settings," + site_match.group()
-                nTDSSiteSettings_filter = f"(distinguishedName={nTDSSiteSettings_dn})"
-            default_policy_dn = (
-                "CN=Default Query Policy,CN=Query-Policies,CN=Directory"
-                " Service,CN=Windows NT,CN=Services," + self.configNC
-            )
-            ldap_filter = f"(|(distinguishedName={nTDSDSA_dn}){nTDSSiteSettings_filter}(distinguishedName={default_policy_dn}))"
-            raw_policy = ""
+        async for entry, err in self.pagedsearch(
+            ldap_filter, ["lDAPAdminLimits"], tree=self.configNC
+        ):
+            if err:
+                raise err
 
-            async for entry, err in self.pagedsearch(
-                ldap_filter, ["lDAPAdminLimits"], tree=self.configNC
-            ):
-                if err:
-                    raise err
+            if "lDAPAdminLimits" not in entry:
+                continue
+            if entry["objectName"] == nTDSDSA_dn:
+                raw_policy = entry["attributes"]["lDAPAdminLimits"]
+                break
+            elif entry["objectName"] == nTDSSiteSettings_dn:
+                raw_policy = entry["attributes"]["lDAPAdminLimits"]
+            elif not raw_policy and entry["objectName"] == default_policy_dn:
+                raw_policy = entry["attributes"]["lDAPAdminLimits"]
 
-                if "lDAPAdminLimits" not in entry:
-                    continue
-                if entry["objectName"] == nTDSDSA_dn:
-                    raw_policy = entry["attributes"]["lDAPAdminLimits"]
-                    break
-                elif entry["objectName"] == nTDSSiteSettings_dn:
-                    raw_policy = entry["attributes"]["lDAPAdminLimits"]
-                elif not raw_policy and entry["objectName"] == default_policy_dn:
-                    raw_policy = entry["attributes"]["lDAPAdminLimits"]
+        for raw_param in raw_policy:
+            param_name, _, param_val = raw_param.partition("=")
+            dict_policy[param_name] = int(param_val)
 
-            for raw_param in raw_policy:
-                param_name, _, param_val = raw_param.partition("=")
-                dict_policy[param_name] = int(param_val)
+        return dict_policy
 
-            return dict_policy
-
-        return asyncio.run_coroutine_threadsafe(asyncPolicy(), self.loop).result()
-
-    def getTrustMap(self, nctype=NCType.ALL):
+    async def getTrustMap(self, nctype=NCType.ALL):
         if self._trustmap and (self._nctype & nctype) == nctype:
             return self._trustmap
-        asyncio.get_event_loop().run_until_complete(
-            self.getTrusts(
-                transitive=True,
-                dns=self.conf.dns,
-                allow_gc=(nctype == NCType.PARTIAL_DOM),
-            )
+        await self.getTrusts(
+            transitive=True,
+            dns=self.conf.dns,
+            allow_gc=(nctype == NCType.PARTIAL_DOM),
         )
         return self._trustmap
 
@@ -408,7 +388,8 @@ class Ldap(MSLDAPClient):
         async def partitionOp(conn_list):
             for conn in conn_list:
                 try:
-                    op_fn = getattr(conn.ldap, op_name)
+                    ldap = await conn.ldap
+                    op_fn = getattr(ldap, op_name)
                     return op_fn(op_params)
                 except Exception as e:
                     LOG.error(
@@ -422,7 +403,7 @@ class Ldap(MSLDAPClient):
         op_results = await asyncio.gather(*tasks)
         return op_results
 
-    def bloodysearch(
+    async def bloodysearch(
         self,
         base,
         ldap_filter="(objectClass=*)",
@@ -443,36 +424,34 @@ class Ldap(MSLDAPClient):
             self.is_prettified = True
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
-            base_dn = self.dnResolver(base)
+            base_dn = await self.dnResolver(base)
         else:
             base_dn = base
 
         if attr is None:
             attr = ["*"]
 
+        # Build a local controls list to avoid mutating caller-provided lists
+        local_controls = list(controls) if controls else []
         if control_flag:
             # Search control to request security descriptor parts
             req_flags = SDFlagsRequestValue({"Flags": control_flag})
-            if controls is None:
-                controls = []
-            controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
+            local_controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
 
-        self.ldap_query_page_size = self.policy["MaxPageSize"]
+        policy = await self.get_policy()
+        self.ldap_query_page_size = policy["MaxPageSize"]
         search_generator = self.pagedsearch(
             ldap_filter,
             attr,
             tree=base_dn,
             search_scope=search_scope.value,
-            controls=controls,
+            controls=local_controls,
             raw=raw,
         )
 
         isNul = True
         try:
-            while True:
-                entry, err = asyncio.run_coroutine_threadsafe(
-                    search_generator.__anext__(), self.loop
-                ).result()
+            async for entry, err in search_generator:
                 if err:
                     raise err
                 isNul = False
@@ -480,12 +459,8 @@ class Ldap(MSLDAPClient):
                     **{"distinguishedName": entry["objectName"]},
                     **entry["attributes"],
                 }
-        except StopAsyncIteration:
-            pass
         finally:
-            asyncio.run_coroutine_threadsafe(
-                search_generator.aclose(), self.loop
-            ).result()
+            await search_generator.aclose()
         if isNul:
             raise NoResultError(base_dn, ldap_filter)
 
@@ -594,9 +569,10 @@ class Ldap(MSLDAPClient):
         # If domain_name is provided it means we try to reach a domain outside of current "conn" forest so we have to find a server that we can reach for this outsider domain and then we search the entire forest related to this outsider domain
         newconn = conn
         if domain_name:
+            ldap_conn = await newconn.getLdap()
             host_params = await reacher.findReachableDomainServer(
                 domain_name,
-                newconn.ldap.current_site,
+                ldap_conn.current_site,
                 server_type="" if allow_gc else "ldap",
                 dns_addr=dns,
                 dc_dns=newconn.conf.dcip,
@@ -617,12 +593,13 @@ class Ldap(MSLDAPClient):
         search_results = []
         # dc is a gc for this forest, hosting every records we want, we don't need to look for other domain partitions on other dc
         # Except if we're looking for attributes no replicated in GC, then searchInForest must be called with allow_gc=False
-        if newconn.ldap.is_gc and allow_gc:
+        newconn_ldap = await newconn.getLdap()
+        if newconn_ldap.is_gc and allow_gc:
             search_results = await self.searchInPartition(
                 newconn, search_params, dns, allow_gc=allow_gc
             )
             if newconn != conn and newconn._ldap:
-                newconn.ldap.close()
+                await newconn._ldap.close()
             return search_results
 
         # Find all domain partitions in the forest and dc hosting them
@@ -630,15 +607,16 @@ class Ldap(MSLDAPClient):
             # Get all domain partitions in the forest
             # partitions = conn.ldap.bloodysearch("CN=Partitions," + conn.ldap.configNC, "(&(objectClass=crossRef)(systemFlags=3))", attr=["nCName"])
             # Find nTDSDSA objects containing msDS-HasDomainNCs and server objects parents containing dNSHostname
-            entries = newconn.ldap.bloodysearch(
-                "CN=Sites," + newconn.ldap.configNC,
+            ldap_conn = await newconn.getLdap()
+            entries = ldap_conn.bloodysearch(
+                "CN=Sites," + ldap_conn.configNC,
                 "(|(objectClass=nTDSDSA)(objectClass=server))",
                 search_scope=Scope.SUBTREE,
                 attr=["msDS-HasDomainNCs", "dNSHostName", "objectClass"],
             )
             # Put domain partitions and hostnames together by matching server distinguished name on them
             forest_servers = collections.defaultdict(dict)
-            for entry in entries:
+            async for entry in entries:
                 if "server" in entry["objectClass"]:
                     try:
                         forest_servers[entry["distinguishedName"]]["host"] = entry[
@@ -672,7 +650,7 @@ class Ldap(MSLDAPClient):
             for p, hosts in forest_partitions.items():
                 host_list = hosts
                 # if newconn already has this partition don't provide new hosts to connect to
-                if p in newconn.ldap._serverinfo["namingContexts"]:
+                if p in ldap_conn._serverinfo["namingContexts"]:
                     host_list = []
                 tasks.append(
                     self.searchInPartition(
@@ -688,7 +666,7 @@ class Ldap(MSLDAPClient):
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:
             if newconn != conn and newconn._ldap:
-                newconn.ldap.close()
+                await newconn._ldap.close()
             return search_results
 
     async def searchInPartition(
@@ -726,14 +704,15 @@ class Ldap(MSLDAPClient):
 
         search_result = []
         try:
+            newconn_ldap = await newconn.getLdap()
             if bloodysearch_params["base"] == "domainNC":
                 # The directory can be handled by others instances of the function so we have to duplicate it before modifying it
                 bloodysearch_params = dict(bloodysearch_params)
-                bloodysearch_params["base"] = newconn.ldap.domainNC
+                bloodysearch_params["base"] = newconn_ldap.domainNC
             # We add parent_conn to know which conn has the trust, useful for krb cross realm
             search_result = [
                 {"parent_conn": newconn, **entry}
-                for entry in newconn.ldap.bloodysearch(**bloodysearch_params)
+                async for entry in newconn_ldap.bloodysearch(**bloodysearch_params)
             ]
         except Exception as e:
             LOG.error(
@@ -742,7 +721,7 @@ class Ldap(MSLDAPClient):
             LOG.error(f"Error {type(e).__name__}: {e}")
         finally:
             if newconn != conn and newconn._ldap:
-                newconn.ldap.close()
+                await newconn._ldap.close()
             return search_result
 
 
