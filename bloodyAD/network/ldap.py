@@ -431,12 +431,12 @@ class Ldap(MSLDAPClient):
         if attr is None:
             attr = ["*"]
 
+        # Build a local controls list to avoid mutating caller-provided lists
+        local_controls = list(controls) if controls else []
         if control_flag:
             # Search control to request security descriptor parts
             req_flags = SDFlagsRequestValue({"Flags": control_flag})
-            if controls is None:
-                controls = []
-            controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
+            local_controls.append(("1.2.840.113556.1.4.801", True, req_flags.dump()))
 
         policy = await self.get_policy()
         self.ldap_query_page_size = policy["MaxPageSize"]
@@ -445,7 +445,7 @@ class Ldap(MSLDAPClient):
             attr,
             tree=base_dn,
             search_scope=search_scope.value,
-            controls=controls,
+            controls=local_controls,
             raw=raw,
         )
 

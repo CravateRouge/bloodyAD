@@ -181,7 +181,7 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
         # We assume member is an SID
         member_transformed = f"<SID={member}>"
     else:
-        member_transformed = ldap.dnResolver(member)
+        member_transformed = await ldap.dnResolver(member)
 
     await ldap.bloodymodify(
         group, {"member": [(Change.DELETE.value, member_transformed)]}

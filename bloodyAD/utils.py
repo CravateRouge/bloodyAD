@@ -533,14 +533,15 @@ async def renderSD(sddl, conn):
     return renderedSD
 
 
-def renderSearchResult(entries):
+async def renderSearchResult(entries: types.AsyncGeneratorType) -> types.AsyncGeneratorType:
     """
-    Takes entries of type Iterator({dn: <list/generator with one depth or primitive type or raw bytes>},{...}...)
-    Returns entries as is but with base64 instead of raw bytes if not decodable in utf-8
-    Sorts entry alphabetically too
+    Takes entries as an asynchronous generator of dicts ({dn: <list/generator with one depth or primitive type or raw bytes>},{...}...)
+    Yields each entry as a dict, converting raw bytes to base64 if not decodable in utf-8.
+    Sorts entry attributes alphabetically (except 'distinguishedName' is first).
+    This function is now an async generator and must be iterated with 'async for'.
     """
     decoded_entry = {}
-    for entry in entries:
+    async for entry in entries:
         entry = {
             **{"distinguishedName": entry["distinguishedName"]},
             **{k: v for k, v in sorted(entry.items()) if k != "distinguishedName"},
