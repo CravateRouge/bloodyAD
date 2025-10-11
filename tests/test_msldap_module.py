@@ -81,6 +81,31 @@ class MSLDAPModuleTests(unittest.TestCase):
         for method in important_methods:
             self.assertTrue(hasattr(msldap, method), 
                           f"Method '{method}' should be exposed in msldap module")
+    
+    def test_parameter_extraction(self):
+        """Test that parameters can be extracted correctly for main.py"""
+        # This tests the fix for the parameter passing issue
+        # main.py extracts parameters using: func.__code__.co_varnames[1:func.__code__.co_argcount]
+        
+        # Test function with multiple parameters
+        func = getattr(msldap, 'user')
+        param_names = func.__code__.co_varnames[1:func.__code__.co_argcount]
+        self.assertEqual(param_names, ('samaccountname', 'to_print'),
+                        "user function should have samaccountname and to_print parameters")
+        
+        # Test function with no parameters (other than conn)
+        func = getattr(msldap, 'whoami')
+        param_names = func.__code__.co_varnames[1:func.__code__.co_argcount]
+        self.assertEqual(param_names, (),
+                        "whoami function should have no parameters")
+        
+        # Test function with multiple parameters
+        func = getattr(msldap, 'query')
+        param_names = func.__code__.co_varnames[1:func.__code__.co_argcount]
+        self.assertIn('query', param_names,
+                     "query function should have query parameter")
+        self.assertIn('attributes', param_names,
+                     "query function should have attributes parameter")
 
 
 if __name__ == '__main__':
