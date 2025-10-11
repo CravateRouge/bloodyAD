@@ -29,7 +29,7 @@ jobs:
 
       - name: Extract and Update Wiki
         run: |
-          python .github/scripts/extract_help_to_wiki.py \
+          python .github/scripts/update_wiki.py \
             --repo-path . \
             --wiki-path wiki \
             --user-guide User-Guide.md
