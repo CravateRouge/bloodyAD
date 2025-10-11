@@ -115,8 +115,11 @@ class _MSLDAPWrapper:
             if param.annotation != inspect.Parameter.empty:
                 annotations[param.name] = param.annotation
             else:
-                # Default to str if no annotation
-                annotations[param.name] = str
+                # Infer type from default value if available, otherwise default to str
+                if param.default != inspect.Parameter.empty:
+                    annotations[param.name] = type(param.default)
+                else:
+                    annotations[param.name] = str
         wrapper.__annotations__ = annotations
         
         # Build signature with proper defaults
@@ -131,11 +134,16 @@ class _MSLDAPWrapper:
                     annotation=param.annotation
                 )
             else:
+                # Infer type from default value if available, otherwise default to str
+                if param.default != inspect.Parameter.empty:
+                    inferred_type = type(param.default)
+                else:
+                    inferred_type = str
                 new_param = inspect.Parameter(
                     param.name,
                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
                     default=param.default,
-                    annotation=str
+                    annotation=inferred_type
                 )
             new_params.append(new_param)
         
