@@ -9,8 +9,9 @@ class MSLDAPModuleTests(unittest.TestCase):
     def test_module_has_functions(self):
         """Test that the msldap module has exposed functions"""
         functions = [name for name, obj in inspect.getmembers(msldap, inspect.isfunction)]
-        # Should have many functions (around 87+)
-        self.assertGreater(len(functions), 80)
+        # Should have many functions (around 80+)
+        # Note: 7 methods are filtered (ls, cd, rm, nullcb, nocb, bindtree, cat) plus 6 interactive methods
+        self.assertGreater(len(functions), 75)
     
     def test_no_interactive_methods_exposed(self):
         """Test that interactive methods are not exposed"""
@@ -87,11 +88,11 @@ class MSLDAPModuleTests(unittest.TestCase):
         # This tests the fix for the parameter passing issue
         # main.py extracts parameters using: func.__code__.co_varnames[1:func.__code__.co_argcount]
         
-        # Test function with multiple parameters
+        # Test function with parameters (to_print is now hidden)
         func = getattr(msldap, 'user')
         param_names = func.__code__.co_varnames[1:func.__code__.co_argcount]
-        self.assertEqual(param_names, ('samaccountname', 'to_print'),
-                        "user function should have samaccountname and to_print parameters")
+        self.assertEqual(param_names, ('samaccountname',),
+                        "user function should have samaccountname parameter (to_print is hidden)")
         
         # Test function with no parameters (other than conn)
         func = getattr(msldap, 'whoami')
@@ -106,6 +107,34 @@ class MSLDAPModuleTests(unittest.TestCase):
                      "query function should have query parameter")
         self.assertIn('attributes', param_names,
                      "query function should have attributes parameter")
+    
+    def test_hidden_parameters_not_exposed(self):
+        """Test that show and to_print parameters are not exposed"""
+        # Test functions that would normally have these parameters
+        test_cases = {
+            'user': ['show', 'to_print'],
+            'ldapinfo': ['show'],
+            'adinfo': ['show'],
+        }
+        
+        for func_name, hidden_params in test_cases.items():
+            if hasattr(msldap, func_name):
+                func = getattr(msldap, func_name)
+                sig = inspect.signature(func)
+                param_names = list(sig.parameters.keys())
+                
+                for hidden_param in hidden_params:
+                    self.assertNotIn(hidden_param, param_names,
+                                   f"{func_name} should not expose {hidden_param} parameter")
+    
+    def test_suppressed_methods_not_exposed(self):
+        """Test that ls, cd, rm, nullcb, nocb, bindtree, cat are not exposed"""
+        suppressed = ['ls', 'cd', 'rm', 'nullcb', 'nocb', 'bindtree', 'cat']
+        functions = [name for name, obj in inspect.getmembers(msldap, inspect.isfunction)]
+        
+        for method in suppressed:
+            self.assertNotIn(method, functions,
+                           f"{method} should not be exposed in msldap module")
 
 
 if __name__ == '__main__':

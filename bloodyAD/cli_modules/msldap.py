@@ -12,7 +12,7 @@ import inspect
 class _MSLDAPWrapper:
     """Internal wrapper class to manage MSLDAPClientConsole method execution"""
     
-    # Interactive methods that should not be exposed
+    # Interactive methods and methods that should not be exposed
     INTERACTIVE_METHODS = {
         'do_login',
         'do_nosig',
@@ -20,7 +20,17 @@ class _MSLDAPWrapper:
         'do_quit',
         'do_test',  # Might be interactive
         'do_plugin',  # Might be interactive
+        'do_ls',  # File system navigation
+        'do_cd',  # File system navigation
+        'do_rm',  # File system operation
+        'do_nullcb',  # Channel binding option
+        'do_nocb',  # Channel binding option
+        'do_bindtree',  # Tree binding operation
+        'do_cat',  # File system operation
     }
+    
+    # Parameters that should not be exposed
+    HIDDEN_PARAMETERS = {'show', 'to_print'}
     
     @staticmethod
     def get_msldap_methods():
@@ -46,12 +56,13 @@ class _MSLDAPWrapper:
         return methods
     
     @staticmethod
-    async def execute_msldap_method(conn, method_name: str, **kwargs):
+    async def execute_msldap_method(conn, method_name: str, original_method, **kwargs):
         """
         Execute an MSLDAPClientConsole method with the given arguments.
         
         :param conn: ConnectionHandler instance
         :param method_name: Name of the method to execute (without 'do_' prefix)
+        :param original_method: The original method object (to get signature for hidden params)
         :param kwargs: Arguments to pass to the method
         """
         # Initialize MSLDAPClientConsole without URL (non-interactive mode)
@@ -72,10 +83,20 @@ class _MSLDAPWrapper:
         full_method_name = f'do_{method_name}'
         method = getattr(msldapcc, full_method_name)
         
-        # Call the method with provided arguments
-        result = await method(**kwargs)
+        # Add hidden parameters with their default values
+        sig = inspect.signature(original_method)
+        for param_name, param in sig.parameters.items():
+            if param_name in _MSLDAPWrapper.HIDDEN_PARAMETERS and param_name not in kwargs:
+                if param.default != inspect.Parameter.empty:
+                    # Use False for hidden parameters to suppress output
+                    kwargs[param_name] = False
         
-        return result
+        # Call the method with provided arguments
+        # Note: We don't return the result as requested - the method will print its output
+        await method(**kwargs)
+        
+        # Return None to indicate success without returning actual results
+        return None
     
     @staticmethod
     def create_wrapper_function(method_name, original_method):
@@ -90,6 +111,9 @@ class _MSLDAPWrapper:
         # Remove 'self' parameter
         if params and params[0].name == 'self':
             params = params[1:]
+        
+        # Filter out hidden parameters (show, to_print)
+        params = [p for p in params if p.name not in _MSLDAPWrapper.HIDDEN_PARAMETERS]
         
         # Get docstring and format it for argparse
         raw_docstring = inspect.getdoc(original_method) or f"Execute {method_name} from MSLDAPClientConsole"
@@ -109,13 +133,14 @@ class _MSLDAPWrapper:
         # Create function code that calls execute_msldap_method with all parameters as kwargs
         func_code = f'''async def wrapper(conn, {param_str}):
     kwargs = {{{', '.join(f"'{name}': {name}" for name in param_names)}}}
-    return await _MSLDAPWrapper.execute_msldap_method(conn, method_name, **kwargs)
+    return await _MSLDAPWrapper.execute_msldap_method(conn, method_name, original_method, **kwargs)
 '''
         
         # Execute the code to create the function
         local_vars = {
             '_MSLDAPWrapper': _MSLDAPWrapper,
-            'method_name': method_name
+            'method_name': method_name,
+            'original_method': original_method
         }
         exec(func_code, local_vars)
         wrapper = local_vars['wrapper']
