@@ -101,9 +101,24 @@ class _MSLDAPWrapper:
             docstring_lines.append(f":param {param.name}: {param.name}")
         docstring = "\n".join(docstring_lines)
         
-        # Create async wrapper function
-        async def wrapper(conn, **kwargs):
-            return await _MSLDAPWrapper.execute_msldap_method(conn, method_name, **kwargs)
+        # Build the function dynamically with proper parameter names
+        # This is necessary because bloodyAD's main.py extracts parameter names from __code__.co_varnames
+        param_names = [p.name for p in params]
+        param_str = ', '.join(param_names)
+        
+        # Create function code that calls execute_msldap_method with all parameters as kwargs
+        func_code = f'''async def wrapper(conn, {param_str}):
+    kwargs = {{{', '.join(f"'{name}': {name}" for name in param_names)}}}
+    return await _MSLDAPWrapper.execute_msldap_method(conn, method_name, **kwargs)
+'''
+        
+        # Execute the code to create the function
+        local_vars = {
+            '_MSLDAPWrapper': _MSLDAPWrapper,
+            'method_name': method_name
+        }
+        exec(func_code, local_vars)
+        wrapper = local_vars['wrapper']
         
         # Set the wrapper's name and docstring
         wrapper.__name__ = method_name
