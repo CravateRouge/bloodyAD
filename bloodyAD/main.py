@@ -7,7 +7,7 @@ import sys, argparse, types, json, asyncio
 import inspect, pkgutil, importlib
 
 
-async def main():
+async def amain():
     parser = argparse.ArgumentParser(description="AD Privesc Swiss Army Knife")
 
     parser.add_argument("-d", "--domain", help="Domain used for NTLM authentication")
@@ -319,6 +319,8 @@ def print_entry(entryname, entry):
     else:
         return entry
 
+def main():
+    asyncio.run(amain())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
