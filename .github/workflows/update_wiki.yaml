@@ -1,0 +1,44 @@
+name: Update Wiki on Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  update-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bloodyAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install bloodyAD and dependencies
+        run: |
+          pip install .
+
+      - name: Clone Wiki
+        run: |
+          git clone https://github.com/CravateRouge/bloodyAD.wiki.git wiki
+
+      - name: Extract and Update Wiki
+        run: |
+          python .github/scripts/extract_help_to_wiki.py \
+            --repo-path . \
+            --wiki-path wiki \
+            --user-guide User-Guide.md
+
+      - name: Commit and Push Wiki Changes
+        run: |
+          cd wiki
+          git config user.name "bloodyAD Bot"
+          git config user.email "bloodyad-bot@github.com"
+          git add User-Guide.md
+          git commit -m "Update User-Guide.md with latest help output"
+          git push https://CravateRouge:${{ secrets.WIKITOKEN }}@github.com/CravateRouge/bloodyAD.wiki.git HEAD:master
