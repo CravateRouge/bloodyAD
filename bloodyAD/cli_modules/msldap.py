@@ -88,8 +88,8 @@ class _MSLDAPWrapper:
         for param_name, param in sig.parameters.items():
             if param_name in _MSLDAPWrapper.HIDDEN_PARAMETERS and param_name not in kwargs:
                 if param.default != inspect.Parameter.empty:
-                    # Use False for hidden parameters to suppress output
-                    kwargs[param_name] = False
+                    # Use the original default value
+                    kwargs[param_name] = param.default
         
         # Call the method with provided arguments
         # Note: We don't return the result as requested - the method will print its output
