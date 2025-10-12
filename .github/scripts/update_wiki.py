@@ -53,6 +53,8 @@ def update_ps1_block(md, md_idx, section_level, section_name, cmd, new_output):
     """
     # Compose regex for section and block
     # Section header can be '#', '##', or '###'
+    # but '#' can also match comment in code so we don't match it
+    level_pattern = rf'^#{{2,{len(section_level)}}} '
     section_header = section_level + " " + section_name
     section_pattern = rf"^{re.escape(section_header)}\s*$"
     new_block = f"```ps1\n$ {cmd}\n\n{new_output.strip()}\n```\n"
@@ -61,10 +63,10 @@ def update_ps1_block(md, md_idx, section_level, section_name, cmd, new_output):
     section_idx = None
     idx = md_idx
     while idx < len(md):
-        if re.match(section_pattern, md[idx]):
+        if re.match(section_pattern, md[idx].strip()):
             section_idx = idx
             break
-        elif md[idx].strip().startswith(section_level+" "):  # Next section hitten
+        elif re.match(level_pattern, md[idx].strip()):  # Next section hitten
             print(f"Section '{section_header}' not found, adding before next section '{md[idx].strip()}'.")
             md.insert(idx, f"{section_header}\n{new_block}")
             return idx + 1
@@ -100,7 +102,7 @@ def update_ps1_block(md, md_idx, section_level, section_name, cmd, new_output):
         print(f"Block start '{block_start}' or block end '{block_end}' not found in {section_header}, inserting new block.")
         # Insert after section header (or at end)
         md.insert(section_idx+1, "\n" + new_block)
-        md_idx = section_idx  # Move cursor after the newly inserted block
+        md_idx = section_idx+1  # Move cursor after the newly inserted block
     return md_idx
 
 def main():
@@ -129,6 +131,13 @@ def main():
         "bloodyAD -h",
         global_help
     )
+
+    # # Get into commands section
+    # while True:
+    #     if re.match(r'^# Commands Arguments', md[md_idx].strip()):
+    #         md_idx += 1
+    #         break
+    #     md_idx += 1
 
     # 2. Parse commands
     commands = parse_commands(global_help)
