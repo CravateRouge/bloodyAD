@@ -94,6 +94,9 @@ async def amain():
 
     subparsers = parser.add_subparsers(title="Commands")
     submodnames = []
+    # Store mapping of lowercase function names to their original case for case-insensitive matching
+    function_name_map = {}
+    
     # Iterates all submodules in module package and creates one parser per submodule
     for importer, submodname, ispkg in pkgutil.iter_modules(cli_modules.__path__):
         submodnames.append(submodname)
@@ -105,6 +108,9 @@ async def amain():
         for function_name, function in inspect.getmembers(
             submodule, inspect.isfunction
         ):
+            # Store case-insensitive mapping for this submodule's functions
+            function_name_map[f"{submodname}:{function_name.lower()}"] = function_name
+            
             function_doc, params_doc = doc_parser(inspect.getdoc(function))
             # This formatter class prints default values
             subsubparser = subsubparsers.add_parser(
@@ -162,10 +168,12 @@ async def amain():
 
     # Preprocess the input arguments because nargs ? and * can capture subparsers commands if put at the end
     # So we always put the --host option at the end
+    # Also normalize function names to be case-insensitive
     input_args = sys.argv[1:]
     isHost = False
     parsed_args = []
     host_arg = None
+    current_submodname = None
     for arg in input_args:
         if arg in ["-H", "--host"]:
             isHost = True
@@ -173,11 +181,22 @@ async def amain():
             isHost = False
             host_arg = arg
         elif arg in submodnames:
+            current_submodname = arg
             parsed_args.append("--host")
             parsed_args.append(host_arg)
             parsed_args.append(arg)
         else:
-            parsed_args.append(arg)
+            # Check if this could be a function name and normalize it if needed
+            if current_submodname and not arg.startswith("-"):
+                normalized_key = f"{current_submodname}:{arg.lower()}"
+                if normalized_key in function_name_map:
+                    # Replace with the correct case version
+                    parsed_args.append(function_name_map[normalized_key])
+                    current_submodname = None  # Reset after finding function
+                else:
+                    parsed_args.append(arg)
+            else:
+                parsed_args.append(arg)
     args = parser.parse_args(parsed_args)
 
     if "func" not in args:
