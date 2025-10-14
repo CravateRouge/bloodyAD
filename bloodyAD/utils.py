@@ -5,7 +5,7 @@ from bloodyAD.formatters import (
     adschema,
 )
 from bloodyAD.network.ldap import Scope, phantomRoot
-import types, base64, collections, asyncio
+import types, base64, collections
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from badldap.network import reacher

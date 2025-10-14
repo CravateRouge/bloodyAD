@@ -87,7 +87,7 @@ class _MSLDAPWrapper:
         sig = inspect.signature(original_method)
         for param_name, param in sig.parameters.items():
             if param_name in _MSLDAPWrapper.HIDDEN_PARAMETERS and param_name not in kwargs:
-                if param.default != inspect.Parameter.empty:
+                if param.default is not None and param.default != inspect.Parameter.empty:
                     # Use the original default value
                     kwargs[param_name] = param.default
         
@@ -156,7 +156,7 @@ class _MSLDAPWrapper:
                 annotations[param.name] = param.annotation
             else:
                 # Infer type from default value if available, otherwise default to str
-                if param.default != inspect.Parameter.empty:
+                if param.default is not None and param.default != inspect.Parameter.empty:
                     annotations[param.name] = type(param.default)
                 else:
                     annotations[param.name] = str
@@ -175,7 +175,7 @@ class _MSLDAPWrapper:
                 )
             else:
                 # Infer type from default value if available, otherwise default to str
-                if param.default != inspect.Parameter.empty:
+                if param.default is not None and param.default != inspect.Parameter.empty:
                     inferred_type = type(param.default)
                 else:
                     inferred_type = str

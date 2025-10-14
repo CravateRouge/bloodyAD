@@ -4,7 +4,7 @@ from bloodyAD.network.ldap import Scope
 from bloodyAD.exceptions import NoResultError
 from badldap.commons.exceptions import LDAPSearchException
 from typing import Literal
-import re, asyncio
+import re
 
 
 async def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
@@ -44,6 +44,7 @@ async def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool 
         f"(&({otype_filter})(!(distinguishedName={target})))",
         search_scope=scope,
         attr=["distinguishedName"],
+        controls=[("1.2.840.113556.1.4.417", True, None)]
     ):
         yield entry
 

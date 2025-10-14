@@ -315,7 +315,8 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
     if newName:
         attributes["name"] = [(Change.REPLACE.value, newName)]
-        attributes["displayName"] = [(Change.REPLACE.value, entry["displayName"].replace(entry["name"], newName))]
+        if entry.get("displayName"):
+            attributes["displayName"] = [(Change.REPLACE.value, entry["displayName"].replace(entry["name"], newName))]
         if entry.get("sAMAccountName"):
             attributes["sAMAccountName"] = [(Change.REPLACE.value, newName+'$' if entry["sAMAccountName"][-1] == "$" else newName)]
         if entry.get("servicePrincipalName"):

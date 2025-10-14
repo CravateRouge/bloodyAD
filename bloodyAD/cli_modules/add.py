@@ -2,7 +2,6 @@ import binascii, datetime, random, string, base64, asyncio
 from typing import Literal
 from urllib import parse
 from bloodyAD import utils, ConnectionHandler
-from bloodyAD.network import ldap
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol, common, cryptography, dns
 from bloodyAD.network.ldap import Change, Scope
