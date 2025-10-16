@@ -499,9 +499,9 @@ async def writable(
         controls = [("1.2.840.113556.1.4.417", True, None)]
 
     # Build attributes list - include objectSid and objectGUID if with_sid is True
-    search_attrs = list(attr_params.keys())
+    requested_attributes = list(attr_params.keys())
     if with_sid:
-        search_attrs.extend(["objectSid", "objectGUID"])
+        requested_attributes.extend(["objectSid", "objectGUID"])
 
     ldap = await conn.getLdap()
     searchbases = []
@@ -514,7 +514,7 @@ async def writable(
     right_entry = {}
     for searchbase in searchbases:
         async for entry in ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=search_attrs, controls=controls
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:
