@@ -434,7 +434,7 @@ async def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    include_del: bool = False,
+    include_del: bool = False
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -444,6 +444,7 @@ async def writable(
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
     :param include_del: if set, include deleted objects
+    :param with_sid: if set, include objectSid and objectGUID in the output
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -492,8 +493,12 @@ async def writable(
             "right": "CREATE_CHILD",
         }
     
+
+    # Build attributes list - include objectSid and objectGUID if with_sid is True
+    requested_attributes = list(attr_params.keys())
     controls = None
     if include_del:
+        requested_attributes.append("objectSid")
         controls = [("1.2.840.113556.1.4.417", True, None)]
 
     ldap = await conn.getLdap()
@@ -507,7 +512,7 @@ async def writable(
     right_entry = {}
     for searchbase in searchbases:
         async for entry in ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params.keys(), controls=controls
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:
@@ -521,8 +526,14 @@ async def writable(
                     right_entry[name].append(attr_params[attr_name]["right"])
 
             if right_entry:
-                yield {
-                    **{"distinguishedName": entry["distinguishedName"]},
-                    **right_entry,
-                }
+                # Build base result with distinguishedName
+                result = {"distinguishedName": entry["distinguishedName"]}
+
+                if "objectSid" in entry:
+                    result["objectSid"] = entry["objectSid"]
+                
+                # Merge right_entry into result
+                result.update(right_entry)
+                
+                yield result
                 right_entry = {}
