@@ -434,8 +434,7 @@ async def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    include_del: bool = False,
-    with_sid: bool = False,
+    include_del: bool = False
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -494,14 +493,13 @@ async def writable(
             "right": "CREATE_CHILD",
         }
     
-    controls = None
-    if include_del:
-        controls = [("1.2.840.113556.1.4.417", True, None)]
 
     # Build attributes list - include objectSid and objectGUID if with_sid is True
     requested_attributes = list(attr_params.keys())
-    if with_sid:
-        requested_attributes.extend(["objectSid", "objectGUID"])
+    controls = None
+    if include_del:
+        requested_attributes.append("objectSid")
+        controls = [("1.2.840.113556.1.4.417", True, None)]
 
     ldap = await conn.getLdap()
     searchbases = []
@@ -530,13 +528,9 @@ async def writable(
             if right_entry:
                 # Build base result with distinguishedName
                 result = {"distinguishedName": entry["distinguishedName"]}
-                
-                # Include objectSid and objectGUID if with_sid is True and they exist
-                if with_sid:
-                    if "objectSid" in entry:
-                        result["objectSid"] = entry["objectSid"]
-                    if "objectGUID" in entry:
-                        result["objectGUID"] = entry["objectGUID"]
+
+                if "objectSid" in entry:
+                    result["objectSid"] = entry["objectSid"]
                 
                 # Merge right_entry into result
                 result.update(right_entry)
