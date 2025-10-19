@@ -621,8 +621,8 @@ async def uac(conn: ConnectionHandler, target: str, f: list = None):
         old_uac = entry["userAccountControl"][0]
     except IndexError as e:
         entry = None
-        async for e in ldap.bloodysearch(target, attr=["allowedAttributes"]):
-            entry = e
+        async for search_entry in ldap.bloodysearch(target, attr=["allowedAttributes"]):
+            entry = search_entry
             break
         for allowed in entry["allowedAttributes"]:
             if "userAccountControl" in allowed:
