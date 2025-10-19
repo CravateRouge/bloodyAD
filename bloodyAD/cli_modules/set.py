@@ -130,7 +130,7 @@ async def password(conn, target: str, newpass: str, oldpass: str = None):
     except badldap.commons.exceptions.LDAPModifyException as e:
         # Let's check if we comply to pwd policy
         entry = None
-        async for e in ldap.bloodysearch(
+        async for search_entry in ldap.bloodysearch(
                 target,
                 attr=[
                     "msDS-ResultantPSO",
@@ -140,7 +140,7 @@ async def password(conn, target: str, newpass: str, oldpass: str = None):
                     "sAMAccountType",
                 ],
             ):
-            entry = e
+            entry = search_entry
             break
         pwdLastSet = entry.get("pwdLastSet", 0)
         pwdPolicy = None
