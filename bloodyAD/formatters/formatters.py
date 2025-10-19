@@ -66,9 +66,9 @@ def formatSchemaVersion(objectVersion):
 
 def formatGMSApass(managedPassword):
     gmsa_blob = cryptography.MSDS_MANAGEDPASSWORD_BLOB(managedPassword)
-    ntlm_hash = "aad3b435b51404eeaad3b435b51404ee:" + gmsa_blob.toNtHash()
+    nt_hash = gmsa_blob.toNtHash()
     return {
-        "NTLM": ntlm_hash,
+        "NT": nt_hash,
         "B64ENCODED": base64.b64encode(gmsa_blob["CurrentPassword"]).decode(),
     }
 
