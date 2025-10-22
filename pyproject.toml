@@ -24,7 +24,8 @@ dependencies = [
         "badldap>=0.6.6",
         "winacl==0.1.9",
         "asn1crypto==1.5.1",
-        "kerbad>=0.5.6"
+        "kerbad>=0.5.6",
+        "bhopengraph>=1.1.0"
 ]
 
 [project.urls]

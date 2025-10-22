@@ -434,7 +434,8 @@ async def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    include_del: bool = False
+    include_del: bool = False,
+    bloodhound_json: str = None
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -444,7 +445,7 @@ async def writable(
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
     :param include_del: if set, include deleted objects
-    :param with_sid: if set, include objectSid and objectGUID in the output
+    :param bloodhound_json: if set, outputs BloodHound-compatible JSON to the specified file path
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -493,13 +494,18 @@ async def writable(
             "right": "CREATE_CHILD",
         }
     
-
-    # Build attributes list - include objectSid and objectGUID if with_sid is True
+    # Build attributes list - include objectSid and objectGUID for BloodHound JSON
     requested_attributes = list(attr_params.keys())
     controls = None
     if include_del:
         requested_attributes.append("objectSid")
         controls = [("1.2.840.113556.1.4.417", True, None)]
+
+    # If bloodhound_json is requested, we need all attributes and objectSid/objectGUID
+    if bloodhound_json:
+        # Request all attributes to populate node properties
+        requested_attributes.append("objectSid")
+        requested_attributes.append("objectGUID")
 
     ldap = await conn.getLdap()
     searchbases = []
@@ -509,31 +515,172 @@ async def writable(
     #     searchbases.append(ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
     # else:
     #     searchbases.append(ldap.NCs) # A definir
-    right_entry = {}
-    for searchbase in searchbases:
-        async for entry in ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
-        ):
-            for attr_name in entry:
-                if attr_name not in attr_params:
-                    continue
-                key_names = attr_params[attr_name]["lambda"](entry[attr_name])
-                for name in key_names:
-                    if name == "distinguishedName":
-                        name = "dn"
-                    if name not in right_entry:
-                        right_entry[name] = []
-                    right_entry[name].append(attr_params[attr_name]["right"])
+    
+    # If bloodhound_json is requested, collect all entries first
+    if bloodhound_json:
+        from bhopengraph.OpenGraph import OpenGraph
+        from bhopengraph.Node import Node
+        from bhopengraph.Edge import Edge
+        from bhopengraph.Properties import Properties
+        
+        graph = OpenGraph(source_kind="Base")
+        current_user_sid = None
+        
+        # Get current user SID
+        async for user_entry in ldap.bloodysearch("", attr=["objectSid"]):
+            if "objectSid" in user_entry:
+                current_user_sid = str(user_entry["objectSid"])
+                break
+        
+        # Map of attribute name to BloodHound edge kind
+        attribute_to_edge_map = {
+            "OWNER": "WriteOwner",
+            "DACL": "WriteDacl",
+            "servicePrincipalName": "WriteSPN",
+            "msDS-KeyCredentialLink": "AddKeyCredentialLink",
+            "userPrincipalName": "WriteUPN"
+        }
+        
+        # Create current user node if we have their SID
+        if current_user_sid:
+            current_user_node = Node(
+                id=current_user_sid,
+                kinds=["User", "Base"],
+                properties=Properties(objectid=current_user_sid)
+            )
+            graph.add_node(current_user_node)
+        
+        right_entry = {}
+        for searchbase in searchbases:
+            # When generating BloodHound JSON, we need to fetch all attributes
+            search_attrs = requested_attributes + ["*"]
+            async for entry in ldap.bloodysearch(
+                searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=search_attrs, controls=controls
+            ):
+                for attr_name in entry:
+                    if attr_name not in attr_params:
+                        continue
+                    key_names = attr_params[attr_name]["lambda"](entry[attr_name])
+                    for name in key_names:
+                        if name == "distinguishedName":
+                            name = "dn"
+                        if name not in right_entry:
+                            right_entry[name] = []
+                        right_entry[name].append(attr_params[attr_name]["right"])
 
-            if right_entry:
-                # Build base result with distinguishedName
-                result = {"distinguishedName": entry["distinguishedName"]}
+                if right_entry:
+                    # Get objectSid for the target node
+                    target_sid = str(entry.get("objectSid", ""))
+                    target_guid = str(entry.get("objectGUID", ""))
+                    
+                    if target_sid:
+                        # Determine node kind based on objectClass
+                        object_classes = entry.get("objectClass", [])
+                        if not isinstance(object_classes, list):
+                            object_classes = [object_classes]
+                        
+                        node_kind = "Base"
+                        if "user" in object_classes or "person" in object_classes:
+                            node_kind = "User"
+                        elif "computer" in object_classes:
+                            node_kind = "Computer"
+                        elif "group" in object_classes:
+                            node_kind = "Group"
+                        elif "organizationalUnit" in object_classes or "container" in object_classes:
+                            node_kind = "Container"
+                        elif "domain" in object_classes:
+                            node_kind = "Domain"
+                        elif "groupPolicyContainer" in object_classes:
+                            node_kind = "GPO"
+                        
+                        # Create properties from all entry attributes
+                        node_properties = Properties()
+                        for key, value in entry.items():
+                            # Skip non-serializable attributes
+                            if key in ["distinguishedName", "objectSid", "objectGUID", "objectClass"]:
+                                continue
+                            # Convert to string representation for JSON serialization
+                            if isinstance(value, (str, int, float, bool)):
+                                node_properties[key] = value
+                            elif isinstance(value, list):
+                                # Only include if all items are primitive types
+                                if all(isinstance(v, (str, int, float, bool)) for v in value):
+                                    node_properties[key] = value
+                                else:
+                                    node_properties[key] = [str(v) for v in value]
+                            else:
+                                node_properties[key] = str(value)
+                        
+                        # Add standard properties
+                        node_properties["objectid"] = target_sid
+                        node_properties["name"] = entry.get("name", entry.get("distinguishedName", ""))
+                        if target_guid:
+                            node_properties["objectguid"] = target_guid
+                        
+                        # Create target node
+                        target_node = Node(
+                            id=target_sid,
+                            kinds=[node_kind, "Base"],
+                            properties=node_properties
+                        )
+                        graph.add_node(target_node)
+                        
+                        # Create edges based on writable attributes
+                        if current_user_sid:
+                            for attr, rights in right_entry.items():
+                                if "WRITE" in rights:
+                                    # Check if this attribute maps to a BloodHound edge
+                                    edge_kind = attribute_to_edge_map.get(attr)
+                                    if edge_kind:
+                                        edge = Edge(
+                                            start_node=current_user_sid,
+                                            end_node=target_sid,
+                                            kind=edge_kind
+                                        )
+                                        graph.add_edge(edge)
+                    
+                    # Build base result with distinguishedName
+                    result = {"distinguishedName": entry["distinguishedName"]}
 
-                if "objectSid" in entry:
-                    result["objectSid"] = entry["objectSid"]
-                
-                # Merge right_entry into result
-                result.update(right_entry)
-                
-                yield result
-                right_entry = {}
+                    if "objectSid" in entry:
+                        result["objectSid"] = entry["objectSid"]
+                    
+                    # Merge right_entry into result
+                    result.update(right_entry)
+                    
+                    yield result
+                    right_entry = {}
+        
+        # Export the graph to JSON file
+        graph.export_to_file(bloodhound_json, include_metadata=True, indent=2)
+        LOG.info(f"BloodHound JSON exported to {bloodhound_json}")
+    else:
+        # Original behavior when bloodhound_json is not specified
+        right_entry = {}
+        for searchbase in searchbases:
+            async for entry in ldap.bloodysearch(
+                searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
+            ):
+                for attr_name in entry:
+                    if attr_name not in attr_params:
+                        continue
+                    key_names = attr_params[attr_name]["lambda"](entry[attr_name])
+                    for name in key_names:
+                        if name == "distinguishedName":
+                            name = "dn"
+                        if name not in right_entry:
+                            right_entry[name] = []
+                        right_entry[name].append(attr_params[attr_name]["right"])
+
+                if right_entry:
+                    # Build base result with distinguishedName
+                    result = {"distinguishedName": entry["distinguishedName"]}
+
+                    if "objectSid" in entry:
+                        result["objectSid"] = entry["objectSid"]
+                    
+                    # Merge right_entry into result
+                    result.update(right_entry)
+                    
+                    yield result
+                    right_entry = {}
