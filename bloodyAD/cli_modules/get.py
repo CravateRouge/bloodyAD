@@ -538,7 +538,11 @@ async def writable(
             "DACL": "WriteDacl",
             "servicePrincipalName": "WriteSPN",
             "msDS-KeyCredentialLink": "AddKeyCredentialLink",
-            "userPrincipalName": "WriteUPN"
+            "userPrincipalName": "WriteUPN",
+            "userAccountControl": "WriteAccountRestrictions",
+            "gPLink": "WriteGPLink",
+            "member": "AddMember",
+            "msDS-AllowedToActOnBehalfOfOtherIdentity": "AddAllowedToAct"
         }
         
         # Create current user node if we have their SID
