@@ -108,7 +108,7 @@ async def getSD(
         sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=sd_data[0])
 
     LOG.debug(
-        "[*] Old Security Descriptor: "
+        "Old Security Descriptor: "
         + "\t".join([SECURITY_DESCRIPTOR.from_bytes(sd).to_sddl() for sd in sd_data])
     )
     return sd, sd_data

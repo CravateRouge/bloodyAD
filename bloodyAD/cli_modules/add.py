@@ -571,7 +571,7 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
         with open(pfx_path, "wb") as f:
             f.write(pfx)
         LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
-        LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350'")
+        LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}&timeout=350'")
         LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
         raise e
     finally:

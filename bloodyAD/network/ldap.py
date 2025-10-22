@@ -240,7 +240,7 @@ class Ldap(MSLDAPClient):
         """
         Return the DN for the object based on the parameters identity
         Args:
-            identity: sAMAccountName, DN, GPO name or SID of the object
+            identity: sAMAccountName, DN, UPN, GPO name or SID of the object
         """
         if ",dc=" in identity.lower():
             # identity is a DN, return as is
@@ -252,9 +252,10 @@ class Ldap(MSLDAPClient):
             ldap_filter = f"(objectSid={identity})"
         # For GPO name as GPO has no sAMAccountName
         elif identity.startswith("{"):
-            ldap_filter = (
-                f"(name={identity})"
-            )
+            ldap_filter = f"(name={identity})"
+        elif "@" in identity:
+            # Assume identity is a UPN
+            ldap_filter = f"(userPrincipalName={identity})"
         else:
             # By default, we assume identity is a sam account name
             ldap_filter = f"(sAMAccountName={identity})"

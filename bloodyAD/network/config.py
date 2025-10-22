@@ -162,15 +162,6 @@ class ConnectionHandler:
         await self._ldap.close()
         self._ldap = None
 
-    async def rebind(self):
-        await self._ldap.close()
-        self._ldap = await Ldap.create(self)
-
-    async def switchUser(self, username, password):
-        self.conf.username = username
-        self.conf.password = password
-        await self.rebind()
-
     # kwargs takes the same arguments as the Config Class
     def copy(self, **kwargs):
         # If it's krb creds and the new host hasn't the same REALM as the previous connection we'll have to request a ticket for the new REALM from the previous kdcc if there is one, if not from the previous dc ip if possible
