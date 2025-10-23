@@ -165,7 +165,7 @@ class Ldap(MSLDAPClient):
                         auth += cnf.format
 
         if cnf.timeout:
-            params += "&timeout=" + cnf.timeout
+            params += f"&timeout={cnf.timeout}"
         if cnf.dns:
             params += "&dns=" + cnf.dns
 
