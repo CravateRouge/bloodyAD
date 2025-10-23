@@ -290,6 +290,18 @@ class Ldap(MSLDAPClient):
         return dn
 
     async def bloodymodify(self, target, changes, controls=None, encode=True):
+        """
+		Performs the modify and modify_dn operation.
+		
+		:param target: The name of the object whose attributes are to be modified
+		:type target: str
+		:param changes: Describes the changes to be made on the object. Must be a dictionary of the following format: {'attribute': [('change_type', [value])]}
+		:type changes: dict
+		:param controls: additional controls to be passed in the query
+		:type controls: dict
+		:param encode: encode the changes provided before sending them to the server
+    	:type encode: bool
+		"""
         if controls is not None:
             t = []
             for control in controls:
@@ -301,10 +313,27 @@ class Ldap(MSLDAPClient):
                     }
                 )
             controls = t
-
-        _, err = await self.modify(await self.dnResolver(target), changes, controls, encode=encode)
-        if err:
-            raise err
+        
+        new_dn = ""
+        attr_changes = {}
+        for attr_name in changes:
+            if attr_name.lower() == "distinguishedname":
+                new_dn = changes[attr_name][0][1][0]
+            else:
+                attr_changes[attr_name] = changes[attr_name]
+        target_dn = await self.dnResolver(target)
+        if attr_changes:
+            _, err = await self.modify(target_dn, attr_changes, controls, encode=encode)
+            if err:
+                raise err
+        if new_dn:
+            new_rdn, new_superior = new_dn.split(",", 1)
+            old_rdn, old_superior = target_dn.split(",", 1)
+            deleteoldrdn = new_rdn != old_rdn
+            new_superior = new_superior if new_superior != old_superior else None
+            _, err = await self._con.modify_dn(target_dn, new_rdn, deleteoldrdn, new_superior)
+            if err:
+                raise err
 
     @cached_property
     def current_site(self):

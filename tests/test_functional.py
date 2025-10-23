@@ -28,7 +28,7 @@ class TestModules(unittest.TestCase):
             "--dc-ip",
             cls.host,
             "-t",
-            300
+            "300"
         ]
         cls.user = {"username": "stan.dard", "password": "Password1123!"}
 
