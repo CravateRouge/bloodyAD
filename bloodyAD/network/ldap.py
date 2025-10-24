@@ -329,9 +329,8 @@ class Ldap(MSLDAPClient):
         if new_dn:
             new_rdn, new_superior = new_dn.split(",", 1)
             old_rdn, old_superior = target_dn.split(",", 1)
-            deleteoldrdn = new_rdn != old_rdn
             new_superior = new_superior if new_superior != old_superior else None
-            _, err = await self._con.modify_dn(target_dn, new_rdn, deleteoldrdn, new_superior)
+            _, err = await self._con.modify_dn(target_dn, new_rdn, newSuperior = new_superior)
             if err:
                 raise err
 
