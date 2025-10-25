@@ -507,9 +507,19 @@ def _parse_ntsecurity_descriptor(entry, ldapentry, schema):
     else:
         entrytype = 'base'
     
-    # Convert the ldapentry to BloodHound format to get the structure
+    # Prepare bh_entry with necessary fields for parse_binary_acl
     dn = entry.get('distinguishedName', '')
-    bh_entry = {}
+    bh_entry = {
+        'Properties': {
+            'haslaps': False  # Default to False, can be enhanced later if needed
+        }
+    }
+    
+    # For computers, check if LAPS is enabled
+    if entrytype == 'computer':
+        # Check if ms-Mcs-AdmPwd or ms-LAPS-EncryptedPassword attribute exists
+        if entry.get('ms-Mcs-AdmPwd') or entry.get('ms-LAPS-EncryptedPassword'):
+            bh_entry['Properties']['haslaps'] = True
     
     # Parse the ACL
     dn_result, bh_entry, relations = parse_binary_acl(
@@ -736,6 +746,16 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     
     # Process each writable entry and create BloodHound JSON
     LOG.info(f"Processing {len(writable_entries)} writable entries...")
+    
+    # Get the current user's SID once (for WriteUPN edges)
+    current_user_sid = None
+    try:
+        current_user_info = await ldap.get_user()
+        if current_user_info and current_user_info.objectSid:
+            current_user_sid = str(current_user_info.objectSid)
+    except Exception as e:
+        LOG.debug(f"Could not get current user info: {e}")
+    
     bh_data = {
         "data": [],
         "meta": {
@@ -778,18 +798,14 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
         bh_entry['Aces'] = resolve_aces(relations, domainname, domainsid, ocache)
         
         # Add WriteUPN edge if userPrincipalName is writable
-        if _check_upn_writable(full_entry):
-            # Get the current user's SID (the authenticated user)
-            current_user_info = await ldap.get_user()
-            if current_user_info and current_user_info.objectSid:
-                current_user_sid = str(current_user_info.objectSid)
-                # Add WriteUPN edge
-                bh_entry['Aces'].append({
-                    'PrincipalSID': current_user_sid,
-                    'PrincipalType': 'User',
-                    'RightName': 'WriteUPN',
-                    'IsInherited': False
-                })
+        if current_user_sid and _check_upn_writable(full_entry):
+            # Add WriteUPN edge for the authenticated user
+            bh_entry['Aces'].append({
+                'PrincipalSID': current_user_sid,
+                'PrincipalType': 'User',
+                'RightName': 'WriteUPN',
+                'IsInherited': False
+            })
         
         bh_data['data'].append(bh_entry)
         bh_data['meta']['count'] += 1
