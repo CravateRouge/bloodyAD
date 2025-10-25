@@ -5,6 +5,8 @@ from bloodyAD.exceptions import NoResultError
 from badldap.commons.exceptions import LDAPSearchException
 from typing import Literal
 import re
+import json
+import base64
 
 
 async def bloodhound(conn, transitive: bool = False, path: str = "CurrentPath"):
@@ -428,13 +430,117 @@ async def search(
             yield entry
 
 
+def _create_ldapentry_from_entry(entry, ldap):
+    """
+    Create a badldap ldapentry object from a dictionary entry based on objectClass.
+    Returns a tuple of (ldapentry, needs_domainsid) where needs_domainsid indicates
+    if the to_bh method needs domainsid parameter.
+    """
+    from badldap.ldap_objects import (
+        MSADUser, MSADMachine, MSADGroup, MSADOU, MSADGPO, 
+        MSADContainer, MSADDMSAUser, MSADGMSAUser
+    )
+    
+    object_classes = entry.get('objectClass', [])
+    sam_account_type = entry.get('sAMAccountType', 0)
+    
+    # Determine the appropriate class based on objectClass and sAMAccountType
+    needs_domainsid = False
+    if 'msDS-GroupManagedServiceAccount' in object_classes:
+        ldapentry = MSADGMSAUser.from_ldap(entry)
+    elif 'msDS-ManagedServiceAccount' in object_classes:
+        ldapentry = MSADDMSAUser.from_ldap(entry)
+    elif sam_account_type == 805306368 or 'user' in object_classes:
+        ldapentry = MSADUser.from_ldap(entry)
+    elif sam_account_type == 805306369 or 'computer' in object_classes:
+        ldapentry = MSADMachine.from_ldap(entry)
+    elif 'group' in object_classes:
+        ldapentry = MSADGroup.from_ldap(entry)
+    elif 'groupPolicyContainer' in object_classes:
+        ldapentry = MSADGPO.from_ldap(entry)
+        needs_domainsid = True
+    elif 'organizationalUnit' in object_classes:
+        ldapentry = MSADOU.from_ldap(entry)
+        needs_domainsid = True
+    elif 'container' in object_classes:
+        ldapentry = MSADContainer.from_ldap(entry)
+        needs_domainsid = True
+    else:
+        # Default to container for unknown types
+        ldapentry = MSADContainer.from_ldap(entry)
+        needs_domainsid = True
+    
+    return ldapentry, needs_domainsid
+
+
+def _parse_ntsecurity_descriptor(entry, ldapentry, schema):
+    """
+    Parse the nTSecurityDescriptor attribute and create ACEs using parse_binary_acl.
+    Returns a tuple of (meta, relations) where meta contains IsACLProtected and relations is a list of ACE dicts.
+    """
+    from badldap.external.bloodhoundpy.acls import parse_binary_acl
+    
+    nt_security_descriptor = entry.get('nTSecurityDescriptor')
+    if not nt_security_descriptor:
+        return {'IsACLProtected': False}, []
+    
+    # Determine entry type for parse_binary_acl
+    object_classes = entry.get('objectClass', [])
+    sam_account_type = entry.get('sAMAccountType', 0)
+    
+    if 'msDS-GroupManagedServiceAccount' in object_classes or 'msDS-ManagedServiceAccount' in object_classes:
+        entrytype = 'user'
+    elif sam_account_type == 805306368 or 'user' in object_classes:
+        entrytype = 'user'
+    elif sam_account_type == 805306369 or 'computer' in object_classes:
+        entrytype = 'computer'
+    elif 'group' in object_classes:
+        entrytype = 'group'
+    elif 'groupPolicyContainer' in object_classes:
+        entrytype = 'gpo'
+    elif 'organizationalUnit' in object_classes:
+        entrytype = 'ou'
+    elif 'container' in object_classes:
+        entrytype = 'container'
+    elif 'domain' in object_classes or 'domainDNS' in object_classes:
+        entrytype = 'domain'
+    else:
+        entrytype = 'base'
+    
+    # Convert the ldapentry to BloodHound format to get the structure
+    dn = entry.get('distinguishedName', '')
+    bh_entry = {}
+    
+    # Parse the ACL
+    dn_result, bh_entry, relations = parse_binary_acl(
+        dn.upper(), 
+        bh_entry, 
+        entrytype, 
+        nt_security_descriptor, 
+        schema
+    )
+    
+    meta = {'IsACLProtected': bh_entry.get('IsACLProtected', False)}
+    return meta, relations
+
+
+def _check_upn_writable(entry):
+    """
+    Check if userPrincipalName is in the allowedAttributesEffective list.
+    Returns True if userPrincipalName is writable.
+    """
+    allowed_attrs = entry.get('allowedAttributesEffective', [])
+    return 'userPrincipalName' in allowed_attrs
+
+
 # TODO: Search writable for application partitions too?
 async def writable(
     conn,
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    include_del: bool = False
+    include_del: bool = False,
+    bh: str = None
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -444,7 +550,7 @@ async def writable(
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
     :param include_del: if set, include deleted objects
-    :param with_sid: if set, include objectSid and objectGUID in the output
+    :param bh: if set, creates a BloodHound-compatible JSON file at the specified path
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -509,6 +615,13 @@ async def writable(
     #     searchbases.append(ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
     # else:
     #     searchbases.append(ldap.NCs) # A definir
+    
+    # If --bh is specified, we need to collect entries and create BloodHound JSON
+    if bh:
+        await _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, requested_attributes, controls, bh)
+        return
+    
+    # Regular output mode
     right_entry = {}
     for searchbase in searchbases:
         async for entry in ldap.bloodysearch(
@@ -537,3 +650,152 @@ async def writable(
                 
                 yield result
                 right_entry = {}
+
+
+async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, requested_attributes, controls, output_path):
+    """
+    Generate BloodHound-compatible JSON for writable objects.
+    """
+    from badldap.external.bloodhoundpy.resolver import resolve_aces
+    
+    # Get domain info for BloodHound
+    domainname = ldap.domainname
+    adinfo = await ldap.get_ad_info()
+    domainsid = str(adinfo.objectSid)
+    
+    # Fetch schema for parse_binary_acl
+    schema = {}
+    # Fetch required schema entries
+    schema_entries = [
+        'ms-Mcs-AdmPwd',
+        'ms-LAPS-EncryptedPassword',
+        'ms-DS-Key-Credential-Link',
+        'Service-Principal-Name',
+        'User-Principal-Name',
+    ]
+    
+    for entry_name in schema_entries:
+        try:
+            entry = await ldap.get_schemaentry_by_name(entry_name)
+            if entry:
+                schema[entry.name.lower()] = str(entry.schemaIDGUID)
+        except Exception as e:
+            LOG.debug(f'Error fetching schema entry {entry_name}: {e}')
+    
+    # Build a simple object cache (SID -> object info)
+    ocache = {}
+    
+    # Collect writable entries
+    writable_entries = []
+    for searchbase in searchbases:
+        async for entry in ldap.bloodysearch(
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
+        ):
+            # Check if any of the writable attributes are non-null
+            has_writable = False
+            for attr_name in attr_params.keys():
+                if attr_name in entry and entry[attr_name]:
+                    has_writable = True
+                    break
+            
+            if has_writable:
+                writable_entries.append(entry)
+    
+    # Build lookup cache for resolve_aces
+    # Query all objects to build the cache
+    LOG.info(f"Building object cache for ACE resolution...")
+    all_attrs = ['distinguishedName', 'objectSid', 'objectGUID', 'sAMAccountName', 'sAMAccountType', 'objectClass']
+    async for entry in ldap.bloodysearch(searchbases[0], '(objectClass=*)', search_scope=Scope.SUBTREE, attr=all_attrs):
+        object_sid = entry.get('objectSid')
+        if object_sid:
+            sam_account_type = entry.get('sAMAccountType', 0)
+            object_classes = entry.get('objectClass', [])
+            
+            # Determine object type
+            if sam_account_type == 805306368 or 'user' in object_classes:
+                otype = 'User'
+            elif sam_account_type == 805306369 or 'computer' in object_classes:
+                otype = 'Computer'
+            elif 'group' in object_classes:
+                otype = 'Group'
+            elif 'groupPolicyContainer' in object_classes:
+                otype = 'GPO'
+            elif 'organizationalUnit' in object_classes:
+                otype = 'OU'
+            elif 'container' in object_classes:
+                otype = 'Container'
+            elif 'domain' in object_classes or 'domainDNS' in object_classes:
+                otype = 'Domain'
+            else:
+                otype = 'Base'
+            
+            ocache[str(object_sid)] = {
+                'ObjectIdentifier': str(object_sid),
+                'ObjectType': otype
+            }
+    
+    # Process each writable entry and create BloodHound JSON
+    LOG.info(f"Processing {len(writable_entries)} writable entries...")
+    bh_data = {
+        "data": [],
+        "meta": {
+            "count": 0,
+            "type": "writable",
+            "version": 5
+        }
+    }
+    
+    for entry in writable_entries:
+        # Query all attributes for this entry, including nTSecurityDescriptor and allowedAttributesEffective
+        dn = entry.get('distinguishedName')
+        full_entry_results = ldap.bloodysearch(
+            dn, '(objectClass=*)', search_scope=Scope.BASE, 
+            attr=['*', 'nTSecurityDescriptor', 'allowedAttributesEffective']
+        )
+        
+        full_entry = None
+        async for fe in full_entry_results:
+            full_entry = fe
+            break
+        
+        if not full_entry:
+            continue
+        
+        # Create ldapentry object
+        ldapentry, needs_domainsid = _create_ldapentry_from_entry(full_entry, ldap)
+        
+        # Convert to BloodHound format
+        if needs_domainsid:
+            bh_entry = ldapentry.to_bh(domainname, domainsid)
+        else:
+            bh_entry = ldapentry.to_bh(domainname)
+        
+        # Parse ACL
+        meta, relations = _parse_ntsecurity_descriptor(full_entry, ldapentry, schema)
+        bh_entry['IsACLProtected'] = meta['IsACLProtected']
+        
+        # Resolve ACEs
+        bh_entry['Aces'] = resolve_aces(relations, domainname, domainsid, ocache)
+        
+        # Add WriteUPN edge if userPrincipalName is writable
+        if _check_upn_writable(full_entry):
+            # Get the current user's SID (the authenticated user)
+            current_user_info = await ldap.get_user()
+            if current_user_info and current_user_info.objectSid:
+                current_user_sid = str(current_user_info.objectSid)
+                # Add WriteUPN edge
+                bh_entry['Aces'].append({
+                    'PrincipalSID': current_user_sid,
+                    'PrincipalType': 'User',
+                    'RightName': 'WriteUPN',
+                    'IsInherited': False
+                })
+        
+        bh_data['data'].append(bh_entry)
+        bh_data['meta']['count'] += 1
+    
+    # Write to file
+    with open(output_path, 'w') as f:
+        json.dump(bh_data, f, indent=2)
+    
+    LOG.info(f"BloodHound JSON written to {output_path} with {bh_data['meta']['count']} entries")
