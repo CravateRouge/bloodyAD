@@ -434,7 +434,7 @@ async def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    include_del: bool = False
+    exclude_del: bool = False
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -443,8 +443,7 @@ async def writable(
     :param otype: type of writable object to retrieve
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
-    :param include_del: if set, include deleted objects
-    :param with_sid: if set, include objectSid and objectGUID in the output
+    :param exclude_del: if set, include deleted objects
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -497,7 +496,7 @@ async def writable(
     # Build attributes list - include objectSid and objectGUID if with_sid is True
     requested_attributes = list(attr_params.keys())
     controls = None
-    if include_del:
+    if not exclude_del:
         requested_attributes.append("objectSid")
         controls = [("1.2.840.113556.1.4.417", True, None)]
 
