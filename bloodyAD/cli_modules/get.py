@@ -430,61 +430,82 @@ async def search(
             yield entry
 
 
-def _determine_object_type(entry):
+def _resolve_entry_type(entry, domainname):
     """
-    Determine the object type based on objectClass and sAMAccountType.
-    Returns tuple of (object_type_string, needs_domainsid)
+    Resolve entry type using the same logic as badldap.bloodhound.resolve_entry.
+    Returns a dictionary with 'type', 'objectid', and 'principal'.
     """
-    object_classes = entry.get('objectClass', [])
-    sam_account_type = entry.get('sAMAccountType', 0)
+    resolved = {}
+    account = entry.get('sAMAccountName', '')
+    dn = entry.get('distinguishedName', '')
+    resolved['objectid'] = entry.get('objectSid', '')
+    resolved['principal'] = ('%s@%s' % (account, domainname)).upper()
     
-    if 'msDS-GroupManagedServiceAccount' in object_classes:
-        return 'gmsa', False
-    elif 'msDS-ManagedServiceAccount' in object_classes:
-        return 'dmsa', False
-    elif sam_account_type == 805306368 or 'user' in object_classes:
-        return 'user', False
-    elif sam_account_type == 805306369 or 'computer' in object_classes:
-        return 'computer', False
-    elif 'group' in object_classes:
-        return 'group', False
-    elif 'groupPolicyContainer' in object_classes:
-        return 'gpo', True
-    elif 'organizationalUnit' in object_classes:
-        return 'ou', True
-    elif 'container' in object_classes:
-        return 'container', True
-    elif 'domain' in object_classes or 'domainDNS' in object_classes:
-        return 'domain', True
-    else:
-        return 'base', True
+    if 'sAMAccountType' in entry:
+        accountType = entry['sAMAccountType']
+        object_class = entry.get('objectClass', [])
+        if accountType in [268435456, 268435457, 536870912, 536870913]:
+            resolved['type'] = 'Group'
+        elif accountType in [805306368] or \
+             'msDS-GroupManagedServiceAccount' in object_class or \
+             'msDS-ManagedServiceAccount' in object_class:
+            resolved['type'] = 'User'
+        elif accountType in [805306369]:
+            resolved['type'] = 'Computer'
+            short_name = account.rstrip('$')
+            resolved['principal'] = ('%s.%s' % (short_name, domainname)).upper()
+        elif accountType in [805306370]:
+            resolved['type'] = 'trustaccount'
+        else:
+            resolved['type'] = 'Domain'
+        return resolved
+    
+    if 'objectGUID' in entry:
+        resolved['objectid'] = entry['objectGUID']
+        resolved['principal'] = ('%s@%s' % (entry.get('name', ''), domainname)).upper()
+        object_class = entry.get('objectClass', [])
+        if 'organizationalUnit' in object_class:
+            resolved['type'] = 'OU'
+        elif 'container' in object_class:
+            resolved['type'] = 'Container'
+        else:
+            resolved['type'] = 'Base'
+        return resolved
+    
+    # Default fallback
+    resolved['type'] = 'Base'
+    return resolved
 
 
-def _create_ldapentry_from_entry(entry, object_type):
+def _create_ldapentry_from_entry(entry, resolved_type):
     """
-    Create a badldap ldapentry object from a dictionary entry based on object_type.
+    Create a badldap ldapentry object from a dictionary entry based on resolved type.
     """
     from badldap.ldap_objects import (
         MSADUser, MSADMachine, MSADGroup, MSADOU, MSADGPO, 
         MSADContainer, MSADDMSAUser, MSADGMSAUser
     )
     
-    if object_type == 'gmsa':
-        return MSADGMSAUser.from_ldap(entry)
-    elif object_type == 'dmsa':
-        return MSADDMSAUser.from_ldap(entry)
-    elif object_type == 'user':
-        return MSADUser.from_ldap(entry)
-    elif object_type == 'computer':
+    otype = resolved_type.lower()
+    
+    if otype == 'user':
+        object_class = entry.get('objectClass', [])
+        if 'msDS-GroupManagedServiceAccount' in object_class:
+            return MSADGMSAUser.from_ldap(entry)
+        elif 'msDS-ManagedServiceAccount' in object_class:
+            return MSADDMSAUser.from_ldap(entry)
+        else:
+            return MSADUser.from_ldap(entry)
+    elif otype == 'computer':
         return MSADMachine.from_ldap(entry)
-    elif object_type == 'group':
+    elif otype == 'group':
         return MSADGroup.from_ldap(entry)
-    elif object_type == 'gpo':
+    elif otype == 'gpo':
         return MSADGPO.from_ldap(entry)
-    elif object_type == 'ou':
+    elif otype == 'ou':
         return MSADOU.from_ldap(entry)
     else:
-        # container, domain, base, or unknown
+        # container, domain, base, trustaccount, or unknown
         return MSADContainer.from_ldap(entry)
 
 
@@ -699,34 +720,15 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     # Build lookup cache for resolve_aces
     # Query all objects to build the cache
     LOG.info(f"Building object cache for ACE resolution...")
-    all_attrs = ['distinguishedName', 'objectSid', 'objectGUID', 'sAMAccountName', 'sAMAccountType', 'objectClass']
+    all_attrs = ['distinguishedName', 'objectSid', 'objectGUID', 'sAMAccountName', 'sAMAccountType', 'objectClass', 'name']
     async for entry in ldap.bloodysearch(searchbases[0], '(objectClass=*)', search_scope=Scope.SUBTREE, attr=all_attrs):
         object_sid = entry.get('objectSid')
         if object_sid:
-            sam_account_type = entry.get('sAMAccountType', 0)
-            object_classes = entry.get('objectClass', [])
-            
-            # Determine object type
-            if sam_account_type == 805306368 or 'user' in object_classes:
-                otype = 'User'
-            elif sam_account_type == 805306369 or 'computer' in object_classes:
-                otype = 'Computer'
-            elif 'group' in object_classes:
-                otype = 'Group'
-            elif 'groupPolicyContainer' in object_classes:
-                otype = 'GPO'
-            elif 'organizationalUnit' in object_classes:
-                otype = 'OU'
-            elif 'container' in object_classes:
-                otype = 'Container'
-            elif 'domain' in object_classes or 'domainDNS' in object_classes:
-                otype = 'Domain'
-            else:
-                otype = 'Base'
-            
+            # Use resolve_entry logic to determine type
+            resolved = _resolve_entry_type(entry, domainname)
             ocache[str(object_sid)] = {
                 'ObjectIdentifier': str(object_sid),
-                'ObjectType': otype
+                'ObjectType': resolved['type']
             }
     
     # Process each writable entry and create BloodHound JSON
@@ -742,26 +744,30 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     }
     
     for entry in writable_entries:
-        # Determine object type once
-        object_type, needs_domainsid = _determine_object_type(entry)
+        # Resolve entry type using resolve_entry logic
+        resolved = _resolve_entry_type(entry, domainname)
+        resolved_type = resolved['type']
         
         # Convert to entrytype for parse_binary_acl
-        if object_type in ['gmsa', 'dmsa', 'user']:
+        if resolved_type in ['User', 'trustaccount']:
             entrytype = 'user'
-        elif object_type == 'computer':
+        elif resolved_type == 'Computer':
             entrytype = 'computer'
-        elif object_type == 'group':
+        elif resolved_type == 'Group':
             entrytype = 'group'
-        elif object_type == 'gpo':
+        elif resolved_type == 'GPO':
             entrytype = 'gpo'
-        elif object_type == 'ou':
+        elif resolved_type == 'OU':
             entrytype = 'ou'
-        elif object_type == 'container':
+        elif resolved_type == 'Container':
             entrytype = 'container'
-        elif object_type == 'domain':
+        elif resolved_type == 'Domain':
             entrytype = 'domain'
         else:
             entrytype = 'base'
+        
+        # Determine if needs_domainsid based on type
+        needs_domainsid = resolved_type in ['GPO', 'OU', 'Container', 'Domain', 'Base']
         
         # Query all attributes for this entry, including nTSecurityDescriptor and allowedAttributesEffective
         dn = entry.get('distinguishedName')
@@ -778,8 +784,8 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
         if not full_entry:
             continue
         
-        # Create ldapentry object
-        ldapentry = _create_ldapentry_from_entry(full_entry, object_type)
+        # Create ldapentry object using resolved type
+        ldapentry = _create_ldapentry_from_entry(full_entry, resolved_type)
         
         # Convert to BloodHound format
         if needs_domainsid:
