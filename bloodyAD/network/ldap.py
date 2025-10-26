@@ -54,7 +54,6 @@ class Ldap(MSLDAPClient):
     # "conn" is optional
     conn = None
     co_url = None
-    is_prettified = False
 
     def __init__(self, conn, target, credential):
         self._trustmap = collections.defaultdict(dict)
@@ -445,12 +444,7 @@ class Ldap(MSLDAPClient):
         ),
         controls=None,
         raw=False,
-    ):
-        # Because when calling badldap high-level functions it doesn't handle prettify so we call prettify only if ldap is used
-        # (hoping badldap will not be called after)
-        if self.is_prettified is False:
-            formatters.enableFormatOutput()
-            self.is_prettified = True
+    ):          
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
             base_dn = await self.dnResolver(base)
@@ -469,13 +463,15 @@ class Ldap(MSLDAPClient):
 
         policy = await self.get_policy()
         self.ldap_query_page_size = policy["MaxPageSize"]
+        
+        # Always get raw data from pagedsearch, then apply formatters ourselves
         search_generator = self.pagedsearch(
             ldap_filter,
             attr,
             tree=base_dn,
             search_scope=search_scope.value,
             controls=local_controls,
-            raw=raw,
+            raw=True,  # Always get raw data
         )
 
         isNul = True
@@ -484,9 +480,15 @@ class Ldap(MSLDAPClient):
                 if err:
                     raise err
                 isNul = False
+                
+                # Apply formatting to attributes before yielding (only if not raw)
+                attributes = entry["attributes"]
+                if not raw:
+                    attributes = formatters.applyFormatters(attributes)
+                
                 yield {
                     **{"distinguishedName": entry["objectName"]},
-                    **entry["attributes"],
+                    **attributes,
                 }
         finally:
             await search_generator.aclose()
