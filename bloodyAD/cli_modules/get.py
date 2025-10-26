@@ -670,7 +670,9 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     
     # Get domain info for BloodHound
     domainname = ldap.domainname
-    adinfo = await ldap.get_ad_info()
+    adinfo, err = await ldap.get_ad_info()
+    if err is not None:
+        raise err
     domainsid = str(adinfo.objectSid)
     
     # Fetch schema for parse_binary_acl
@@ -686,7 +688,7 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     
     for entry_name in schema_entries:
         try:
-            entry = await ldap.get_schemaentry_by_name(entry_name)
+            entry, err = await ldap.get_schemaentry_by_name(entry_name)
             if entry:
                 schema[entry.name.lower()] = str(entry.schemaIDGUID)
         except Exception as e:
@@ -747,15 +749,6 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     # Process each writable entry and create BloodHound JSON
     LOG.info(f"Processing {len(writable_entries)} writable entries...")
     
-    # Get the current user's SID once (for WriteUPN edges)
-    current_user_sid = None
-    try:
-        current_user_info = await ldap.get_user()
-        if current_user_info and current_user_info.objectSid:
-            current_user_sid = str(current_user_info.objectSid)
-    except Exception as e:
-        LOG.debug(f"Could not get current user info: {e}")
-    
     bh_data = {
         "data": [],
         "meta": {
@@ -795,17 +788,23 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
         bh_entry['IsACLProtected'] = meta['IsACLProtected']
         
         # Resolve ACEs
-        bh_entry['Aces'] = resolve_aces(relations, domainname, domainsid, ocache)
+        resolved_aces = resolve_aces(relations, domainname, domainsid, ocache)
         
-        # Add WriteUPN edge if userPrincipalName is writable
-        if current_user_sid and _check_upn_writable(full_entry):
-            # Add WriteUPN edge for the authenticated user
-            bh_entry['Aces'].append({
-                'PrincipalSID': current_user_sid,
-                'PrincipalType': 'User',
-                'RightName': 'WriteUPN',
-                'IsInherited': False
-            })
+        # Add WriteUPN edges for principals with write access to user-principal-name property
+        if 'user-principal-name' in schema:
+            upn_guid = schema['user-principal-name'].lower()
+            for relation in relations:
+                # Check if this relation grants write access to the userPrincipalName property
+                if relation.get('RightName') == 'WriteProp' and relation.get('ObjectType', '').lower() == upn_guid:
+                    # Add WriteUPN edge for this principal
+                    resolved_aces.append({
+                        'PrincipalSID': relation['PrincipalSID'],
+                        'PrincipalType': relation.get('PrincipalType', 'Unknown'),
+                        'RightName': 'WriteUPN',
+                        'IsInherited': relation.get('IsInherited', False)
+                    })
+        
+        bh_entry['Aces'] = resolved_aces
         
         bh_data['data'].append(bh_entry)
         bh_data['meta']['count'] += 1
