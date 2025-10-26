@@ -11,8 +11,9 @@ def enableCliLogger(level="DEBUG"):
         #     )
         logging.getLogger().setLevel(logging.DEBUG)
         level = "DEBUG"
+    logging_level = getattr(logging, level)
     LOG.propagate = False
-    LOG.setLevel("DEBUG")
+    LOG.setLevel(logging_level)
     handler = logging.StreamHandler(sys.stdout)
     class SymbolFormatter(logging.Formatter):
         LEVEL_SYMBOLS = {
@@ -26,7 +27,7 @@ def enableCliLogger(level="DEBUG"):
             symbol = self.LEVEL_SYMBOLS.get(record.levelno, '[?]')
             return f"{symbol} {record.getMessage()}"
     handler.setFormatter(SymbolFormatter())
-    handler.setLevel(getattr(logging, level))
+    handler.setLevel(logging_level)
     LOG.addHandler(handler)
 
 class BloodyError(Exception):
