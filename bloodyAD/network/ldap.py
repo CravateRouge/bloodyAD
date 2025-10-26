@@ -446,11 +446,16 @@ class Ldap(MSLDAPClient):
         controls=None,
         raw=False,
     ):
-        # Because when calling badldap high-level functions it doesn't handle prettify so we call prettify only if ldap is used
-        # (hoping badldap will not be called after)
+        # Enable encoding support for attributes that need special encoding handling
+        # This needs to be done once to modify badldap's encoding dictionaries
         if self.is_prettified is False:
-            formatters.enableFormatOutput()
+            formatters.enableEncoding()
             self.is_prettified = True
+        
+        # Get formatters mapping for applying formatting locally
+        # We get formatters regardless of raw mode, and decide later whether to apply them
+        attribute_formatters = formatters.getFormatters()
+        
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
             base_dn = await self.dnResolver(base)
@@ -469,13 +474,15 @@ class Ldap(MSLDAPClient):
 
         policy = await self.get_policy()
         self.ldap_query_page_size = policy["MaxPageSize"]
+        
+        # Always get raw data from pagedsearch, then apply formatters ourselves
         search_generator = self.pagedsearch(
             ldap_filter,
             attr,
             tree=base_dn,
             search_scope=search_scope.value,
             controls=local_controls,
-            raw=raw,
+            raw=True,  # Always get raw data
         )
 
         isNul = True
@@ -484,9 +491,15 @@ class Ldap(MSLDAPClient):
                 if err:
                     raise err
                 isNul = False
+                
+                # Apply formatting to attributes before yielding (only if not raw)
+                attributes = entry["attributes"]
+                if not raw and attribute_formatters:
+                    attributes = formatters.applyFormatters(attributes, attribute_formatters)
+                
                 yield {
                     **{"distinguishedName": entry["objectName"]},
-                    **entry["attributes"],
+                    **attributes,
                 }
         finally:
             await search_generator.aclose()

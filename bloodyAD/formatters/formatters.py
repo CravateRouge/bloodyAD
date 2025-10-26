@@ -112,10 +112,111 @@ def formatFactory(format_func, origin_format):
     return genericFormat
 
 
-def enableFormatOutput():
+def getFormatters():
+    """
+    Returns a dictionary mapping attribute names to their formatting functions.
+    This doesn't modify badldap's global dictionaries, allowing for local formatting.
+    """
+    def make_formatter(format_func):
+        """Wrapper to handle list/non-list values consistently"""
+        def wrapper(val):
+            if isinstance(val, list):
+                if len(val) == 1:
+                    return format_func(val[0])
+                else:
+                    return [format_func(v) for v in val]
+            else:
+                return format_func(val)
+        return wrapper
+    
+    def make_list_formatter(format_func):
+        """Wrapper for formatters that expect the value as a list"""
+        def wrapper(val):
+            if isinstance(val, list):
+                return format_func(val)
+            else:
+                return format_func([val])
+        return wrapper
+    
+    formatters_map = {}
+    
+    # Security descriptors - expect single bytes value
+    formatters_map["nTSecurityDescriptor"] = make_formatter(formatSD)
+    formatters_map["msDS-AllowedToActOnBehalfOfOtherIdentity"] = make_formatter(formatSD)
+    formatters_map["msDS-GroupMSAMembership"] = make_formatter(formatSD)
+    
+    # Passwords and credentials - expect single bytes value
+    formatters_map["msDS-ManagedPassword"] = make_formatter(formatGMSApass)
+    
+    # Account control - expect single bytes value
+    formatters_map["userAccountControl"] = make_formatter(formatAccountControl)
+    formatters_map["msDS-User-Account-Control-Computed"] = make_formatter(formatAccountControl)
+    
+    # Trust attributes - expect single bytes value
+    formatters_map["trustDirection"] = make_formatter(formatTrustDirection)
+    formatters_map["trustAttributes"] = make_formatter(formatTrustAttributes)
+    formatters_map["trustType"] = make_formatter(formatTrustType)
+    
+    # Versions and levels - expect single bytes value
+    formatters_map["msDS-Behavior-Version"] = make_formatter(formatFunctionalLevel)
+    formatters_map["objectVersion"] = make_formatter(formatSchemaVersion)
+    
+    # DNS and other - expect single bytes value
+    formatters_map["dnsRecord"] = make_formatter(formatDnsRecord)
+    formatters_map["msDS-KeyCredentialLink"] = make_formatter(formatKeyCredentialLink)
+    formatters_map["wellKnownObjects"] = make_formatter(formatWellKnownObjects)
+    
+    # GUID and time attributes - these expect the value as a list
+    formatters_map["attributeSecurityGUID"] = make_list_formatter(single_guid)
+    formatters_map["msDS-MinimumPasswordAge"] = make_list_formatter(int2timedelta)
+    
+    return formatters_map
+
+
+def applyFormatters(attributes, formatters_map):
+    """
+    Apply formatters to attributes dictionary.
+    
+    Args:
+        attributes: Dictionary of attribute names to values
+        formatters_map: Dictionary of attribute names to formatter functions
+    
+    Returns:
+        Dictionary with formatted attributes
+    """
+    formatted_attrs = {}
+    
+    for attr_name, attr_value in attributes.items():
+        if attr_name in formatters_map:
+            formatter = formatters_map[attr_name]
+            try:
+                formatted_attrs[attr_name] = formatter(attr_value)
+            except Exception as e:
+                # If formatting fails, keep original value
+                formatted_attrs[attr_name] = attr_value
+        else:
+            formatted_attrs[attr_name] = attr_value
+    
+    return formatted_attrs
+
+
+def enableEncoding():
+    """
+    Enable encoding support for specific attributes that need special encoding handling.
+    This modifies badldap's encoding dictionaries but not the decoding/formatting logic.
+    """
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
         multi_bytes
     )
+
+
+def enableFormatOutput():
+    """
+    DEPRECATED: This function modifies badldap's global dictionaries.
+    It's kept for backward compatibility but should not be called by new code.
+    Use getFormatters() and applyFormatters() instead.
+    """
+    enableEncoding()
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"] = formatFactory(
         formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"]
     )
