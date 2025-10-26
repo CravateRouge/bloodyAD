@@ -4,6 +4,7 @@ from bloodyAD.formatters import (
     cryptography,
     dns,
 )
+from bloodyAD.exceptions import LOG
 import base64
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
@@ -192,7 +193,10 @@ def applyFormatters(attributes, formatters_map):
             try:
                 formatted_attrs[attr_name] = formatter(attr_value)
             except Exception as e:
-                # If formatting fails, keep original value
+                # If formatting fails, log the error and keep original value
+                LOG.debug(
+                    f"Failed to format attribute '{attr_name}': {type(e).__name__}: {e}"
+                )
                 formatted_attrs[attr_name] = attr_value
         else:
             formatted_attrs[attr_name] = attr_value
