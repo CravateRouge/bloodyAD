@@ -117,6 +117,9 @@ def getFormatters():
     """
     Returns a dictionary mapping attribute names to their formatting functions.
     This doesn't modify badldap's global dictionaries, allowing for local formatting.
+    
+    Returns both bloodyAD custom formatters and badldap default formatters.
+    BloodyAD formatters take precedence over badldap formatters.
     """
     def make_formatter(format_func):
         """Wrapper to handle list/non-list values consistently"""
@@ -139,8 +142,19 @@ def getFormatters():
                 return format_func([val])
         return wrapper
     
+    # Start with badldap's default formatters
     formatters_map = {}
     
+    # First, import badldap's MSLDAP_BUILTIN_ATTRIBUTE_TYPES formatters (higher priority)
+    for attr_name, formatter in MSLDAP_BUILTIN_ATTRIBUTE_TYPES.items():
+        formatters_map[attr_name] = make_list_formatter(formatter)
+    
+    # Then, add LDAP_WELL_KNOWN_ATTRS formatters only if not already present
+    for attr_name, formatter in LDAP_WELL_KNOWN_ATTRS.items():
+        if attr_name not in formatters_map:
+            formatters_map[attr_name] = make_list_formatter(formatter)
+    
+    # Now override with bloodyAD custom formatters (these take highest precedence)
     # Security descriptors - expect single bytes value
     formatters_map["nTSecurityDescriptor"] = make_formatter(formatSD)
     formatters_map["msDS-AllowedToActOnBehalfOfOtherIdentity"] = make_formatter(formatSD)
@@ -167,9 +181,8 @@ def getFormatters():
     formatters_map["msDS-KeyCredentialLink"] = make_formatter(formatKeyCredentialLink)
     formatters_map["wellKnownObjects"] = make_formatter(formatWellKnownObjects)
     
-    # GUID and time attributes - these expect the value as a list
-    formatters_map["attributeSecurityGUID"] = make_list_formatter(single_guid)
-    formatters_map["msDS-MinimumPasswordAge"] = make_list_formatter(int2timedelta)
+    # GUID and time attributes - keep badldap's formatters (already added above)
+    # attributeSecurityGUID and msDS-MinimumPasswordAge use badldap's single_guid and int2timedelta
     
     return formatters_map
 

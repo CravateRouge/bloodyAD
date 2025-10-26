@@ -7,44 +7,68 @@ class FormatterTests(unittest.TestCase):
         """Test that getFormatters returns expected attribute mappings"""
         formatter_map = formatters.getFormatters()
         
-        # Check that we have formatters for key attributes
+        # Check that we have formatters for key bloodyAD custom attributes
         self.assertIn("nTSecurityDescriptor", formatter_map)
         self.assertIn("userAccountControl", formatter_map)
         self.assertIn("trustDirection", formatter_map)
         self.assertIn("dnsRecord", formatter_map)
         self.assertIn("msDS-ManagedPassword", formatter_map)
         
+        # Check that we have badldap default formatters too
+        self.assertIn("objectSid", formatter_map)
+        self.assertIn("objectGUID", formatter_map)
+        self.assertIn("cn", formatter_map)
+        
         # Verify that formatters are callable
         self.assertTrue(callable(formatter_map["nTSecurityDescriptor"]))
         self.assertTrue(callable(formatter_map["userAccountControl"]))
+        self.assertTrue(callable(formatter_map["objectSid"]))
 
     def test_applyFormatters_no_matching_attributes(self):
         """Test applyFormatters with attributes that don't need formatting"""
         attributes = {
             "distinguishedName": "CN=Test,DC=example,DC=com",
-            "cn": "Test",
-            "objectClass": ["top", "person"]
+            "someUnknownAttr": [b"test"],
         }
         formatter_map = formatters.getFormatters()
         
         result = formatters.applyFormatters(attributes, formatter_map)
         
-        # Attributes without formatters should remain unchanged
-        self.assertEqual(result, attributes)
+        # Unknown attributes should remain unchanged
+        self.assertEqual(result["distinguishedName"], "CN=Test,DC=example,DC=com")
+        self.assertEqual(result["someUnknownAttr"], [b"test"])
+
+    def test_applyFormatters_with_badldap_formatter(self):
+        """Test that badldap default formatters are applied"""
+        import uuid
+        test_guid = uuid.uuid4().bytes
+        
+        attributes = {
+            "objectGUID": [test_guid],
+            "cn": [b"TestUser"]
+        }
+        formatter_map = formatters.getFormatters()
+        
+        result = formatters.applyFormatters(attributes, formatter_map)
+        
+        # objectGUID should be formatted to string
+        self.assertIsInstance(result["objectGUID"], str)
+        # cn should be formatted to string
+        self.assertEqual(result["cn"], "TestUser")
 
     def test_applyFormatters_with_userAccountControl_single_value(self):
         """Test applyFormatters with userAccountControl attribute as single-item list"""
         attributes = {
-            "cn": "Test",
+            "cn": [b"Test"],
             "userAccountControl": [b"512"]  # NORMAL_ACCOUNT in list
         }
         formatter_map = formatters.getFormatters()
         
         result = formatters.applyFormatters(attributes, formatter_map)
         
-        # cn should remain unchanged
+        # cn should be formatted by badldap
         self.assertEqual(result["cn"], "Test")
-        # userAccountControl should be formatted as a list
+        # userAccountControl should be formatted as a list by bloodyAD custom formatter
         self.assertIsInstance(result["userAccountControl"], list)
         self.assertIn("NORMAL_ACCOUNT", result["userAccountControl"])
 
@@ -101,7 +125,7 @@ class FormatterTests(unittest.TestCase):
     def test_applyFormatters_empty_formatters(self):
         """Test applyFormatters with empty formatters dict (raw mode)"""
         attributes = {
-            "cn": "Test",
+            "cn": [b"Test"],
             "userAccountControl": [b"512"]
         }
         
