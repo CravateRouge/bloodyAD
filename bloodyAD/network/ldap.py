@@ -54,7 +54,6 @@ class Ldap(MSLDAPClient):
     # "conn" is optional
     conn = None
     co_url = None
-    is_prettified = False
 
     def __init__(self, conn, target, credential):
         self._trustmap = collections.defaultdict(dict)
@@ -445,17 +444,7 @@ class Ldap(MSLDAPClient):
         ),
         controls=None,
         raw=False,
-    ):
-        # Enable encoding support for attributes that need special encoding handling
-        # This needs to be done once to modify badldap's encoding dictionaries
-        if self.is_prettified is False:
-            formatters.enableEncoding()
-            self.is_prettified = True
-        
-        # Get formatters mapping for applying formatting locally
-        # We get formatters regardless of raw mode, and decide later whether to apply them
-        attribute_formatters = formatters.getFormatters()
-        
+    ):          
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
             base_dn = await self.dnResolver(base)
@@ -494,8 +483,8 @@ class Ldap(MSLDAPClient):
                 
                 # Apply formatting to attributes before yielding (only if not raw)
                 attributes = entry["attributes"]
-                if not raw and attribute_formatters:
-                    attributes = formatters.applyFormatters(attributes, attribute_formatters)
+                if not raw:
+                    attributes = formatters.applyFormatters(attributes)
                 
                 yield {
                     **{"distinguishedName": entry["objectName"]},
