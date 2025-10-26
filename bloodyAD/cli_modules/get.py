@@ -430,50 +430,65 @@ async def search(
             yield entry
 
 
-def _create_ldapentry_from_entry(entry, ldap):
+def _determine_object_type(entry):
     """
-    Create a badldap ldapentry object from a dictionary entry based on objectClass.
-    Returns a tuple of (ldapentry, needs_domainsid) where needs_domainsid indicates
-    if the to_bh method needs domainsid parameter.
+    Determine the object type based on objectClass and sAMAccountType.
+    Returns tuple of (object_type_string, needs_domainsid)
+    """
+    object_classes = entry.get('objectClass', [])
+    sam_account_type = entry.get('sAMAccountType', 0)
+    
+    if 'msDS-GroupManagedServiceAccount' in object_classes:
+        return 'gmsa', False
+    elif 'msDS-ManagedServiceAccount' in object_classes:
+        return 'dmsa', False
+    elif sam_account_type == 805306368 or 'user' in object_classes:
+        return 'user', False
+    elif sam_account_type == 805306369 or 'computer' in object_classes:
+        return 'computer', False
+    elif 'group' in object_classes:
+        return 'group', False
+    elif 'groupPolicyContainer' in object_classes:
+        return 'gpo', True
+    elif 'organizationalUnit' in object_classes:
+        return 'ou', True
+    elif 'container' in object_classes:
+        return 'container', True
+    elif 'domain' in object_classes or 'domainDNS' in object_classes:
+        return 'domain', True
+    else:
+        return 'base', True
+
+
+def _create_ldapentry_from_entry(entry, object_type):
+    """
+    Create a badldap ldapentry object from a dictionary entry based on object_type.
     """
     from badldap.ldap_objects import (
         MSADUser, MSADMachine, MSADGroup, MSADOU, MSADGPO, 
         MSADContainer, MSADDMSAUser, MSADGMSAUser
     )
     
-    object_classes = entry.get('objectClass', [])
-    sam_account_type = entry.get('sAMAccountType', 0)
-    
-    # Determine the appropriate class based on objectClass and sAMAccountType
-    needs_domainsid = False
-    if 'msDS-GroupManagedServiceAccount' in object_classes:
-        ldapentry = MSADGMSAUser.from_ldap(entry)
-    elif 'msDS-ManagedServiceAccount' in object_classes:
-        ldapentry = MSADDMSAUser.from_ldap(entry)
-    elif sam_account_type == 805306368 or 'user' in object_classes:
-        ldapentry = MSADUser.from_ldap(entry)
-    elif sam_account_type == 805306369 or 'computer' in object_classes:
-        ldapentry = MSADMachine.from_ldap(entry)
-    elif 'group' in object_classes:
-        ldapentry = MSADGroup.from_ldap(entry)
-    elif 'groupPolicyContainer' in object_classes:
-        ldapentry = MSADGPO.from_ldap(entry)
-        needs_domainsid = True
-    elif 'organizationalUnit' in object_classes:
-        ldapentry = MSADOU.from_ldap(entry)
-        needs_domainsid = True
-    elif 'container' in object_classes:
-        ldapentry = MSADContainer.from_ldap(entry)
-        needs_domainsid = True
+    if object_type == 'gmsa':
+        return MSADGMSAUser.from_ldap(entry)
+    elif object_type == 'dmsa':
+        return MSADDMSAUser.from_ldap(entry)
+    elif object_type == 'user':
+        return MSADUser.from_ldap(entry)
+    elif object_type == 'computer':
+        return MSADMachine.from_ldap(entry)
+    elif object_type == 'group':
+        return MSADGroup.from_ldap(entry)
+    elif object_type == 'gpo':
+        return MSADGPO.from_ldap(entry)
+    elif object_type == 'ou':
+        return MSADOU.from_ldap(entry)
     else:
-        # Default to container for unknown types
-        ldapentry = MSADContainer.from_ldap(entry)
-        needs_domainsid = True
-    
-    return ldapentry, needs_domainsid
+        # container, domain, base, or unknown
+        return MSADContainer.from_ldap(entry)
 
 
-def _parse_ntsecurity_descriptor(entry, ldapentry, schema):
+def _parse_ntsecurity_descriptor(entry, ldapentry, schema, entrytype):
     """
     Parse the nTSecurityDescriptor attribute and create ACEs using parse_binary_acl.
     Returns a tuple of (meta, relations) where meta contains IsACLProtected and relations is a list of ACE dicts.
@@ -483,29 +498,6 @@ def _parse_ntsecurity_descriptor(entry, ldapentry, schema):
     nt_security_descriptor = entry.get('nTSecurityDescriptor')
     if not nt_security_descriptor:
         return {'IsACLProtected': False}, []
-    
-    # Determine entry type for parse_binary_acl
-    object_classes = entry.get('objectClass', [])
-    sam_account_type = entry.get('sAMAccountType', 0)
-    
-    if 'msDS-GroupManagedServiceAccount' in object_classes or 'msDS-ManagedServiceAccount' in object_classes:
-        entrytype = 'user'
-    elif sam_account_type == 805306368 or 'user' in object_classes:
-        entrytype = 'user'
-    elif sam_account_type == 805306369 or 'computer' in object_classes:
-        entrytype = 'computer'
-    elif 'group' in object_classes:
-        entrytype = 'group'
-    elif 'groupPolicyContainer' in object_classes:
-        entrytype = 'gpo'
-    elif 'organizationalUnit' in object_classes:
-        entrytype = 'ou'
-    elif 'container' in object_classes:
-        entrytype = 'container'
-    elif 'domain' in object_classes or 'domainDNS' in object_classes:
-        entrytype = 'domain'
-    else:
-        entrytype = 'base'
     
     # Prepare bh_entry with necessary fields for parse_binary_acl
     dn = entry.get('distinguishedName', '')
@@ -675,24 +667,15 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
         raise err
     domainsid = str(adinfo.objectSid)
     
-    # Fetch schema for parse_binary_acl
-    schema = {}
-    # Fetch required schema entries
-    schema_entries = [
-        'ms-Mcs-AdmPwd',
-        'ms-LAPS-EncryptedPassword',
-        'ms-DS-Key-Credential-Link',
-        'Service-Principal-Name',
-        'User-Principal-Name',
-    ]
-    
-    for entry_name in schema_entries:
-        try:
-            entry, err = await ldap.get_schemaentry_by_name(entry_name)
-            if entry:
-                schema[entry.name.lower()] = str(entry.schemaIDGUID)
-        except Exception as e:
-            LOG.debug(f'Error fetching schema entry {entry_name}: {e}')
+    # Hardcoded schema GUIDs for parse_binary_acl
+    # These are fixed GUIDs that don't change across AD implementations
+    schema = {
+        'ms-mcs-admpwd': '79775c0c-d2e0-4b5f-b8e5-0e8e6a0c0e0e',  # LAPS password attribute
+        'ms-laps-encryptedpassword': 'c835d1d5-f9fb-4c5b-8b8f-8b6f9b6f9b6f',  # LAPS encrypted password
+        'ms-ds-key-credential-link': '5b47d60f-6090-40b2-9f37-2a4de88f3063',  # Key Credential Link
+        'service-principal-name': 'f3a64788-5306-11d1-a9c5-0000f80367c1',  # SPN attribute
+        'user-principal-name': '28630ebf-41d5-11d1-a9c1-0000f80367c1',  # UPN attribute
+    }
     
     # Build a simple object cache (SID -> object info)
     ocache = {}
@@ -759,6 +742,27 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
     }
     
     for entry in writable_entries:
+        # Determine object type once
+        object_type, needs_domainsid = _determine_object_type(entry)
+        
+        # Convert to entrytype for parse_binary_acl
+        if object_type in ['gmsa', 'dmsa', 'user']:
+            entrytype = 'user'
+        elif object_type == 'computer':
+            entrytype = 'computer'
+        elif object_type == 'group':
+            entrytype = 'group'
+        elif object_type == 'gpo':
+            entrytype = 'gpo'
+        elif object_type == 'ou':
+            entrytype = 'ou'
+        elif object_type == 'container':
+            entrytype = 'container'
+        elif object_type == 'domain':
+            entrytype = 'domain'
+        else:
+            entrytype = 'base'
+        
         # Query all attributes for this entry, including nTSecurityDescriptor and allowedAttributesEffective
         dn = entry.get('distinguishedName')
         full_entry_results = ldap.bloodysearch(
@@ -775,7 +779,7 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
             continue
         
         # Create ldapentry object
-        ldapentry, needs_domainsid = _create_ldapentry_from_entry(full_entry, ldap)
+        ldapentry = _create_ldapentry_from_entry(full_entry, object_type)
         
         # Convert to BloodHound format
         if needs_domainsid:
@@ -784,25 +788,37 @@ async def _writable_bh(conn, ldap, searchbases, ldap_filter, attr_params, reques
             bh_entry = ldapentry.to_bh(domainname)
         
         # Parse ACL
-        meta, relations = _parse_ntsecurity_descriptor(full_entry, ldapentry, schema)
+        meta, relations = _parse_ntsecurity_descriptor(full_entry, ldapentry, schema, entrytype)
         bh_entry['IsACLProtected'] = meta['IsACLProtected']
         
         # Resolve ACEs
         resolved_aces = resolve_aces(relations, domainname, domainsid, ocache)
         
-        # Add WriteUPN edges for principals with write access to user-principal-name property
-        if 'user-principal-name' in schema:
-            upn_guid = schema['user-principal-name'].lower()
-            for relation in relations:
-                # Check if this relation grants write access to the userPrincipalName property
-                if relation.get('RightName') == 'WriteProp' and relation.get('ObjectType', '').lower() == upn_guid:
-                    # Add WriteUPN edge for this principal
-                    resolved_aces.append({
-                        'PrincipalSID': relation['PrincipalSID'],
-                        'PrincipalType': relation.get('PrincipalType', 'Unknown'),
-                        'RightName': 'WriteUPN',
-                        'IsInherited': relation.get('IsInherited', False)
-                    })
+        # Add WriteUPN edges if userPrincipalName is in allowedAttributesEffective
+        # and there's no GenericAll or GenericWrite already
+        allowed_attrs = full_entry.get('allowedAttributesEffective', [])
+        if 'userPrincipalName' in allowed_attrs and entrytype == 'user':
+            # Check if there's already GenericAll or GenericWrite in the resolved ACEs
+            has_generic_write = False
+            for ace in resolved_aces:
+                if ace.get('RightName') in ['GenericAll', 'GenericWrite']:
+                    has_generic_write = True
+                    break
+            
+            # Only add WriteUPN if no GenericAll/GenericWrite exists
+            if not has_generic_write:
+                # Find principals who can write to this object
+                # Look for write permissions in relations
+                for relation in relations:
+                    right_name = relation.get('RightName', '')
+                    # Add WriteUPN for any principal with write-related rights
+                    if right_name in ['WriteProp', 'WriteProperty', 'Self']:
+                        resolved_aces.append({
+                            'PrincipalSID': relation['PrincipalSID'],
+                            'PrincipalType': relation.get('PrincipalType', 'Unknown'),
+                            'RightName': 'WriteUPN',
+                            'IsInherited': relation.get('IsInherited', False)
+                        })
         
         bh_entry['Aces'] = resolved_aces
         
