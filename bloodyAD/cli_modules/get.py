@@ -550,9 +550,20 @@ async def writable(
             current_user_dn = await ldap.dnResolver(ldap.creds.username)
             current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
             writable_entries += [current_user_dn] + current_user_groups
-            ldap_filter = "(|" + "".join(f"(distinguishedName={dn})" for dn in writable_entries) + ")"
+            ldap_filter = "(|" + "".join(f"(distinguishedName={decode_escaped_controls(dn)})" for dn in writable_entries) + ")"
+            print(ldap_filter)
             await _granular_bh(ldap, searchbase, ldap_filter)
 
+def decode_escaped_controls(s: str) -> str:
+    """
+    Convert textual escaped control sequences like '\\0A' into the actual byte/char.
+    Example: "CN=stan.dard\\0ADEL:...,CN=Deleted Objects,..." -> "CN=stan.dard\nDEL:...,CN=Deleted Objects,..."
+    """
+    def _repl_hex(m):
+        return chr(int(m.group(1), 16))
+    # \0HH (common in AD deleted-object RDNs) and \xHH
+    s = re.sub(r'\\0([0-9A-Fa-f]{2})', _repl_hex, s)
+    return s
 
 def _create_msldapentry(entry, otype):
     """
@@ -586,16 +597,16 @@ def _create_msldapentry(entry, otype):
         return MSADContainer.from_ldap(entry)
 
 
+from badldap.wintypes.asn1.sdflagsrequest import SDFlagsRequestValue
+from bloodyAD.formatters import accesscontrol
+from badldap.external.bloodhoundpy.resolver import resolve_aces, WELLKNOWN_SIDS
+from badldap.external.bloodhoundpy.acls import parse_binary_acl
+from badldap.bloodhound import MSLDAPDump2Bloodhound
+import zipfile
 async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
     """
     Generate BloodHound-compatible JSON for queried objects.
     """
-    from badldap.wintypes.asn1.sdflagsrequest import SDFlagsRequestValue
-    from bloodyAD.formatters import accesscontrol
-    from badldap.external.bloodhoundpy.resolver import resolve_aces, WELLKNOWN_SIDS
-    from badldap.external.bloodhoundpy.acls import parse_binary_acl
-    from badldap.bloodhound import MSLDAPDump2Bloodhound
-    import zipfile
     msbh = MSLDAPDump2Bloodhound(ldap.co_url)
     additional_schema = {
         'ms-mcs-admpwd': '79775c0c-d2e0-4b5f-b8e5-0e8e6a0c0e0e',  # LAPS password attribute
@@ -611,7 +622,7 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
     bh_data = {}
     filectr_dict = {}
     adinfo, err = await ldap.get_ad_info()
-    if err is not None:
+    if err:
         raise err
     control_flag=(
             accesscontrol.OWNER_SECURITY_INFORMATION
@@ -627,26 +638,29 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
                 raise err
             entry_attr = entry['attributes']
             # Deal with known foreign principals
+            gname = ""
             if entry_attr.get('name') in WELLKNOWN_SIDS:
                     bh_entry = {}
                     gname, sidtype = WELLKNOWN_SIDS[entry_attr['name']]
                     obj_type = sidtype.lower()
-                    bh_entry['type'] = sidtype.capitalize()
-                    bh_entry['principal'] = '%s@%s' % (gname.upper(), msbh.domainname.upper())
-                    bh_entry['objectid'] = '%s-%s' % (msbh.domainname.upper(), entry_attr['objectSid'].upper())
+                    # bh_entry['type'] = sidtype.capitalize()
+                    # bh_entry['principal'] = '%s@%s' % (gname.upper(), msbh.domainname.upper())
+                    # bh_entry['ObjectIdentifier'] = '%s-%s' % (msbh.domainname.upper(), entry_attr['objectSid'].upper())
             else:
                 resolved = msbh.resolve_entry(entry_attr)
                 obj_type = resolved['type'].lower()
                 if obj_type == 'trustaccount':
-                    obj_type = 'domain'
-                msldap_entry = _create_msldapentry(entry, obj_type)
+                    obj_type = 'user'  # We will consider Trust accounts are users in BH for now
+            msldap_entry = _create_msldapentry(entry, obj_type)                
+            try:
+                bh_entry = msldap_entry.to_bh(ldap.domainname, adinfo.objectSid)
+            except TypeError:
                 try:
-                    bh_entry = msldap_entry.to_bh(ldap.domainname, adinfo.objectSid)
+                    bh_entry = msldap_entry.to_bh(ldap.domainname)
                 except TypeError:
-                    try:
-                        bh_entry = msldap_entry.to_bh(ldap.domainname)
-                    except TypeError:
-                        bh_entry = msldap_entry.to_bh()
+                    bh_entry = msldap_entry.to_bh()
+            if gname:
+                bh_entry['Properties']['name'] = gname
             # Parse the ACL
             dn_result, bh_entry, relations = parse_binary_acl(
                 entry_attr['distinguishedName'], 
@@ -660,6 +674,7 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
             bh_type_data = bh_data.get(json_type, msbh.get_json_wrapper(json_type))
             bh_type_data['data'].append(bh_entry)
             bh_type_data['meta']['count'] += 1
+
             if bh_type_data['meta']['count'] == msbh.MAX_ENTRIES_PER_FILE:
                 LOG.info('Max entries per file reached for %s, flushing %d entries to zip' % (json_type, bh_type_data['meta']['count']))
                 filectr = filectr_dict.get(json_type, 0)
