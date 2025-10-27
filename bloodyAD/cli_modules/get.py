@@ -620,8 +620,6 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
     ocache = {}
     bh_data = {}
     filectr_dict = {}
-    # Store entries temporarily to process groups after ocache is built
-    temp_entries = []
     adinfo, err = await ldap.get_ad_info()
     if err:
         raise err
@@ -633,57 +631,26 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
     req_flags = SDFlagsRequestValue({"Flags": control_flag})
     # First one for recycled and second one for nt security descriptor
     controls = [("1.2.840.113556.1.4.417", True, None), ("1.2.840.113556.1.4.801", True, req_flags.dump())]
-    
-    # First pass: collect all entries and build ocache
-    LOG.info('First pass: Building object cache...')
-    async for entry, err in ldap.pagedsearch(ldap_filter, attributes=['*'], tree=searchbase, controls=controls):
-        if err:
-            raise err
-        entry_attr = entry['attributes']
-        
-        # Resolve entry type
-        gname = ""
-        if entry_attr.get('name') in WELLKNOWN_SIDS:
-            gname, sidtype = WELLKNOWN_SIDS[entry_attr['name']]
-            obj_type = sidtype.lower()
-        else:
-            resolved = msbh.resolve_entry(entry_attr)
-            obj_type = resolved['type'].lower()
-            if obj_type == 'trustaccount':
-                obj_type = 'user'
-        
-        # Add to ocache using add_ocache
-        dn = entry_attr.get('distinguishedName', '')
-        objectid = entry_attr.get('objectSid', entry_attr.get('objectGUID', ''))
-        account = entry_attr.get('sAMAccountName', '')
-        
-        # Determine principal
-        if obj_type == 'computer':
-            short_name = account.rstrip('$')
-            principal = ('%s.%s' % (short_name, msbh.domainname)).upper()
-        else:
-            principal = ('%s@%s' % (account, msbh.domainname)).upper()
-        
-        # Get DNS and SPNs for computers
-        dns = entry_attr.get('dNSHostName', '')
-        spns = entry_attr.get('servicePrincipalName')
-        
-        # Add to ocache
-        msbh.add_ocache(dn, str(objectid), principal, obj_type, dns, spns)
-        
-        # Store entry for second pass
-        temp_entries.append((entry, obj_type, gname))
-    
-    # Update ocache reference for resolve_aces
-    ocache = msbh.ocache
-    
-    # Second pass: convert to BloodHound format with populated Members for groups
-    LOG.info(f'Second pass: Processing {len(temp_entries)} entries...')
     with zipfile.ZipFile(msbh.zipfilepath, 'w', zipfile.ZIP_DEFLATED) as msbh.zipfile:
-        for entry, obj_type, gname in temp_entries:
+        async for entry, err in ldap.pagedsearch(ldap_filter, attributes=['*'], tree=searchbase, controls=controls):
+            if err:
+                raise err
             entry_attr = entry['attributes']
-            msldap_entry = _create_msldapentry(entry, obj_type)
-            
+            # Deal with known foreign principals
+            gname = ""
+            if entry_attr.get('name') in WELLKNOWN_SIDS:
+                    bh_entry = {}
+                    gname, sidtype = WELLKNOWN_SIDS[entry_attr['name']]
+                    obj_type = sidtype.lower()
+                    # bh_entry['type'] = sidtype.capitalize()
+                    # bh_entry['principal'] = '%s@%s' % (gname.upper(), msbh.domainname.upper())
+                    # bh_entry['ObjectIdentifier'] = '%s-%s' % (msbh.domainname.upper(), entry_attr['objectSid'].upper())
+            else:
+                resolved = msbh.resolve_entry(entry_attr)
+                obj_type = resolved['type'].lower()
+                if obj_type == 'trustaccount':
+                    obj_type = 'user'  # We will consider Trust accounts are users in BH for now
+            msldap_entry = _create_msldapentry(entry, obj_type)                
             try:
                 bh_entry = msldap_entry.to_bh(ldap.domainname, adinfo.objectSid)
             except TypeError:
@@ -691,10 +658,8 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
                     bh_entry = msldap_entry.to_bh(ldap.domainname)
                 except TypeError:
                     bh_entry = msldap_entry.to_bh()
-            
             if gname:
                 bh_entry['Properties']['name'] = gname
-            
             # Parse the ACL
             dn_result, bh_entry, relations = parse_binary_acl(
                 entry_attr['distinguishedName'], 
@@ -704,19 +669,6 @@ async def _granular_bh(ldap, searchbase, ldap_filter, output_path=None):
                 msbh.schema
             )
             bh_entry['Aces'] = resolve_aces(relations, ldap.domainname, adinfo.objectSid, ocache)
-            
-            # Populate Members for groups using DNs dictionary
-            if obj_type == 'group' and msldap_entry.member is not None:
-                for member_dn in msldap_entry.member:
-                    member_dn_upper = member_dn.upper()
-                    if member_dn_upper in msbh.DNs:
-                        member_sid = msbh.DNs[member_dn_upper]
-                        if member_sid in ocache:
-                            bh_entry['Members'].append({
-                                'ObjectIdentifier': ocache[member_sid]['ObjectIdentifier'],
-                                'ObjectType': ocache[member_sid]['ObjectType'].capitalize()
-                            })
-            
             json_type = obj_type + 's'
             bh_type_data = bh_data.get(json_type, msbh.get_json_wrapper(json_type))
             bh_type_data['data'].append(bh_entry)
