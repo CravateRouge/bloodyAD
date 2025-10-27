@@ -551,7 +551,6 @@ async def writable(
             current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
             writable_entries += [current_user_dn] + current_user_groups
             ldap_filter = "(|" + "".join(f"(distinguishedName={decode_escaped_controls(dn)})" for dn in writable_entries) + ")"
-            print(ldap_filter)
             await _granular_bh(ldap, searchbase, ldap_filter)
 
 def decode_escaped_controls(s: str) -> str:
