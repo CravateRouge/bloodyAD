@@ -4,7 +4,9 @@ from bloodyAD.formatters import (
     cryptography,
     dns,
 )
+from bloodyAD.exceptions import LOG
 import base64
+from functools import lru_cache
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 
@@ -94,9 +96,7 @@ from badldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
     single_guid,
-    multi_bytes,
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
-    int2timedelta,
+    int2timedelta
 )
 
 
@@ -111,55 +111,112 @@ def formatFactory(format_func, origin_format):
     genericFormat.__name__ = origin_format.__name__
     return genericFormat
 
+@lru_cache
+def getFormatters():
+    """
+    Returns a dictionary mapping attribute names to their formatting functions.
+    This doesn't modify badldap's global dictionaries, allowing for local formatting.
+    
+    Returns both bloodyAD custom formatters and badldap default formatters.
+    BloodyAD formatters take precedence over badldap formatters.
+    """
+    def make_formatter(format_func):
+        """Wrapper to handle list/non-list values consistently"""
+        def wrapper(val):
+            if isinstance(val, list):
+                # if len(val) == 1:
+                #     return format_func(val[0])
+                # else:
+                return [format_func(v) for v in val]
+            else:
+                return format_func(val)
+        return wrapper
+    
+    def make_list_formatter(format_func):
+        """Wrapper for formatters that expect the value as a list"""
+        def wrapper(val):
+            if isinstance(val, list):
+                return format_func(val)
+            else:
+                return format_func([val])
+        return wrapper
+    
+    # Start with badldap's default formatters
+    formatters_map = {}
+    
+    # First, import badldap's MSLDAP_BUILTIN_ATTRIBUTE_TYPES formatters (higher priority)
+    for attr_name, formatter in MSLDAP_BUILTIN_ATTRIBUTE_TYPES.items():
+        formatters_map[attr_name] = make_list_formatter(formatter)
+    
+    # Then, add LDAP_WELL_KNOWN_ATTRS formatters only if not already present
+    for attr_name, formatter in LDAP_WELL_KNOWN_ATTRS.items():
+        if attr_name not in formatters_map:
+            formatters_map[attr_name] = make_list_formatter(formatter)
+    
+    # Now override with bloodyAD custom formatters (these take highest precedence)
+    # Security descriptors - expect single bytes value
+    formatters_map["nTSecurityDescriptor"] = make_formatter(formatSD)
+    formatters_map["msDS-AllowedToActOnBehalfOfOtherIdentity"] = make_formatter(formatSD)
+    formatters_map["msDS-GroupMSAMembership"] = make_formatter(formatSD)
+    
+    # Passwords and credentials - expect single bytes value
+    formatters_map["msDS-ManagedPassword"] = make_formatter(formatGMSApass)
+    
+    # Account control - expect single bytes value
+    formatters_map["userAccountControl"] = make_formatter(formatAccountControl)
+    formatters_map["msDS-User-Account-Control-Computed"] = make_formatter(formatAccountControl)
+    
+    # Trust attributes - expect single bytes value
+    formatters_map["trustDirection"] = make_formatter(formatTrustDirection)
+    formatters_map["trustAttributes"] = make_formatter(formatTrustAttributes)
+    formatters_map["trustType"] = make_formatter(formatTrustType)
+    
+    # Versions and levels - expect single bytes value
+    formatters_map["msDS-Behavior-Version"] = make_formatter(formatFunctionalLevel)
+    formatters_map["objectVersion"] = make_formatter(formatSchemaVersion)
+    
+    # DNS and other - expect single bytes value
+    formatters_map["dnsRecord"] = make_formatter(formatDnsRecord)
+    formatters_map["msDS-KeyCredentialLink"] = make_formatter(formatKeyCredentialLink)
+    formatters_map["wellKnownObjects"] = make_formatter(formatWellKnownObjects)
+    
+    formatters_map["attributeSecurityGUID"] = make_formatter(single_guid)
+    formatters_map["msDS-MinimumPasswordAge"] = make_formatter(int2timedelta)
+    # GUID and time attributes - keep badldap's formatters (already added above)
+    # attributeSecurityGUID and msDS-MinimumPasswordAge use badldap's single_guid and int2timedelta
+    
+    return formatters_map
 
-def enableFormatOutput():
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
-        multi_bytes
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"] = formatFactory(
-        formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["nTSecurityDescriptor"]
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-AllowedToActOnBehalfOfOtherIdentity"] = (
-        formatFactory(formatSD, multi_bytes)
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"] = formatFactory(
-        formatSD, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-GroupMSAMembership"]
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"] = formatFactory(
-        formatGMSApass, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-ManagedPassword"]
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"] = formatFactory(
-        formatAccountControl, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["userAccountControl"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"] = formatFactory(
-        formatAccountControl, LDAP_WELL_KNOWN_ATTRS["msDS-User-Account-Control-Computed"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["trustDirection"] = formatFactory(
-        formatTrustDirection, LDAP_WELL_KNOWN_ATTRS["trustDirection"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["trustAttributes"] = formatFactory(
-        formatTrustAttributes, LDAP_WELL_KNOWN_ATTRS["trustAttributes"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["trustType"] = formatFactory(
-        formatTrustType, LDAP_WELL_KNOWN_ATTRS["trustType"]
-    )
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"] = formatFactory(
-        formatFunctionalLevel, MSLDAP_BUILTIN_ATTRIBUTE_TYPES["msDS-Behavior-Version"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["objectVersion"] = formatFactory(
-        formatSchemaVersion, LDAP_WELL_KNOWN_ATTRS["objectVersion"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["dnsRecord"] = formatFactory(
-        formatDnsRecord, LDAP_WELL_KNOWN_ATTRS["dnsRecord"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"] = formatFactory(
-        formatKeyCredentialLink, LDAP_WELL_KNOWN_ATTRS["msDS-KeyCredentialLink"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["attributeSecurityGUID"] = single_guid
-    LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"] = formatFactory(
-        formatWellKnownObjects, LDAP_WELL_KNOWN_ATTRS["wellKnownObjects"]
-    )
-    LDAP_WELL_KNOWN_ATTRS["msDS-MinimumPasswordAge"] = int2timedelta
+
+def applyFormatters(attributes):
+    """
+    Apply formatters to attributes dictionary.
+    
+    Args:
+        attributes: Dictionary of attribute names to values
+        formatters_map: Dictionary of attribute names to formatter functions
+    
+    Returns:
+        Dictionary with formatted attributes
+    """
+    formatted_attrs = {}
+    formatters_map = getFormatters()
+    for attr_name, attr_value in attributes.items():
+        if attr_name in formatters_map:
+            formatter = formatters_map[attr_name]
+            try:
+                formatted_attrs[attr_name] = formatter(attr_value)
+            except Exception as e:
+                # If formatting fails, log the error and keep original value
+                LOG.debug(
+                    f"Failed to format attribute '{attr_name}': {type(e).__name__}: {e}"
+                )
+                formatted_attrs[attr_name] = attr_value
+        else:
+            formatted_attrs[attr_name] = attr_value
+    
+    return formatted_attrs
+
 
 from winacl.dtyp.ace import (
     SYSTEM_AUDIT_OBJECT_ACE,

@@ -31,7 +31,7 @@ class NCType(enum.IntFlag):
 
 
 @lru_cache
-def phantomRoot():
+def phantomRoot() -> list:
     # [MS-ADTS] 3.1.1.3.4.1.12
     # Search control to search in all NC replicas except applications replicas (DNS partitions)
     class SearchOptionsRequest(core.Sequence):
@@ -43,8 +43,15 @@ def phantomRoot():
     scontrols = SearchOptionsRequest({"Flags": SERVER_SEARCH_FLAG_PHANTOM_ROOT})
     LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
 
-    return (LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())
+    return [(LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())]
 
+@lru_cache
+def showRecoverable() -> list:
+    # Show link values stored and referring to deleted objects
+    LDAP_SERVER_SHOW_DEACTIVATED_LINK_OID = "1.2.840.113556.1.4.2065"
+    # Show tombstoned and deleted objects (excluding recycled which are not recoverable using ldap)
+    LDAP_SERVER_SHOW_DELETED_OID = "1.2.840.113556.1.4.417"
+    return [(LDAP_SERVER_SHOW_DEACTIVATED_LINK_OID, True, None), (LDAP_SERVER_SHOW_DELETED_OID, True, None)]
 
 class Ldap(MSLDAPClient):
     conf = None
@@ -54,7 +61,6 @@ class Ldap(MSLDAPClient):
     # "conn" is optional
     conn = None
     co_url = None
-    is_prettified = False
 
     def __init__(self, conn, target, credential):
         self._trustmap = collections.defaultdict(dict)
@@ -445,12 +451,7 @@ class Ldap(MSLDAPClient):
         ),
         controls=None,
         raw=False,
-    ):
-        # Because when calling badldap high-level functions it doesn't handle prettify so we call prettify only if ldap is used
-        # (hoping badldap will not be called after)
-        if self.is_prettified is False:
-            formatters.enableFormatOutput()
-            self.is_prettified = True
+    ):          
         # Handles corner case where querying default partitions (no dn provided for that)
         if base:
             base_dn = await self.dnResolver(base)
@@ -469,13 +470,15 @@ class Ldap(MSLDAPClient):
 
         policy = await self.get_policy()
         self.ldap_query_page_size = policy["MaxPageSize"]
+        
+        # Always get raw data from pagedsearch, then apply formatters ourselves
         search_generator = self.pagedsearch(
             ldap_filter,
             attr,
             tree=base_dn,
             search_scope=search_scope.value,
             controls=local_controls,
-            raw=raw,
+            raw=True,  # Always get raw data
         )
 
         isNul = True
@@ -484,9 +487,15 @@ class Ldap(MSLDAPClient):
                 if err:
                     raise err
                 isNul = False
+                
+                # Apply formatting to attributes before yielding (only if not raw)
+                attributes = entry["attributes"]
+                if not raw:
+                    attributes = formatters.applyFormatters(attributes)
+                
                 yield {
                     **{"distinguishedName": entry["objectName"]},
-                    **entry["attributes"],
+                    **attributes,
                 }
         finally:
             await search_generator.aclose()
@@ -549,7 +558,7 @@ class Ldap(MSLDAPClient):
             ],
             "search_scope": Scope.SUBTREE,
             "raw": True,
-            "controls": [phantomRoot()],
+            "controls": phantomRoot(),
         }
         trusts = await self.searchInForest(
             conn, search_params, dns, domain_name, allow_gc

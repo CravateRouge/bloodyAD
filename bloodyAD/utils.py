@@ -4,8 +4,8 @@ from bloodyAD.formatters import (
     accesscontrol,
     adschema,
 )
-from bloodyAD.network.ldap import Scope, phantomRoot
-import types, base64, collections
+from bloodyAD.network.ldap import Scope, phantomRoot, showRecoverable
+import types, base64, collections, re
 from winacl import dtyp
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from badldap.network import reacher
@@ -284,6 +284,7 @@ class AceFlag:
 class LazyAdSchema:
     guids = set()
     sids = set()
+    DNs = set()
     # All known guids
     guid_dict = {
         **adschema.OBJECT_TYPES,
@@ -291,16 +292,18 @@ class LazyAdSchema:
     }
     # All known sids
     sid_dict = dtyp.sid.well_known_sids_sid_name_map
+    # All known DNs
+    dn_dict = {}
     isResolved = False
 
-    # We resolve every guid/sid in one request to be more efficient
+    # We resolve every guid/sid/dn in one request to be more efficient
     # Put the load on the server instead of the client
     # Perfect in case of bad network
     async def _resolveAll(self):
         if self.isResolved:
             return
 
-        async def domResolve(conn, sid_iter):
+        async def domResolve(conn, sid_iter, dn_iter):
             # WARNING: only 512 filters max per request
             filters = []
             buffer_filter = ""
@@ -311,6 +314,13 @@ class LazyAdSchema:
                     buffer_filter = ""
                     filter_nb = 0
                 buffer_filter += f"(objectSid={sid})"
+                filter_nb += 1
+            for dn in dn_iter:
+                if filter_nb > 511:
+                    filters.append(buffer_filter)
+                    buffer_filter = ""
+                    filter_nb = 0
+                buffer_filter += f"(distinguishedName={dn})"
                 filter_nb += 1
 
             if conn == self.conn:
@@ -345,7 +355,7 @@ class LazyAdSchema:
                         "schemaIDGUID",
                     ],
                     search_scope=Scope.SUBTREE,
-                    controls=[phantomRoot()],
+                    controls=phantomRoot()+showRecoverable(),
                 )
                 async for entry in entries:
                     if entry.get("objectSid"):
@@ -354,6 +364,7 @@ class LazyAdSchema:
                             if entry.get("sAMAccountName")
                             else entry["name"]
                         )
+                        self.dn_dict[entry["distinguishedName"].upper()] = entry["objectSid"]
                     else:
                         if entry.get("rightsGuid"):
                             key = entry["rightsGuid"]
@@ -365,7 +376,7 @@ class LazyAdSchema:
                         self.guid_dict[key] = entry["name"]
 
         sidmap = collections.defaultdict(list)
-        if getattr(self.conn.conf, "transitive"):
+        if getattr(self.conn.conf, "transitive", None):
             ldap = await self.conn.getLdap()
             trustmap = await ldap.getTrustMap()
             for sid in self.sids:
@@ -375,12 +386,13 @@ class LazyAdSchema:
             for conn, sidlist in sidmap.items():
                 await domResolve(conn, sidlist)
         else:
-            await domResolve(self.conn, self.sids)
+            await domResolve(self.conn, self.sids, self.DNs)
 
         # Cleanup resolved ids from queues
         self.isResolved = True
         self.guids = set()
         self.sids = set()
+        self.DNs = set()
 
     def addguid(self, guid):
         # Should not add in set to resolve after if it is already resolved
@@ -391,6 +403,11 @@ class LazyAdSchema:
         # Should not add in set to resolve after if it is already resolved
         if sid not in self.sid_dict:
             self.sids.add(sid)
+
+    def adddn(self, dn):
+        dn_upper = dn.upper()
+        if dn_upper not in self.dn_dict:
+            self.DNs.add(dn_upper)
 
     # Return name mapped to the guid
     async def getguid(self, guid):
@@ -404,7 +421,7 @@ class LazyAdSchema:
                 return guid
 
     # Return name mapped to the sid
-    async def getsid(self, sid):
+    async def getsid(self, sid) -> str:
         try:
             return self.sid_dict[sid]
         except KeyError:
@@ -414,6 +431,16 @@ class LazyAdSchema:
             else:
                 return sid
 
+    async def getdn(self, dn) -> str:
+        dn_upper = dn.upper()
+        try:
+            return self.dn_dict[dn_upper]
+        except KeyError:
+            if not self.isResolved:
+                await self._resolveAll()
+                return await self.getdn(dn)
+            else:
+                return ""
 
 global_lazy_adschema = LazyAdSchema()
 
@@ -629,3 +656,7 @@ async def connectReachable(conn, srv_names: list, ports: list = [389, 636, 3268,
             "No reachable server found, try to provide one manually in --host or a dns server with --dns"
         )
     return new_conn
+
+def double_encode_controls(s):
+    # Match a backslash followed by two hex digits (e.g., \0A, \2A)
+    return re.sub(r'\\([0-9A-Fa-f]{2})', r'\\\\\1', s)

@@ -1,7 +1,8 @@
 from bloodyAD import utils, asciitree
 from bloodyAD.exceptions import LOG
-from bloodyAD.network.ldap import Scope
+from bloodyAD.network.ldap import Scope, showRecoverable
 from bloodyAD.exceptions import NoResultError
+from bloodyAD.formatters import bloodhound as bhformatter
 from badldap.commons.exceptions import LDAPSearchException
 from typing import Literal
 import re
@@ -44,7 +45,7 @@ async def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool 
         f"(&({otype_filter})(!(distinguishedName={target})))",
         search_scope=scope,
         attr=["distinguishedName"],
-        controls=[("1.2.840.113556.1.4.417", True, None)]
+        controls=showRecoverable()
     ):
         yield entry
 
@@ -434,7 +435,8 @@ async def writable(
     otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
-    exclude_del: bool = False
+    exclude_del: bool = False,
+    bh: bool = False
     # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
 ):
     """
@@ -443,7 +445,8 @@ async def writable(
     :param otype: type of writable object to retrieve
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
-    :param exclude_del: if set, include deleted objects
+    :param exclude_del: if set, exclude deleted objects
+    :param bh: if set, creates a BloodHound-compatible Zip file with the writable objects found
     """
     # :param partition: directory partition a.k.a naming context to explore
 
@@ -493,12 +496,9 @@ async def writable(
         }
     
 
-    # Build attributes list - include objectSid and objectGUID if with_sid is True
-    requested_attributes = list(attr_params.keys())
     controls = None
     if not exclude_del:
-        requested_attributes.append("objectSid")
-        controls = [("1.2.840.113556.1.4.417", True, None)]
+        controls = showRecoverable()
 
     ldap = await conn.getLdap()
     searchbases = []
@@ -508,10 +508,12 @@ async def writable(
     #     searchbases.append(ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
     # else:
     #     searchbases.append(ldap.NCs) # A definir
+    
     right_entry = {}
     for searchbase in searchbases:
+        writable_entries = []
         async for entry in ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=requested_attributes, controls=controls
+            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
         ):
             for attr_name in entry:
                 if attr_name not in attr_params:
@@ -526,13 +528,16 @@ async def writable(
 
             if right_entry:
                 # Build base result with distinguishedName
-                result = {"distinguishedName": entry["distinguishedName"]}
-
-                if "objectSid" in entry:
-                    result["objectSid"] = entry["objectSid"]
-                
+                result = {"distinguishedName": entry["distinguishedName"]}        
+                if bh:
+                    writable_entries.append(entry["distinguishedName"])        
                 # Merge right_entry into result
-                result.update(right_entry)
-                
+                result.update(right_entry)         
                 yield result
                 right_entry = {}
+        if bh:
+            current_user_dn = await ldap.dnResolver(ldap.creds.username)
+            current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
+            writable_entries += [current_user_dn] + current_user_groups
+            ldap_filter = "(|" + "".join(f"(distinguishedName={utils.double_encode_controls(dn)})" for dn in writable_entries) + ")"
+            await bhformatter.granular_bh(conn, searchbase, ldap_filter)

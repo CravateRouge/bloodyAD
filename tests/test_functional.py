@@ -357,7 +357,8 @@ class TestModules(unittest.TestCase):
             hostname3 + "$",
         )
 
-        del self.env["KRB5CCNAME"]
+        if "KRB5CCNAME" in self.env:
+            del self.env["KRB5CCNAME"]
         self.assertRegex(
             self.launchProcess(
                 [

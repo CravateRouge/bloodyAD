@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
         "cryptography==44.0.2",
-        "badldap>=0.7.0",
+        "badldap>=0.7.1",
         "winacl==0.1.9",
         "asn1crypto==1.5.1",
         "kerbad>=0.5.6"
