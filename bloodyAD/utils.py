@@ -626,6 +626,10 @@ async def findCompatibleDC(conn, min_version: int = 0, max_version: int = 1000, 
 
     compatible_dcs = []
     for dc_info in dc_dict.values():
+        # length check to ensure server's child nTDSDSA is present 
+        if len(dc_info) < 2:
+            LOG.warning(f"nTDSDSA object missing for server {dc_info.get('hostname')}, excluding from compatible DCs...")
+            continue
         if min_version <= dc_info["version"] <= max_version and (scope == "FOREST" or (scope == "DOMAIN" and ldap.domainNC.encode() in dc_info.get("domainNCs"))):
             compatible_dcs.append(dc_info["hostname"])
     return compatible_dcs
