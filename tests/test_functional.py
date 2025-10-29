@@ -306,7 +306,7 @@ class TestModules(unittest.TestCase):
             ],
         )
 
-    def test_04ComputerRbcdGetSetAttribute(self):
+    def test_04ComputerRbcdRestoreGetSetAttribute(self):
         hostname = "test_pc"
         self.launchBloody(
             self.user,
@@ -319,6 +319,13 @@ class TestModules(unittest.TestCase):
                 "CN=COMPUTERS," + self.rootDomainNamingContext,
             ],
         )
+
+        # Test restore
+        self.launchBloody(self.admin, ["remove", "object", hostname + "$"])
+        newHostname = "restored_pc"
+        self.launchBloody(self.admin, ["set", "restore", hostname + "$", "--newName", newHostname, "--newParent", "CN=Users," + self.rootDomainNamingContext])
+        self.launchBloody(self.admin, ["remove", "object", hostname + "$"])
+        self.launchBloody(self.admin, ["set", "restore", hostname + "$", "--newName", hostname, "--newParent", "CN=Computers," + self.rootDomainNamingContext])
         self.toTear.append(
             (self.launchBloody, self.admin, ["remove", "object", hostname + "$"])
         )

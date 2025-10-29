@@ -295,7 +295,7 @@ class Ldap(MSLDAPClient):
 
         return dn
 
-    async def bloodymodify(self, target, changes, controls=None, encode=True):
+    async def bloodymodify(self, target, changes, controls=None, encode=True, is_restore=False):
         """
 		Performs the modify and modify_dn operation.
 		
@@ -307,6 +307,8 @@ class Ldap(MSLDAPClient):
 		:type controls: dict
 		:param encode: encode the changes provided before sending them to the server
     	:type encode: bool
+        :param is_restore: if true, distinguishedName is handled in the same modify as other attributes (required for restore operations)
+        :type is_restore: bool
 		"""
         if controls is not None:
             t = []
@@ -323,7 +325,7 @@ class Ldap(MSLDAPClient):
         new_dn = ""
         attr_changes = {}
         for attr_name in changes:
-            if attr_name.lower() == "distinguishedname":
+            if attr_name.lower() == "distinguishedname" and not is_restore:
                 new_dn = changes[attr_name][0][1][0]
             else:
                 attr_changes[attr_name] = changes[attr_name]

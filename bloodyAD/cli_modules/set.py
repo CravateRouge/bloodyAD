@@ -297,7 +297,7 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     :param newParent: new parent for the restored object, if not provided will use the last known parent
     """
     if target.lower().startswith("cn=") or target.lower().startswith("dc="):
-        # Needed because of \0A in deleted objects DNs
+        # double encode needed because of \0A in deleted objects DNs
         ldap_filter = f"(distinguishedName={utils.double_encode_controls(target)})"
     elif target.lower().startswith("s-1-"):
         ldap_filter = f"(objectSid={target})"
@@ -317,7 +317,9 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',old_name)},{newParent if newParent else entry['lastKnownParent']}"
     attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
     if newName:
-        attributes["name"] = [(Change.REPLACE.value, newName)]
+        # Name will be automatically replaced by new RDN,
+        # If we force the change we will have error ERROR_DS_CANT_ON_RDN
+        #attributes["name"] = [(Change.REPLACE.value, newName)]
         if entry.get("displayName"):
             attributes["displayName"] = [(Change.REPLACE.value, entry["displayName"].replace(entry["name"], newName))]
         if entry.get("sAMAccountName"):
@@ -331,7 +333,7 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
 
     try:
         await ldap.bloodymodify(
-            entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.2064", True, None)]
+            entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.417", True, None)], is_restore=True
         )
     except badldap.commons.exceptions.LDAPModifyException as e:
         if "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19: # 19 is constraintViolation
