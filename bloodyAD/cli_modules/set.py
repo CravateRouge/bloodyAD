@@ -292,11 +292,14 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     """
     Restore a deleted object
 
-    :param target: sAMAccountName (or name for GPO) or SID of the target (shouldn't be sAMAccountName if there is a duplicate)
+    :param target: DN, sAMAccountName (or name for GPO) or SID of the target (avoid sAMAccountName if there is a duplicate)
     :param newName: new name for the restored object (update also sAMAccountName, UPN, SPN...), if not provided will use the last known RDN
     :param newParent: new parent for the restored object, if not provided will use the last known parent
     """
-    if target.lower().startswith("s-1-"):
+    if target.lower().startswith("cn=") or target.lower().startswith("dc="):
+        # Needed because of \0A in deleted objects DNs
+        ldap_filter = f"(distinguishedName={utils.double_encode_controls(target)})"
+    elif target.lower().startswith("s-1-"):
         ldap_filter = f"(objectSid={target})"
     elif target.startswith("{"):
         ldap_filter = f"(name={target})"

@@ -31,7 +31,7 @@ class NCType(enum.IntFlag):
 
 
 @lru_cache
-def phantomRoot():
+def phantomRoot() -> list:
     # [MS-ADTS] 3.1.1.3.4.1.12
     # Search control to search in all NC replicas except applications replicas (DNS partitions)
     class SearchOptionsRequest(core.Sequence):
@@ -43,8 +43,15 @@ def phantomRoot():
     scontrols = SearchOptionsRequest({"Flags": SERVER_SEARCH_FLAG_PHANTOM_ROOT})
     LDAP_SERVER_SEARCH_OPTIONS_OID = "1.2.840.113556.1.4.1340"
 
-    return (LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())
+    return [(LDAP_SERVER_SEARCH_OPTIONS_OID, False, scontrols.dump())]
 
+@lru_cache
+def showRecoverable() -> list:
+    # Show link values stored and referring to deleted objects
+    LDAP_SERVER_SHOW_DEACTIVATED_LINK_OID = "1.2.840.113556.1.4.2065"
+    # Show tombstoned and deleted objects (excluding recycled which are not recoverable using ldap)
+    LDAP_SERVER_SHOW_DELETED_OID = "1.2.840.113556.1.4.417"
+    return [(LDAP_SERVER_SHOW_DEACTIVATED_LINK_OID, True, None), (LDAP_SERVER_SHOW_DELETED_OID, True, None)]
 
 class Ldap(MSLDAPClient):
     conf = None
@@ -551,7 +558,7 @@ class Ldap(MSLDAPClient):
             ],
             "search_scope": Scope.SUBTREE,
             "raw": True,
-            "controls": [phantomRoot()],
+            "controls": phantomRoot(),
         }
         trusts = await self.searchInForest(
             conn, search_params, dns, domain_name, allow_gc

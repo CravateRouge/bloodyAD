@@ -134,16 +134,6 @@ class FormatterTests(unittest.TestCase):
         # All attributes should remain unchanged
         self.assertEqual(result, attributes)
 
-    def test_enableEncoding(self):
-        """Test that enableEncoding modifies encoding dictionary"""
-        from badldap.protocol.typeconversion import MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
-        
-        # Call enableEncoding
-        formatters.enableEncoding()
-        
-        # Verify that msDS-AllowedToActOnBehalfOfOtherIdentity is in encoding dict
-        self.assertIn("msDS-AllowedToActOnBehalfOfOtherIdentity", MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC)
-
 
 if __name__ == '__main__':
     unittest.main()

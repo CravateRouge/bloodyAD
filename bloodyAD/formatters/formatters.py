@@ -124,10 +124,10 @@ def getFormatters():
         """Wrapper to handle list/non-list values consistently"""
         def wrapper(val):
             if isinstance(val, list):
-                if len(val) == 1:
-                    return format_func(val[0])
-                else:
-                    return [format_func(v) for v in val]
+                # if len(val) == 1:
+                #     return format_func(val[0])
+                # else:
+                return [format_func(v) for v in val]
             else:
                 return format_func(val)
         return wrapper
