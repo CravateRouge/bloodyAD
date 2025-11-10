@@ -509,9 +509,30 @@ async def writable(
     # else:
     #     searchbases.append(ldap.NCs) # A definir
     
+    # Get current user's SID and group memberships for self-membership checks
+    user_sids = set()
+    check_self_membership = (right == "WRITE" or right == "ALL") and (otype == "GROUP" or otype == "ALL")
+    
+    if check_self_membership:
+        try:
+            # Get user's own SID
+            current_user_dn = await ldap.dnResolver(ldap.creds.username)
+            async for user_entry in ldap.bloodysearch(current_user_dn, attr=["objectSid", "tokenGroups"]):
+                if "objectSid" in user_entry:
+                    user_sids.add(user_entry["objectSid"])
+                # Get all group memberships (including nested)
+                if "tokenGroups" in user_entry:
+                    for group_sid in user_entry["tokenGroups"]:
+                        user_sids.add(group_sid)
+        except Exception as e:
+            LOG.debug(f"Could not retrieve user SIDs for self-membership check: {e}")
+            check_self_membership = False
+    
     right_entry = {}
     for searchbase in searchbases:
         writable_entries = []
+        seen_entries = set()  # Track entries we've already yielded
+        
         async for entry in ldap.bloodysearch(
             searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
         ):
@@ -529,12 +550,106 @@ async def writable(
             if right_entry:
                 # Build base result with distinguishedName
                 result = {"distinguishedName": entry["distinguishedName"]}        
+                seen_entries.add(entry["distinguishedName"])
                 if bh:
                     writable_entries.append(entry["distinguishedName"])        
                 # Merge right_entry into result
                 result.update(right_entry)         
                 yield result
                 right_entry = {}
+        
+        # Check for self-membership permissions on groups
+        if check_self_membership:
+            # Self-Membership GUID from [MS-ADTS]
+            SELF_MEMBERSHIP_GUID = "bf9679c0-0de6-11d0-a285-00aa003049e2"
+            WRITE_VALIDATED = 0x8
+            
+            # Search for groups
+            group_filter = "(objectClass=group)"
+            async for group_entry in ldap.bloodysearch(
+                searchbase, group_filter, search_scope=Scope.SUBTREE, 
+                attr=["distinguishedName", "nTSecurityDescriptor"], 
+                controls=controls, raw=True
+            ):
+                try:
+                    from bloodyAD.formatters import ldaptypes, accesscontrol
+                    from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
+                    
+                    group_dn = group_entry.get("distinguishedName")
+                    if isinstance(group_dn, bytes):
+                        group_dn = group_dn.decode()
+                    elif isinstance(group_dn, list) and len(group_dn) > 0:
+                        if isinstance(group_dn[0], bytes):
+                            group_dn = group_dn[0].decode()
+                        else:
+                            group_dn = group_dn[0]
+                    
+                    sd_data = group_entry.get("nTSecurityDescriptor")
+                    if not sd_data or len(sd_data) < 1:
+                        continue
+                    
+                    # Parse security descriptor
+                    sd_bytes = sd_data[0]
+                    sd = SECURITY_DESCRIPTOR.from_bytes(sd_bytes)
+                    
+                    if not sd.Dacl:
+                        continue
+                    
+                    # Check each ACE for self-membership permission
+                    has_self_membership = False
+                    
+                    for ace in sd.Dacl.aces:
+                        # Only check ALLOWED ACEs (type 0 = ACCESS_ALLOWED_ACE, type 5 = ACCESS_ALLOWED_OBJECT_ACE)
+                        ace_type_val = ace.AceType.value if hasattr(ace.AceType, 'value') else ace.AceType
+                        if ace_type_val not in [0, 5]:
+                            continue
+                        
+                        # Check if ACE is for one of the user's SIDs
+                        ace_sid = str(ace.Sid)
+                        if ace_sid not in user_sids:
+                            continue
+                        
+                        # Check if it's an ALLOWED ACE with WRITE_VALIDATED permission
+                        if hasattr(ace, 'Mask'):
+                            # Mask can be either an int or an object with a mask attribute
+                            mask_val = ace.Mask.mask if hasattr(ace.Mask, 'mask') else ace.Mask
+                            
+                            if not (mask_val & WRITE_VALIDATED):
+                                continue
+                        else:
+                            continue
+                        
+                        # Check if it has the Self-Membership object type
+                        if hasattr(ace, 'ObjectType') and ace.ObjectType:
+                            object_type_str = str(ace.ObjectType).lower()
+                            if object_type_str == SELF_MEMBERSHIP_GUID.lower():
+                                has_self_membership = True
+                                break
+                    
+                    if has_self_membership:
+                        # group_dn is already properly converted to a string
+                        dn = group_dn
+                        
+                        # Skip if we already yielded this entry with other permissions
+                        if dn in seen_entries:
+                            continue
+                        
+                        result = {
+                            "distinguishedName": dn,
+                            "permission": ["ADDSELF"]
+                        }
+                        if detail:
+                            result["permission"] = ["member (Self-Membership)"]
+                        
+                        seen_entries.add(dn)
+                        yield result
+                        if bh:
+                            writable_entries.append(dn)
+                            
+                except Exception as e:
+                    LOG.debug(f"Error checking self-membership for {group_entry.get('distinguishedName')}: {e}")
+                    continue
+        
         if bh:
             current_user_dn = await ldap.dnResolver(ldap.creds.username)
             current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
