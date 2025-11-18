@@ -341,6 +341,8 @@ async def object(
     target: str,
     attr: str = "*",
     resolve_sd: bool = False,
+    acl_only: bool = False,
+    filter_admin_defaults: bool = False,
     raw: bool = False,
     transitive: bool = False,
 ):
@@ -350,6 +352,8 @@ async def object(
     :param target: sAMAccountName, DN or SID of the target (if you give an empty string "" prints rootDSE)
     :param attr: attributes to retrieve separated by a comma, retrieves all the attributes by default
     :param resolve_sd: if set, permissions linked to a security descriptor will be resolved (see bloodyAD github wiki/Access-Control for more information)
+    :param acl_only: if set, only security-descriptor-related attributes (ACLs) are retrieved for the target object
+    :param filter_admin_defaults: if set with "--resolve-sd", hides ACEs where all trustees are default admin/builtin groups (e.g. BUILTIN_ADMINISTRATORS, Domain Admins, Enterprise Admins)
     :param raw: if set, will return attributes as sent by the server without any formatting, binary data will be outputted in base64
     :param transitive: if set with "--resolve-sd", will try to resolve foreign SID by reaching trusts
     """
@@ -358,9 +362,71 @@ async def object(
         "msDS-GroupMSAMembership",
         "msDS-AllowedToActOnBehalfOfOtherIdentity",
     ]
+
+    # When only ACLs are requested, restrict the attributes fetched to security-descriptor-related ones
+    search_attrs = attributesSD if acl_only else attr.split(",")
+
+    def _normalize_trustee_name(name: str) -> str:
+        # Normalize trustee names to a comparable form
+        return name.upper().replace("\\", "_").strip()
+
+    # Well-known/built-in trustees considered "default noise" for ACL analysis
+    # Names are compared after uppercasing and replacing '\' with '_'
+    DEFAULT_ADMIN_TRUSTEES = {
+        # Core admin groups
+        "BUILTIN_ADMINISTRATORS",
+        "ADMINISTRATORS",
+        "DOMAIN ADMINS",
+        "ENTERPRISE ADMINS",
+        "ENTERPRISE ADMINISTRATORS",
+        "ACCOUNT_OPERATORS",
+        # Self / system / common principals
+        "PRINCIPAL_SELF",
+        "LOCAL_SYSTEM",
+        "EVERYONE",
+        "AUTHENTICATED_USERS",
+        "CREATOR_OWNER",
+        # Common built-in / infra groups
+        "ALIAS_PREW2KCOMPACC",
+        "ENTERPRISE_DOMAIN_CONTROLLERS",
+        "WINDOWS_AUTHORIZATION_ACCESS_GROUP",
+        "CERT PUBLISHERS",
+        "PRINTER_OPERATORS",
+        "KEY ADMINS",
+        "ENTERPRISE KEY ADMINS",
+    }
+
+    def _filter_default_admin_aces(rendered_sd):
+        """
+        Remove ACEs where all trustees are default admin/builtin groups.
+        """
+        acl = rendered_sd.get("ACL", [])
+        if not isinstance(acl, list):
+            return rendered_sd
+
+        filtered_acl = []
+        for ace in acl:
+            trustees = ace.get("Trustee", [])
+            if not trustees:
+                filtered_acl.append(ace)
+                continue
+
+            normalized_trustees = {
+                _normalize_trustee_name(str(t)) for t in trustees
+            }
+            # Drop ACEs where every trustee is a default admin/builtin group
+            if normalized_trustees and normalized_trustees.issubset(
+                DEFAULT_ADMIN_TRUSTEES
+            ):
+                continue
+            filtered_acl.append(ace)
+
+        rendered_sd["ACL"] = filtered_acl
+        return rendered_sd
+
     conn.conf.transitive = transitive
     ldap = await conn.getLdap()
-    entries = ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
+    entries = ldap.bloodysearch(target, attr=search_attrs, raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         async for entry in rendered_entries:
@@ -368,9 +434,18 @@ async def object(
                 if attrSD in entry:
                     e = entry[attrSD]
                     if not isinstance(e, list):
-                        entry[attrSD] = await utils.renderSD(e, conn)
+                        sd_obj = await utils.renderSD(e, conn)
+                        if filter_admin_defaults:
+                            sd_obj = _filter_default_admin_aces(sd_obj)
+                        entry[attrSD] = sd_obj
                     else:
-                        entry[attrSD] = [await utils.renderSD(sd, conn) for sd in e]
+                        sd_list = []
+                        for sd in e:
+                            sd_obj = await utils.renderSD(sd, conn)
+                            if filter_admin_defaults:
+                                sd_obj = _filter_default_admin_aces(sd_obj)
+                            sd_list.append(sd_obj)
+                        entry[attrSD] = sd_list
             yield entry
     else:
         async for entry in rendered_entries:
