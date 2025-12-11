@@ -29,7 +29,7 @@ async def children(conn, target: str = "DOMAIN", otype: str = "*", direct: bool 
     List children for a given target object
 
     :param target: sAMAccountName, DN or SID of the target
-    :param otype: special keyword "useronly" or objectClass of objects to fetch e.g. user, computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc
+    :param otype: special keyword "useronly" or objectClass of objects to fetch (e.g. computer, group, trustedDomain, organizationalUnit, container, groupPolicyContainer, msDS-GroupManagedServiceAccount, etc)
     :param direct: Fetch only direct children of target
     """
     ldap = await conn.getLdap()
@@ -429,36 +429,35 @@ async def search(
             yield entry
 
 
-# TODO: Search writable for application partitions too?
 async def writable(
     conn,
-    otype: Literal["ALL", "OU", "USER", "COMPUTER", "GROUP", "DOMAIN", "GPO"] = "ALL",
+    otype: str = "*",
     right: Literal["ALL", "WRITE", "CHILD"] = "ALL",
     detail: bool = False,
+    partition: Literal["DOMAIN", "CONFIGURATION", "SCHEMA", "DNS", "ALL"] = "ALL",
+    transitive: bool = False,
     exclude_del: bool = False,
-    bh: bool = False
-    # partition: Literal["DOMAIN", "DNS", "ALL"] = "DOMAIN"
+    bh: bool = False,
 ):
     """
     Retrieve objects writable by client
 
-    :param otype: type of writable object to retrieve
+    :param otype: special keywords "useronly, ou, gpo" or objectClass of objects to fetch (e.g. computer, group, server...)
     :param right: type of right to search
     :param detail: if set, displays attributes/object types you can write/create for the object
+    :param partition: directory partition a.k.a naming context to explore
+    :param transitive: if set, will try to reach trusts to have more complete results (you should start from a dc of your user's domain to have more complete results)
     :param exclude_del: if set, exclude deleted objects
     :param bh: if set, creates a BloodHound-compatible Zip file with the writable objects found
     """
-    # :param partition: directory partition a.k.a naming context to explore
 
     ldap_filter = ""
-    if otype == "USER":
+    if otype == "useronly":
         ldap_filter = "(sAMAccountType=805306368)"
-    elif otype == "OU":
+    elif otype == "ou":
         ldap_filter = "(|(objectClass=container)(objectClass=organizationalUnit))"
     else:
-        if otype == "ALL":
-            objectClass = "*"
-        elif otype == "GPO":
+        if otype == "gpo":
             objectClass = "groupPolicyContainer"
         else:
             objectClass = otype
@@ -494,50 +493,65 @@ async def writable(
             "lambda": genericReturn,
             "right": "CREATE_CHILD",
         }
-    
 
     controls = None
     if not exclude_del:
         controls = showRecoverable()
-
-    ldap = await conn.getLdap()
-    searchbases = []
-    # if partition == "DOMAIN":
-    searchbases.append(ldap.domainNC)
-    # elif partition == "DNS":
-    #     searchbases.append(ldap.applicationNCs) # A definir https://learn.microsoft.com/en-us/windows/win32/ad/enumerating-application-directory-partitions-in-a-forest
-    # else:
-    #     searchbases.append(ldap.NCs) # A definir
     
-    right_entry = {}
-    for searchbase in searchbases:
-        writable_entries = []
-        async for entry in ldap.bloodysearch(
-            searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
-        ):
-            for attr_name in entry:
-                if attr_name not in attr_params:
-                    continue
-                key_names = attr_params[attr_name]["lambda"](entry[attr_name])
-                for name in key_names:
-                    if name == "distinguishedName":
-                        name = "dn"
-                    if name not in right_entry:
-                        right_entry[name] = []
-                    right_entry[name].append(attr_params[attr_name]["right"])
+    async def search_writable(conn):
+        ldap = await conn.getLdap()
+        searchbases = []
+        if partition == "DOMAIN":
+            searchbases.append(ldap.domainNC)
+        elif partition == "CONFIGURATION":
+            searchbases.append(ldap.configNC)
+        elif partition == "SCHEMA":
+            searchbases.append(ldap.schemaNC)
+        elif partition == "DNS":
+            searchbases = ldap.applicationNCs
+        else: # For ALL option
+            searchbases = ldap._serverinfo["namingContexts"]
+        
+        right_entry = {}
+        for searchbase in searchbases:
+            writable_entries = []
+            async for entry in ldap.bloodysearch(
+                searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
+            ):
+                for attr_name in entry:
+                    if attr_name not in attr_params:
+                        continue
+                    key_names = attr_params[attr_name]["lambda"](entry[attr_name])
+                    for name in key_names:
+                        if name == "distinguishedName":
+                            name = "dn"
+                        if name not in right_entry:
+                            right_entry[name] = []
+                        right_entry[name].append(attr_params[attr_name]["right"])
 
-            if right_entry:
-                # Build base result with distinguishedName
-                result = {"distinguishedName": entry["distinguishedName"]}        
-                if bh:
-                    writable_entries.append(entry["distinguishedName"])        
-                # Merge right_entry into result
-                result.update(right_entry)         
-                yield result
-                right_entry = {}
-        if bh:
-            current_user_dn = await ldap.dnResolver(ldap.creds.username)
-            current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
-            writable_entries += [current_user_dn] + current_user_groups
-            ldap_filter = "(|" + "".join(f"(distinguishedName={utils.double_encode_controls(dn)})" for dn in writable_entries) + ")"
-            await bhformatter.granular_bh(conn, searchbase, ldap_filter)
+                if right_entry:
+                    # Build base result with distinguishedName
+                    result = {"distinguishedName": entry["distinguishedName"]}        
+                    if bh:
+                        writable_entries.append(entry["distinguishedName"])        
+                    # Merge right_entry into result
+                    result.update(right_entry)         
+                    yield result
+                    right_entry = {}
+            if bh:
+                current_user_dn = await ldap.dnResolver(ldap.creds.username)
+                current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]
+                writable_entries += [current_user_dn] + current_user_groups
+                bh_filter = "(|" + "".join(f"(distinguishedName={utils.double_encode_controls(dn)})" for dn in writable_entries) + ")"
+                await bhformatter.granular_bh(conn, searchbase, bh_filter)
+
+    root_ldap = await conn.getLdap()
+    if transitive:
+        trustmap = await root_ldap.getTrustMap()
+        for trust in trustmap.values():
+            if "conn" in trust:
+                async for result in search_writable(trust["conn"]):
+                    yield result
+    else:
+        async for result in search_writable(conn):
+            yield result

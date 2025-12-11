@@ -3,7 +3,7 @@ import badldap
 from bloodyAD import utils
 from bloodyAD.exceptions import LOG
 from bloodyAD.formatters import accesscontrol
-from bloodyAD.network.ldap import Change, Scope
+from bloodyAD.network.ldap import Change, Scope, showRecoverable
 from badldap.protocol import typeconversion
 from badldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
@@ -105,13 +105,14 @@ async def owner(conn, target: str, owner: str):
 
 # Full info on what you can do:
 # https://learn.microsoft.com/en-us/troubleshoot/windows-server/identity/change-windows-active-directory-user-password
-async def password(conn, target: str, newpass: str, oldpass: str = None):
+async def password(conn, target: str, newpass: str, oldpass: str = None, stealth: bool = False):
     """
     Change password of a user/computer
 
     :param target: sAMAccountName, DN or SID of the target
     :param newpass: new password for the target
     :param oldpass: old password of the target, mandatory if you don't have "change password" permission on the target
+    :param stealth: disable password policy check when password change is denied
     """
     encoded_new_password = '"%s"' % newpass
     if oldpass is not None:
@@ -128,6 +129,8 @@ async def password(conn, target: str, newpass: str, oldpass: str = None):
         await ldap.bloodymodify(target, {"unicodePwd": op_list})
 
     except badldap.commons.exceptions.LDAPModifyException as e:
+        if stealth:
+            raise e
         # Let's check if we comply to pwd policy
         entry = None
         async for search_entry in ldap.bloodysearch(
@@ -309,7 +312,7 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(
-        "CN=Deleted Objects,"+ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=[("1.2.840.113556.1.4.2064", True, None)]
+        "CN=Deleted Objects,"+ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=showRecoverable()
     ):
         entry = e
         break# LDAP_SERVER_SHOW_DELETED_OID

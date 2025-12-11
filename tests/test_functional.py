@@ -126,7 +126,7 @@ class TestModules(unittest.TestCase):
 
         writableAll = self.launchBloody(self.user, ["get", "writable"])
         writableUserWrite = self.launchBloody(
-            self.user, ["get", "writable", "--otype", "USER", "--right", "WRITE"]
+            self.user, ["get", "writable", "--otype", "useronly", "--right", "WRITE"]
         )
         self.assertIn(writableUserWrite, writableAll)
 

