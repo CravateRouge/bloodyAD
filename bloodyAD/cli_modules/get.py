@@ -515,29 +515,32 @@ async def writable(
         right_entry = {}
         for searchbase in searchbases:
             writable_entries = []
-            async for entry in ldap.bloodysearch(
-                searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
-            ):
-                for attr_name in entry:
-                    if attr_name not in attr_params:
-                        continue
-                    key_names = attr_params[attr_name]["lambda"](entry[attr_name])
-                    for name in key_names:
-                        if name == "distinguishedName":
-                            name = "dn"
-                        if name not in right_entry:
-                            right_entry[name] = []
-                        right_entry[name].append(attr_params[attr_name]["right"])
+            try:
+                async for entry in ldap.bloodysearch(
+                    searchbase, ldap_filter, search_scope=Scope.SUBTREE, attr=attr_params, controls=controls
+                ):
+                    for attr_name in entry:
+                        if attr_name not in attr_params:
+                            continue
+                        key_names = attr_params[attr_name]["lambda"](entry[attr_name])
+                        for name in key_names:
+                            if name == "distinguishedName":
+                                name = "dn"
+                            if name not in right_entry:
+                                right_entry[name] = []
+                            right_entry[name].append(attr_params[attr_name]["right"])
 
-                if right_entry:
-                    # Build base result with distinguishedName
-                    result = {"distinguishedName": entry["distinguishedName"]}        
-                    if bh:
-                        writable_entries.append(entry["distinguishedName"])        
-                    # Merge right_entry into result
-                    result.update(right_entry)         
-                    yield result
-                    right_entry = {}
+                    if right_entry:
+                        # Build base result with distinguishedName
+                        result = {"distinguishedName": entry["distinguishedName"]}        
+                        if bh:
+                            writable_entries.append(entry["distinguishedName"])        
+                        # Merge right_entry into result
+                        result.update(right_entry)         
+                        yield result
+                        right_entry = {}
+            except NoResultError:
+                continue
             if bh:
                 current_user_dn = await ldap.dnResolver(ldap.creds.username)
                 current_user_groups = [g['distinguishedName'] async for g in membership(conn, current_user_dn)]

