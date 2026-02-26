@@ -307,12 +307,13 @@ async def dnsRecord(
     data: str,
     dnstype: Literal["A", "AAAA", "CNAME", "MX", "PTR", "SRV", "TXT"] = "A",
     zone: str = "CurrentDomain",
+    zone_type: Literal["DOMAIN","FOREST","LEGACY"] = "DOMAIN",
+    zone_raw_dn: str = None,
     ttl: int = 300,
     preference: int = 10,
     port: int = None,
     priority: int = 10,
     weight: int = 60,
-    forest: bool = False,
 ):
     """
     This function adds a new DNS record into an AD environment.
@@ -321,12 +322,13 @@ async def dnsRecord(
     :param data: DNS record data, for most record types this will be the destination hostname or IP address, for TXT records this can be used for text
     :param dnstype: DNS record type
     :param zone: DNS zone
+    :param zone_type: DNS zone type targeted
+    :param zone_raw_dn: DNS zone raw DistinguishedName, e.g. "DC=_msdcs.racoon.lan,CN=MicrosoftDNS,DC=ForestDnsZones,DC=racoon,DC=lan"
     :param ttl: DNS record TTL, time in seconds the record stays in DNS caches, must be low if you want to propagate record updates quickly
     :param preference: DNS MX record preference, must be lower than the concurrent records to be chosen
     :param port: listening port of the service in a DNS SRV record
     :param priority: priority of a DNS SRV record against concurrent, must be lower to be chosen, if identical to others, highest weight will be chosen
     :param weight: weight of a DNS SRV record against concurrent, must be higher with the lowest priority to be chosen
-    :param forest: if set, registers dns record in forest instead of domain
     """
     # DNS_RPC_RECORD - section 2.2.2.2.5
     # RANK_ZONE - The record comes from an authoritative zone
@@ -339,19 +341,20 @@ async def dnsRecord(
         for label in naming_context.split(",DC="):
             if label:
                 zone += "." + label
-        if forest:
-            zone = "_msdcs" + zone
-        else:
-            # Removes first dot
-            zone = zone[1:]
+        # Removes first dot
+        zone = zone[1:]
 
-    # TODO: take into account custom ForestDnsZones and DomainDnsZones partition name ?
-    if forest:
-        zone_type = "ForestDnsZones"
+    zone_types = {
+        "DOMAIN": "DC=DomainDnsZones",
+        "FOREST": "DC=ForestDnsZones",
+        "LEGACY": "CN=System"
+    }
+    if zone_raw_dn:
+        zone_dn = zone_raw_dn
     else:
-        zone_type = "DomainDnsZones"
-
-    zone_dn = f"DC={zone},CN=MicrosoftDNS,DC={zone_type}{naming_context}"
+        zone_dn = f"DC={zone},CN=MicrosoftDNS,{zone_types[zone_type]}{naming_context}"
+    
+    LOG.info(f'Adding "{name}" to "{zone_dn}"')
     record_dn = None
 
     serial = None
