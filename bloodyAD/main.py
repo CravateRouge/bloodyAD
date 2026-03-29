@@ -47,7 +47,7 @@ async def amain():
     parser.add_argument(
         "-s",
         "--secure",
-        help="Use LDAP/GC over TLS (LDAPS/GCS). Use -ss to remove all encryption/signing (useful for debug).",
+        help="Use LDAP/GC over TLS (LDAPS/GCS). Use -ss for simple bind and -sss to remove all channel binding/signing (useful for debug).",
         action="count",
         default=0,
     )

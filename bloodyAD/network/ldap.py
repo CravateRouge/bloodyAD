@@ -190,6 +190,11 @@ class Ldap(MSLDAPClient):
         # Create instance
         instance = cls(conn, ldap_factory.target, ldap_factory.credential)
         instance.co_url = co_url
+
+        if cnf.debug == 3:
+            instance._disable_channel_binding = True
+            instance._disable_signing = True
+            instance._null_channel_binding = True
         
         # Connect asynchronously
         try:

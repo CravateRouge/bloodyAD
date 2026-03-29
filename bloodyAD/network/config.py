@@ -29,6 +29,7 @@ class Config:
     dns: str = ""
     timeout: int = 0
     auth: str = ""
+    debug: int = 0
 
     def __post_init__(self):
         # Resolve dc ip
@@ -128,7 +129,7 @@ class ConnectionHandler:
             elif args.secure:
                 if args.secure == 1:
                     scheme = "ldaps"
-                elif args.secure >= 2:
+                elif args.secure == 2:
                     auth = "simple"
                     
             cnf = Config(
@@ -143,7 +144,8 @@ class ConnectionHandler:
                 format=args.format,
                 dns=args.dns,
                 timeout=args.timeout,
-                auth=auth
+                auth=auth,
+                debug=args.secure
             )
         else:
             cnf = config

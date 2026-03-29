@@ -452,12 +452,12 @@ async def writable(
     """
 
     ldap_filter = ""
-    if otype == "useronly":
+    if otype.lower() == "useronly":
         ldap_filter = "(sAMAccountType=805306368)"
-    elif otype == "ou":
+    elif otype.lower() == "ou":
         ldap_filter = "(|(objectClass=container)(objectClass=organizationalUnit))"
     else:
-        if otype == "gpo":
+        if otype.lower() == "gpo":
             objectClass = "groupPolicyContainer"
         else:
             objectClass = otype
