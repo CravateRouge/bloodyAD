@@ -11,7 +11,7 @@ from badldap.protocol.typeconversion import (
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
 )
 from datetime import datetime, timezone, timedelta
-import unicodedata, base64
+import unicodedata, base64, json, re
 
 async def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False):
     """
@@ -59,6 +59,56 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
             v = [vstr.encode() for vstr in v]
 
     ldap = await conn.getLdap()
+
+    # Auto-backup current attribute value before modification
+    try:
+        current_entry = None
+        async for e in ldap.bloodysearch(target, attr=[attribute], raw=True):
+            current_entry = e
+            break
+
+        # Case-insensitive attribute lookup in response
+        current_values = None
+        if current_entry:
+            for key in current_entry:
+                if key.lower() == attribute.lower() and key.lower() != "distinguishedname":
+                    current_values = current_entry[key]
+                    break
+
+        if current_values is not None:
+            if not isinstance(current_values, list):
+                current_values = [current_values]
+
+            encoded_values = []
+            for val in current_values:
+                if isinstance(val, bytes):
+                    encoded_values.append(base64.b64encode(val).decode())
+                else:
+                    encoded_values.append(base64.b64encode(str(val).encode()).decode())
+
+            now = datetime.now(timezone.utc)
+            safe_target = re.sub(r'[^\w\-]', '', target)
+            safe_attr = re.sub(r'[^\w\-]', '', attribute)
+            backup_filename = f".bloodyad-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}-{safe_target}-{safe_attr}.bak"
+
+            backup_data = {
+                "target": target,
+                "target_dn": current_entry.get("distinguishedName", target),
+                "attribute": attribute,
+                "values": encoded_values,
+                "host": conn.conf.host,
+                "timestamp": now.isoformat(),
+            }
+
+            with open(backup_filename, 'w') as f:
+                json.dump(backup_data, f, indent=2)
+
+            LOG.info(f"{target}'s {attribute} original values backed up to {backup_filename}")
+        else:
+            LOG.info(f"{target}'s {attribute} was empty before modification, restore via set object to empty the attribute")
+    except Exception as e:
+        LOG.warning(f"Could not backup current value of {attribute}: {e}")
+
     await ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
     )
