@@ -13,7 +13,7 @@ from badldap.protocol.typeconversion import (
 from datetime import datetime, timezone, timedelta
 import unicodedata, base64
 
-async def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False):
+async def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False, bak: bool = False):
     """
     Add/Replace/Delete target's attribute
 
@@ -22,6 +22,7 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
     :param v: add value if attribute doesn't exist, replace value if attribute exists, delete if no value given, can be called multiple times if multiple values to set (e.g -v HOST/janettePC -v HOST/janettePC.bloody.local)
     :param raw: if set, will try to send the values provided as is, without any encoding
     :param b64: expect base64 values in -v (available only with --raw)
+    :param bak: if set, prints the command to restore the original attribute value
     """
 
     if not raw:
@@ -59,10 +60,53 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
             v = [vstr.encode() for vstr in v]
 
     ldap = await conn.getLdap()
+
+    # Query current value before modification for --bak restore command
+    restore_cmd = None
+    if bak:
+        try:
+            current_entry = None
+            async for e in ldap.bloodysearch(target, attr=[attribute], raw=True):
+                current_entry = e
+                break
+
+            current_values = None
+            if current_entry:
+                for key in current_entry:
+                    if key.lower() == attribute.lower() and key.lower() != "distinguishedname":
+                        current_values = current_entry[key]
+                        break
+
+            if current_values is not None:
+                if not isinstance(current_values, list):
+                    current_values = [current_values]
+
+                str_values = []
+                is_binary = False
+                for val in current_values:
+                    if isinstance(val, bytes):
+                        try:
+                            str_values.append(val.decode())
+                        except UnicodeDecodeError:
+                            is_binary = True
+                            str_values.append(base64.b64encode(val).decode())
+                    else:
+                        str_values.append(str(val))
+
+                v_args = " ".join(f"-v '{val}'" for val in str_values)
+                raw_args = " --raw --b64" if is_binary else ""
+                restore_cmd = f"set object '{target}' {attribute}{raw_args} {v_args}"
+            else:
+                restore_cmd = f"set object '{target}' {attribute}"
+        except Exception as e:
+            LOG.warning(f"Could not query current value for --bak: {e}")
+
     await ldap.bloodymodify(
         target, {attribute: [(Change.REPLACE.value, v)]}, encode=(not raw)
     )
     LOG.info(f"{target}'s {attribute} has been updated")
+    if restore_cmd is not None:
+        LOG.info(f"Restore command:\n    {restore_cmd}")
 
 
 async def owner(conn, target: str, owner: str):
