@@ -96,6 +96,10 @@ class UnitTests(unittest.TestCase):
             ["--host", "test.local", "add", "shadowcredentials", "--help"],
             ["--host", "test.local", "add", "SHADOWCREDENTIALS", "--help"],
             ["--host", "test.local", "add", "ShadowCredentials", "--help"],
+            # Test gmsaGroup variations
+            ["--host", "test.local", "add", "gmsagroup", "--help"],
+            ["--host", "test.local", "add", "GMSAGROUP", "--help"],
+            ["--host", "test.local", "add", "gmsaGroup", "--help"],
             # Test get module
             ["--host", "test.local", "get", "object", "--help"],
             ["--host", "test.local", "get", "OBJECT", "--help"],
