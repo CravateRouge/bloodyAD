@@ -3,7 +3,18 @@ __pycache__/
 *.pfx
 *.ccache
 venv/
+.venv/
 *.egg-info/
 dist/
 build/
 settings.json
+
+# Test secrets — copy from secrets.json.example
+tests/secrets.json
+tests/tmp/
+
+# Local lab provisioning (user-specific, not shipped with repo)
+tests/lab/.local/
+tests/lab/terraform.tfstate*
+tests/lab/*.tfvars
+!tests/lab/terraform.tfvars.example
