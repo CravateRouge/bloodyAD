@@ -30,10 +30,9 @@ class FormatterTests(unittest.TestCase):
             "distinguishedName": "CN=Test,DC=example,DC=com",
             "someUnknownAttr": [b"test"],
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # Unknown attributes should remain unchanged
         self.assertEqual(result["distinguishedName"], "CN=Test,DC=example,DC=com")
         self.assertEqual(result["someUnknownAttr"], [b"test"])
@@ -42,15 +41,14 @@ class FormatterTests(unittest.TestCase):
         """Test that badldap default formatters are applied"""
         import uuid
         test_guid = uuid.uuid4().bytes
-        
+
         attributes = {
             "objectGUID": [test_guid],
             "cn": [b"TestUser"]
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # objectGUID should be formatted to string
         self.assertIsInstance(result["objectGUID"], str)
         # cn should be formatted to string
@@ -62,10 +60,9 @@ class FormatterTests(unittest.TestCase):
             "cn": [b"Test"],
             "userAccountControl": [b"512"]  # NORMAL_ACCOUNT in list
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # cn should be formatted by badldap
         self.assertEqual(result["cn"], "Test")
         # userAccountControl should be formatted as a list by bloodyAD custom formatter
@@ -77,10 +74,9 @@ class FormatterTests(unittest.TestCase):
         attributes = {
             "userAccountControl": b"512"  # Direct bytes value
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # Should be formatted as a list
         self.assertIsInstance(result["userAccountControl"], list)
         self.assertIn("NORMAL_ACCOUNT", result["userAccountControl"])
@@ -90,23 +86,21 @@ class FormatterTests(unittest.TestCase):
         attributes = {
             "userAccountControl": [b"512", b"544"]  # Multiple values
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # Should format each value in the list
         self.assertIsInstance(result["userAccountControl"], list)
         self.assertEqual(len(result["userAccountControl"]), 2)
-        
+
     def test_applyFormatters_with_trustDirection_single_item_list(self):
         """Test applyFormatters with trustDirection attribute as single-item list"""
         attributes = {
             "trustDirection": [b"3"]  # BIDIRECTIONAL in list
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # trustDirection should be formatted (single value from list)
         self.assertEqual(result["trustDirection"], "BIDIRECTIONAL")
 
@@ -115,24 +109,11 @@ class FormatterTests(unittest.TestCase):
         attributes = {
             "trustDirection": b"3"  # Direct bytes value
         }
-        formatter_map = formatters.getFormatters()
-        
-        result = formatters.applyFormatters(attributes, formatter_map)
-        
+
+        result = formatters.applyFormatters(attributes)
+
         # trustDirection should be formatted
         self.assertEqual(result["trustDirection"], "BIDIRECTIONAL")
-
-    def test_applyFormatters_empty_formatters(self):
-        """Test applyFormatters with empty formatters dict (raw mode)"""
-        attributes = {
-            "cn": [b"Test"],
-            "userAccountControl": [b"512"]
-        }
-        
-        result = formatters.applyFormatters(attributes, {})
-        
-        # All attributes should remain unchanged
-        self.assertEqual(result, attributes)
 
 
 if __name__ == '__main__':
