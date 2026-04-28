@@ -121,12 +121,17 @@ def getFormatters():
     BloodyAD formatters take precedence over badldap formatters.
     """
     def make_formatter(format_func):
-        """Wrapper to handle list/non-list values consistently"""
+        """Wrapper to handle list/non-list values consistently.
+
+        When the input is a single-item list (the common LDAP case for
+        single-valued attributes), unwrap it so formatters that already
+        return a list of decoded values (e.g. userAccountControl flags)
+        don't end up double-nested.
+        """
         def wrapper(val):
             if isinstance(val, list):
-                # if len(val) == 1:
-                #     return format_func(val[0])
-                # else:
+                if len(val) == 1:
+                    return format_func(val[0])
                 return [format_func(v) for v in val]
             else:
                 return format_func(val)
@@ -191,11 +196,10 @@ def getFormatters():
 def applyFormatters(attributes):
     """
     Apply formatters to attributes dictionary.
-    
+
     Args:
         attributes: Dictionary of attribute names to values
-        formatters_map: Dictionary of attribute names to formatter functions
-    
+
     Returns:
         Dictionary with formatted attributes
     """
