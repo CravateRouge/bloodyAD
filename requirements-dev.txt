@@ -1,0 +1,14 @@
+# Development dependencies for running the bloodyAD test suite.
+#
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# Unit tests (tests/unit_test.py, tests/test_formatters.py,
+# tests/test_msldap_module.py) don't need any of these — they run against
+# the installed bloodyAD package only.
+#
+# The functional suite (tests/test_functional.py, tests/test_authentication.py)
+# shells out to `getTGT.py` and `certipy`, so those need to be on PATH.
+
+impacket==0.13.0
+certipy-ad==5.0.4

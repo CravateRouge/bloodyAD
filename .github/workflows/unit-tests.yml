@@ -1,0 +1,46 @@
+name: Unit tests
+
+# Runs the AD-free unit tests on every PR and push to main.
+# These tests don't need a DC — they exercise formatters, CLI parsing,
+# and the msldap module wrapper in isolation.
+#
+# Functional tests (tests/test_functional.py, tests/test_authentication.py)
+# are not run in CI because they need a live AD lab with AD CS. Run those
+# locally against your lab — see tests/lab/README.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install bloodyAD
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run AD-free unit tests
+        run: |
+          python -m unittest \
+            tests.test_formatters \
+            tests.test_msldap_module \
+            tests.unit_test \
+            -v

@@ -1,0 +1,14 @@
+# Copy this file to terraform.tfvars (alongside main.tf, gitignored) and
+# fill in values for your Proxmox cluster.
+
+pm_api_url          = "https://proxmox.lan:8006/api2/json"
+pm_api_token_id     = "terraform@pve!bloodyad"
+pm_api_token_secret = "your-secret-here-change-me"
+pm_tls_insecure     = true
+
+target_node         = "pve01"
+template_name       = "win2025-template"
+vm_name             = "bloody-dc"
+cpu_cores           = 4
+memory_mb           = 6144
+bridge              = "vmbr0"
