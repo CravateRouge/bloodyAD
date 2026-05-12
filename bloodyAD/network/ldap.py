@@ -712,7 +712,7 @@ class Ldap(MSLDAPClient):
         finally:
             if newconn != conn and newconn._ldap:
                 await newconn._ldap.close()
-            return search_results
+        return search_results
 
     async def searchInPartition(
         self,
@@ -767,6 +767,6 @@ class Ldap(MSLDAPClient):
         finally:
             if newconn != conn and newconn._ldap:
                 await newconn._ldap.close()
-            return search_result
+        return search_result
 
 
