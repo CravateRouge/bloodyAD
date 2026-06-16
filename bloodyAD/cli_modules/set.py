@@ -8,12 +8,21 @@ from badldap.protocol import typeconversion
 from badldap.protocol.typeconversion import (
     LDAP_WELL_KNOWN_ATTRS,
     MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
-    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC
+    MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
 )
 from datetime import datetime, timezone, timedelta
 import unicodedata, base64
 
-async def object(conn, target: str, attribute: str, v: list = [], raw: bool = False, b64: bool = False, bak: bool = False):
+
+async def object(
+    conn,
+    target: str,
+    attribute: str,
+    v: list = [],
+    raw: bool = False,
+    b64: bool = False,
+    bak: bool = False,
+):
     """
     Add/Replace/Delete target's attribute
 
@@ -28,12 +37,20 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
     if not raw:
         # We change some encoding functions because for whatever reason some are marked as 'bytes' but are actually 'sd' so can take sddl string
         # but we cannot directly change in badldap because it would break the ones passing directly multi_bytes
-        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["msDS-AllowedToActOnBehalfOfOtherIdentity"] = typeconversion.multi_sd
-        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["nTSecurityDescriptor"] = typeconversion.single_sd
+        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC[
+            "msDS-AllowedToActOnBehalfOfOtherIdentity"
+        ] = typeconversion.multi_sd
+        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC["nTSecurityDescriptor"] = (
+            typeconversion.single_sd
+        )
         norm_attr = attribute.lower()
         lookup_table = None
         # Order is very important cause there are overlapped with different encoding function values
-        for table in [MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC, MSLDAP_BUILTIN_ATTRIBUTE_TYPES, LDAP_WELL_KNOWN_ATTRS]:
+        for table in [
+            MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC,
+            MSLDAP_BUILTIN_ATTRIBUTE_TYPES,
+            LDAP_WELL_KNOWN_ATTRS,
+        ]:
             for key in table:
                 if key.lower() == norm_attr:
                     attribute = key
@@ -44,13 +61,17 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
 
         if lookup_table:
             encoding_func = lookup_table[attribute]
-            str_support = ["utf16le","sid","str","int","guid","sd"]
-            encoding_type = encoding_func.__name__.split('_')[1]
+            str_support = ["utf16le", "sid", "str", "int", "guid", "sd"]
+            encoding_type = encoding_func.__name__.split("_")[1]
             if encoding_type not in str_support:
-                LOG.warning(f"Attribute encoding not supported for {attribute} with {encoding_type} attribute type, using raw mode")
+                LOG.warning(
+                    f"Attribute encoding not supported for {attribute} with {encoding_type} attribute type, using raw mode"
+                )
                 raw = True
         else:
-            LOG.warning(f"Attribute encoding not supported for {attribute}, using raw mode")
+            LOG.warning(
+                f"Attribute encoding not supported for {attribute}, using raw mode"
+            )
             raw = True
     # Converting raw str into raw binary
     if raw:
@@ -73,7 +94,10 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
             current_values = None
             if current_entry:
                 for key in current_entry:
-                    if key.lower() == attribute.lower() and key.lower() != "distinguishedname":
+                    if (
+                        key.lower() == attribute.lower()
+                        and key.lower() != "distinguishedname"
+                    ):
                         current_values = current_entry[key]
                         break
 
@@ -149,7 +173,9 @@ async def owner(conn, target: str, owner: str):
 
 # Full info on what you can do:
 # https://learn.microsoft.com/en-us/troubleshoot/windows-server/identity/change-windows-active-directory-user-password
-async def password(conn, target: str, newpass: str, oldpass: str = None, stealth: bool = False):
+async def password(
+    conn, target: str, newpass: str, oldpass: str = None, stealth: bool = False
+):
     """
     Change password of a user/computer
 
@@ -178,15 +204,15 @@ async def password(conn, target: str, newpass: str, oldpass: str = None, stealth
         # Let's check if we comply to pwd policy
         entry = None
         async for search_entry in ldap.bloodysearch(
-                target,
-                attr=[
-                    "msDS-ResultantPSO",
-                    "pwdLastSet",
-                    "displayName",
-                    "sAMAccountName",
-                    "sAMAccountType",
-                ],
-            ):
+            target,
+            attr=[
+                "msDS-ResultantPSO",
+                "pwdLastSet",
+                "displayName",
+                "sAMAccountName",
+                "sAMAccountType",
+            ],
+        ):
             entry = search_entry
             break
         pwdLastSet = entry.get("pwdLastSet", 0)
@@ -195,15 +221,15 @@ async def password(conn, target: str, newpass: str, oldpass: str = None, stealth
         if "msDS-ResultantPSO" in entry:
             tmpPolicy = None
             async for p in ldap.bloodysearch(
-                    entry["msDS-ResultantPSO"],
-                    attr=[
-                        "msDS-MinimumPasswordAge",
-                        "msDS-MinimumPasswordLength",
-                        "msDS-PasswordHistoryLength",
-                        "msDS-PasswordComplexityEnabled",
-                        "name",
-                    ],
-                ):
+                entry["msDS-ResultantPSO"],
+                attr=[
+                    "msDS-MinimumPasswordAge",
+                    "msDS-MinimumPasswordLength",
+                    "msDS-PasswordHistoryLength",
+                    "msDS-PasswordComplexityEnabled",
+                    "name",
+                ],
+            ):
                 tmpPolicy = p
                 break
             pwdPolicy = {
@@ -222,14 +248,14 @@ async def password(conn, target: str, newpass: str, oldpass: str = None, stealth
         else:
             pwdPolicy = None
             async for p in ldap.bloodysearch(
-                    ldap.domainNC,
-                    attr=[
-                        "minPwdAge",
-                        "minPwdLength",
-                        "pwdHistoryLength",
-                        "pwdProperties",
-                    ],
-                ):
+                ldap.domainNC,
+                attr=[
+                    "minPwdAge",
+                    "minPwdLength",
+                    "pwdHistoryLength",
+                    "pwdProperties",
+                ],
+            ):
                 pwdPolicy = p
                 break
             pwdPolicy["pwdComplexity"] = (pwdPolicy["pwdProperties"] & 1) > 0
@@ -307,7 +333,6 @@ async def password(conn, target: str, newpass: str, oldpass: str = None, stealth
                     " protocol such as smbpasswd, server error may be more explicit."
                 )
             else:
-
                 if pwdPolicy.get("pwdHistoryLength", 0) > 0:
                     if oldpass == newpass:
                         error_str = "New Password can't be identical to old password."
@@ -356,34 +381,90 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     ldap = await conn.getLdap()
     entry = None
     async for e in ldap.bloodysearch(
-        "CN=Deleted Objects,"+ldap.domainNC, ldap_filter, search_scope=Scope.SUBTREE, attr=["msDS-LastKnownRDN","lastKnownParent", "sAMAccountName", "servicePrincipalName", "userPrincipalName", "name", "dNSHostName", "displayName"], controls=showRecoverable()
+        "CN=Deleted Objects," + ldap.domainNC,
+        ldap_filter,
+        search_scope=Scope.SUBTREE,
+        attr=[
+            "msDS-LastKnownRDN",
+            "lastKnownParent",
+            "sAMAccountName",
+            "servicePrincipalName",
+            "userPrincipalName",
+            "name",
+            "dNSHostName",
+            "displayName",
+        ],
+        controls=showRecoverable(),
     ):
         entry = e
-        break# LDAP_SERVER_SHOW_DELETED_OID
-    old_name = entry['name'].splitlines()[0]
-    new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',old_name)},{newParent if newParent else entry['lastKnownParent']}"
-    attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
+        break  # LDAP_SERVER_SHOW_DELETED_OID
+
+    # Raise early if restore destination is unknown
+    if not newParent and not entry.get("lastKnownParent"):
+        raise ValueError(
+            "lastKnownParent is missing and no --newParent provided, cannot safely restore"
+        )
+
+    old_name = entry["name"].splitlines()[0]
+    new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN', old_name)},{newParent if newParent else entry['lastKnownParent']}"
+    attributes = {
+        "distinguishedName": [(Change.REPLACE.value, new_dn)],
+        "isDeleted": [(Change.DELETE.value, [])],
+    }
     if newName:
         # Name will be automatically replaced by new RDN,
         # If we force the change we will have error ERROR_DS_CANT_ON_RDN
-        #attributes["name"] = [(Change.REPLACE.value, newName)]
+        # attributes["name"] = [(Change.REPLACE.value, newName)]
         if entry.get("displayName"):
-            attributes["displayName"] = [(Change.REPLACE.value, entry["displayName"].replace(entry["name"], newName))]
+            attributes["displayName"] = [
+                (
+                    Change.REPLACE.value,
+                    entry["displayName"].replace(entry["name"], newName),
+                )
+            ]
         if entry.get("sAMAccountName"):
-            attributes["sAMAccountName"] = [(Change.REPLACE.value, newName+'$' if entry["sAMAccountName"][-1] == "$" else newName)]
+            attributes["sAMAccountName"] = [
+                (
+                    Change.REPLACE.value,
+                    newName + "$" if entry["sAMAccountName"][-1] == "$" else newName,
+                )
+            ]
         if entry.get("servicePrincipalName"):
-            attributes["servicePrincipalName"] = [(Change.REPLACE.value, [v.replace(entry["name"],newName) for v in entry["servicePrincipalName"]])]
+            attributes["servicePrincipalName"] = [
+                (
+                    Change.REPLACE.value,
+                    [
+                        v.replace(entry["name"], newName)
+                        for v in entry["servicePrincipalName"]
+                    ],
+                )
+            ]
         if entry.get("userPrincipalName"):
-            attributes["userPrincipalName"] = [(Change.REPLACE.value, newName + '@' + entry["userPrincipalName"].split('@')[-1])]
+            attributes["userPrincipalName"] = [
+                (
+                    Change.REPLACE.value,
+                    newName + "@" + entry["userPrincipalName"].split("@")[-1],
+                )
+            ]
         if entry.get("dNSHostName"):
-            attributes["dNSHostName"] = [(Change.REPLACE.value, newName + '.' + entry["dNSHostName"].split('.',1)[-1])]
+            attributes["dNSHostName"] = [
+                (
+                    Change.REPLACE.value,
+                    newName + "." + entry["dNSHostName"].split(".", 1)[-1],
+                )
+            ]
 
     try:
         await ldap.bloodymodify(
-            entry["distinguishedName"], attributes, controls=[("1.2.840.113556.1.4.417", True, None)], is_restore=True
+            entry["distinguishedName"],
+            attributes,
+            controls=[("1.2.840.113556.1.4.417", True, None)],
+            is_restore=True,
         )
     except badldap.commons.exceptions.LDAPModifyException as e:
-        if "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19: # 19 is constraintViolation
+        if (
+            "userPrincipalName" in str(e.diagnostic_message) and e.resultcode == 19
+        ):  # 19 is constraintViolation
             LOG.error(
                 "Operation failed, the userPrincipalName is probably already used by another non-deleted object, you have the change the other user UPN first (changing UPN of a deleted object is not allowed)"
             )
