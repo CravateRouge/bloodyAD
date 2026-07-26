@@ -360,6 +360,8 @@ async def restore(conn, target: str, newName: str = None, newParent: str = None)
     ):
         entry = e
         break# LDAP_SERVER_SHOW_DELETED_OID
+    if not newParent and not entry.get("lastKnownParent"):
+        raise ValueError("lastKnownParent is missing and no --newParent provided, cannot safely restore")
     old_name = entry['name'].splitlines()[0]
     new_dn = f"CN={newName if newName else entry.get('msDS-LastKnownRDN',old_name)},{newParent if newParent else entry['lastKnownParent']}"
     attributes = {"distinguishedName": [(Change.REPLACE.value, new_dn)],"isDeleted": [(Change.DELETE.value, [])]}
