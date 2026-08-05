@@ -83,6 +83,15 @@ async def badSuccessor(conn: ConnectionHandler, dmsa: str, t: list = ["CN=Admini
         return ou
 
     ldap = await conn.getLdap()
+
+    # Allow to retrieve username even when username is not provided in args (e.g. kerberos ccache)
+    if not conn.conf.username:
+        res, err = await ldap.whoami()
+        if err is not None:
+            raise err
+        domain, samaccountname = res[2:].split('\\', 1)
+        conn.conf.username = samaccountname
+
     if not ou:
         ou = await getWeakOU(conn)
     
