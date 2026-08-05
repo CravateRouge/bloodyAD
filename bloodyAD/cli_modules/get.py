@@ -360,7 +360,7 @@ async def object(
     ]
     conn.conf.transitive = transitive
     ldap = await conn.getLdap()
-    entries = ldap.bloodysearch(target, attr=attr.split(","), raw=raw)
+    entries = ldap.bloodysearch(target, attr=attr.split(","), controls=showRecoverable(), raw=raw)
     rendered_entries = utils.renderSearchResult(entries)
     if resolve_sd and not raw:
         async for entry in rendered_entries:
