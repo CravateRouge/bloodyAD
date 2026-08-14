@@ -106,6 +106,10 @@ class UnitTests(unittest.TestCase):
             # Test remove module  
             ["--host", "test.local", "remove", "genericall", "--help"],
             ["--host", "test.local", "remove", "SHADOWCREDENTIALS", "--help"],
+            # Test set parent variations
+            ["--host", "test.local", "set", "parent", "--help"],
+            ["--host", "test.local", "set", "PARENT", "--help"],
+            ["--host", "test.local", "set", "Parent", "--help"],
         ]
         
         for test_args in test_cases:

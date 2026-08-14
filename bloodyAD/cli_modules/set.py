@@ -147,6 +147,43 @@ async def owner(conn, target: str, owner: str):
         LOG.info(f"Old owner {old_sid} is now replaced by {owner} on {target}")
 
 
+async def parent(conn, target: str, new_ou: str):
+    """
+    Move an object to a new parent container/OU
+
+    :param target: sAMAccountName, DN or SID of the target
+    :param new_ou: DN of the new parent container/OU
+    """
+    ldap = await conn.getLdap()
+
+    target_dn = ""
+    async for entry in ldap.bloodysearch(
+        target, attr=["distinguishedName"], control_flag=0
+    ):
+        target_dn = entry["distinguishedName"]
+        break
+
+    old_parent = target_dn.split(",", 1)[1]
+    if old_parent.lower() == new_ou.lower():
+        LOG.warning(
+            f"{target} is already under {new_ou}, no modification will be made"
+        )
+        return
+
+    new_dn = f"{target_dn.split(',', 1)[0]},{new_ou}"
+
+    try:
+        await ldap.bloodymodify(
+            target_dn,
+            {"distinguishedName": [(Change.REPLACE.value, [new_dn])]},
+        )
+    except badldap.commons.exceptions.LDAPModifyDNException as e:
+        LOG.error(f"Failed to move {target} to {new_ou}: {e}")
+        raise e
+
+    LOG.info(f"{target} has been moved from {old_parent} to {new_ou}")
+
+
 # Full info on what you can do:
 # https://learn.microsoft.com/en-us/troubleshoot/windows-server/identity/change-windows-active-directory-user-password
 async def password(conn, target: str, newpass: str, oldpass: str = None, stealth: bool = False):

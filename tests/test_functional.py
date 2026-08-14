@@ -449,6 +449,99 @@ class TestModules(unittest.TestCase):
             "test.domain",
         )
 
+    def test_07SetParent(self):
+        # Uses default containers available in the lab, CN=Users and
+        # CN=ForeignSecurityPrincipals (already used for users in test_03)
+        fsp = "CN=FOREIGNSECURITYPRINCIPALS," + self.rootDomainNamingContext
+        users = "CN=Users," + self.rootDomainNamingContext
+        user = "parent_user"
+
+        # Happy path: move user from CN=Users to the FSP container and back
+        self.createUser(self.admin, user, "Password1237!")
+        self.launchBloody(self.admin, ["set", "parent", user, fsp])
+        self.assertRegex(
+            self.launchBloody(
+                self.admin,
+                ["get", "object", user, "--attr", "distinguishedName"],
+            ),
+            "CN=FOREIGNSECURITYPRINCIPALS",
+        )
+
+        # Same-parent no-op: warn like set owner does
+        self.assertRegex(
+            self.launchBloody(self.admin, ["set", "parent", user, fsp]),
+            "no modification will be made",
+        )
+        self.launchBloody(self.admin, ["set", "parent", user, users])
+
+        # new_ou not found: diagnostic logged, then the move fails server-side on modify_dn
+        self.assertRegex(
+            self.launchBloody(
+                self.admin,
+                ["set", "parent", user, "OU=GhostOU," + self.rootDomainNamingContext],
+                isErr=False,
+            ),
+            "Failed to move",
+        )
+        self.assertRegex(
+            self.launchBloody(
+                self.admin,
+                ["set", "parent", user, "OU=GhostOU," + self.rootDomainNamingContext],
+                isErr=False,
+            ),
+            "LDAPModifyDNException",
+        )
+
+        # target not found
+        self.assertRegex(
+            self.launchBloody(
+                self.admin,
+                ["set", "parent", "ghost_user", fsp],
+                isErr=False,
+            ),
+            "No object found",
+        )
+
+        # Access denied during the actual move: stan.dard has no rights on the object
+        lock_user = "parent_lock_user"
+        self.createUser(self.admin, lock_user, "Password1237!")
+        self.assertRegex(
+            self.launchBloody(
+                self.user,
+                ["set", "parent", lock_user, users],
+                isErr=False,
+            ),
+            "insufficientAccessRights",
+        )
+        self.assertRegex(
+            self.launchBloody(
+                self.user,
+                ["set", "parent", lock_user, users],
+                isErr=False,
+            ),
+            "Failed to move",
+        )
+
+        # Target ambiguous: same sAMAccountName in two different containers
+        self.launchBloody(
+            self.admin, ["add", "user", user, "Password1237!", "--ou", fsp]
+        )
+        self.toTear.append(
+            (
+                self.launchBloody,
+                self.admin,
+                ["remove", "object", f"CN={user},{fsp}"],
+            )
+        )
+        self.assertRegex(
+            self.launchBloody(
+                self.admin,
+                ["set", "parent", user, fsp],
+                isErr=False,
+            ),
+            "objects found",
+        )
+
     def createUser(self, creds, usr, pwd, ou=None):
         args = ["add", "user", usr, pwd]
         if ou:
