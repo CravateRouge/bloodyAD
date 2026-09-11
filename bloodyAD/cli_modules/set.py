@@ -54,6 +54,15 @@ async def object(conn, target: str, attribute: str, v: list = [], raw: bool = Fa
             raw = True
     # Converting raw str into raw binary
     if raw:
+        # Force badldap to treat this attribute as raw bytes on write, otherwise
+        # _find_attribute_encoder() may return a decoder (e.g. bytes2timedelta for
+        # pKIExpirationPeriod) and crash / mangle the value in encode=False mode.
+        MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC[attribute] = typeconversion.multi_bytes
+        lower_cache = getattr(
+            typeconversion, "_MSLDAP_BUILTIN_ATTRIBUTE_TYPES_ENC_LOWER", None
+        )
+        if lower_cache is not None:
+            lower_cache[attribute.lower()] = attribute
         if b64:
             v = [base64.b64decode(vstr, validate=True) for vstr in v]
         else:
