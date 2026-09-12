@@ -295,6 +295,9 @@ async def uac(conn: ConnectionHandler, target: str, f: list = None):
         async for e in ldap.bloodysearch(target, attr=["userAccountControl"], raw=True):
             entry = e
             break
+        if "userAccountControl" not in entry:
+            LOG.warn(f"User doesn't have access to {target}'s userAccountControl")
+            return
         old_uac = entry["userAccountControl"][0]
     except IndexError as e:
         entry = None
