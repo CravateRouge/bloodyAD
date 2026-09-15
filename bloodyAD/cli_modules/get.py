@@ -508,7 +508,7 @@ async def writable(
         elif partition == "SCHEMA":
             searchbases.append(ldap.schemaNC)
         elif partition == "DNS":
-            searchbases = ldap.applicationNCs
+            searchbases = ldap.appNCs
         else: # For ALL option
             searchbases = ldap._serverinfo["namingContexts"]
         
