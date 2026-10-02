@@ -368,7 +368,11 @@ async def dnsRecord(
 
     serial = None
     new_dnsrecord_list = None
-    ldap_filter = f"(|(name=@)(name={name}))"
+    # Escape RFC 4515 special chars — without this, name="*" produces the
+    # presence filter (name=*) which matches every node in the zone instead
+    # of the literal "*" node, causing a KeyError crash or wrong node update.
+    escaped_name = name.replace("\\", r"\5c").replace("*", r"\2a").replace("(", r"\28").replace(")", r"\29").replace("\x00", r"\00")
+    ldap_filter = f"(|(name=@)(name={escaped_name}))"
     async for entry in ldap.bloodysearch(
         zone_dn,
         ldap_filter=ldap_filter,
@@ -404,10 +408,16 @@ async def dnsRecord(
         LOG.info(f"{name} has been successfully added")
         return
 
-    new_dnsrecord_list.append(new_dnsrecord.getData())
+    # Drop type-0 tombstone records and clear dNSTombstoned so a previously
+    # deleted node is revived and actually served by the DNS server.
+    live_records = [r for r in new_dnsrecord_list if dns.Record(r).toDict().get("Type") != 0]
+    live_records.append(new_dnsrecord.getData())
 
     await ldap.bloodymodify(
-        record_dn, {"dnsRecord": [(Change.REPLACE.value, new_dnsrecord_list)]}
+        record_dn, {
+            "dnsRecord": [(Change.REPLACE.value, live_records)],
+            "dNSTombstoned": [(Change.REPLACE.value, False)],
+        }
     )
     LOG.info(f"{name} has been successfully updated")
 
