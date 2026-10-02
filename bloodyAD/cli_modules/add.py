@@ -368,7 +368,8 @@ async def dnsRecord(
 
     serial = None
     new_dnsrecord_list = None
-    ldap_filter = f"(|(name=@)(name={name}))"
+    escaped_name = name.replace("\\", r"\5c").replace("*", r"\2a").replace("(", r"\28").replace(")", r"\29").replace("\x00", r"\00")
+    ldap_filter = f"(|(name=@)(name={escaped_name}))"
     async for entry in ldap.bloodysearch(
         zone_dn,
         ldap_filter=ldap_filter,
