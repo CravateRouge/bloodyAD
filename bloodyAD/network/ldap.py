@@ -126,6 +126,8 @@ class Ldap(MSLDAPClient):
                         auth += cnf.format
                     else:
                         auth += "password"
+                        # Prefer AES over RC4 for TGT request (RC4-disabled KDCs reject RC4)
+                        params += "&etype=18&etype=17&etype=23"
                     key = encoded_cnf["password"]
                 else:
                     if os.name == "nt":
