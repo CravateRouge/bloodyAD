@@ -130,6 +130,11 @@ class TestModules(unittest.TestCase):
         )
         self.assertIn(writableUserWrite, writableAll)
 
+        for partition in ["DOMAIN", "CONFIGURATION", "SCHEMA", "DNS", "ALL"]:
+            self.launchBloody(
+                self.user, ["get", "writable", "--partition", partition]
+            )
+
         self.assertRegex(
             self.launchBloody(self.user, ["get", "membership", self.user["username"]]),
             "Domain Users",
