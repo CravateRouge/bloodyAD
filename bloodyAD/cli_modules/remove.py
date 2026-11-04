@@ -47,12 +47,13 @@ async def dnsRecord(
     data: str,
     dnstype: Literal["A", "AAAA", "CNAME", "MX", "PTR", "SRV", "TXT"] = "A",
     zone: str = "CurrentDomain",
+    zone_type: Literal["DOMAIN","FOREST","LEGACY"] = "DOMAIN",
+    zone_raw_dn: str = None,
     ttl: int = None,
     preference: int = None,
     port: int = None,
     priority: int = None,
     weight: int = None,
-    forest: bool = False,
 ):
     """
     Remove a DNS record of an AD environment.
@@ -61,12 +62,13 @@ async def dnsRecord(
     :param data: DNS record data
     :param dnstype: DNS record type
     :param zone: DNS zone
+    :param zone_type: DNS zone type targeted
+    :param zone_raw_dn: DNS zone raw DistinguishedName, e.g. "DC=_msdcs.racoon.lan,CN=MicrosoftDNS,DC=ForestDnsZones,DC=racoon,DC=lan"
     :param ttl: DNS record TTL
     :param preference: DNS MX record preference
     :param port: listening port of the service in a DNS SRV record
     :param priority: priority of a DNS SRV record against concurrent
     :param weight: weight of a DNS SRV record against concurrent
-    :param forest: if set, will fetch the dns record in forest instead of domain
     """
 
     ldap = await conn.getLdap()
@@ -76,20 +78,20 @@ async def dnsRecord(
         for label in naming_context.split(",DC="):
             if label:
                 zone += "." + label
-        if forest:
-            zone = "_msdcs" + zone
-        else:
-            # Removes first dot
-            zone = zone[1:]
+        # Removes first dot
+        zone = zone[1:]
 
-    # TODO: take into account custom ForestDnsZones and DomainDnsZones partition name ?
-    if forest:
-        zone_type = "ForestDnsZones"
+    zone_types = {
+        "DOMAIN": "DC=DomainDnsZones",
+        "FOREST": "DC=ForestDnsZones",
+        "LEGACY": "CN=System"
+    }
+    if zone_raw_dn:
+        zone_dn = zone_raw_dn
     else:
-        zone_type = "DomainDnsZones"
+        zone_dn = f"DC={zone},CN=MicrosoftDNS,{zone_types[zone_type]}{naming_context}"
 
-    zone_dn = f",DC={zone},CN=MicrosoftDNS,DC={zone_type}{naming_context}"
-    record_dn = f"DC={name}{zone_dn}"
+    record_dn = f"DC={name},{zone_dn}"
 
     record_to_remove = None
     entry = None
