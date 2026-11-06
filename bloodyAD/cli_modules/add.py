@@ -692,14 +692,24 @@ async def uac(conn: ConnectionHandler, target: str, f: list = None):
     LOG.info(f"{f} property flags added to {target}'s userAccountControl")
 
 
-async def user(conn: ConnectionHandler, sAMAccountName: str, newpass: str, ou: str = "DefaultOU", lifetime: int = 0):
+async def user(
+    conn: ConnectionHandler,
+    sAMAccountName: str,
+    newpass: str,
+    ou: str = "DefaultOU",
+    lifetime: int = 0,
+    uac: int = 544,
+    no_password: bool = False,
+):
     """
     Add a new user
 
     :param sAMAccountName: sAMAccountName for new user
-    :param newpass: password for new user
+    :param newpass: password for new user, ignored if no_password is set
     :param ou: Organizational Unit for new user
     :param lifetime: lifetime of new user in seconds, if non-zero creates it as a dynamic object
+    :param uac: userAccountControl flags for new user (e.g. 512 for NORMAL_ACCOUNT)
+    :param no_password: if set, does not add the unicodePwd attribute, useful when only Create Child permission is available
     """
     ldap = await conn.getLdap()
     if ou == "DefaultOU":
@@ -726,9 +736,10 @@ async def user(conn: ConnectionHandler, sAMAccountName: str, newpass: str, ou: s
         "objectClass": ["top", "person", "organizationalPerson", "user"],
         "distinguishedName": user_dn,
         "sAMAccountName": sAMAccountName,
-        "userAccountControl": 544,
-        "unicodePwd": '"%s"' % newpass,
+        "userAccountControl": uac,
     }
+    if not no_password:
+        attr["unicodePwd"] = '"%s"' % newpass
 
     if lifetime > 0:
         attr["objectClass"].append("dynamicObject")
