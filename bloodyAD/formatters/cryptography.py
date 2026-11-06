@@ -133,12 +133,28 @@ class MSDS_MANAGEDPASSWORD_BLOB(Structure):
         ("PreviousPasswordOffset", "<H"),
         ("QueryPasswordIntervalOffset", "<H"),
         ("UnchangedPasswordIntervalOffset", "<H"),
-        ("CurrentPassword", "u"),
-        ("PreviousPassword", "u"),
+        ("CurrentPassword", ":"),
+        ("PreviousPassword", ":"),
         # ('AlignmentPadding',':'),
-        ("QueryPasswordInterval", "<Q"),
-        ("UnchangedPasswordInterval", "<Q"),
+        ("QueryPasswordInterval", ":"),
+        ("UnchangedPasswordInterval", ":"),
     )
+
+    def fromString(self, data):
+        super().fromString(data)
+
+        def _strip_terminator(buf):
+            return buf[:-2] if buf.endswith(b"\x00\x00") else buf
+
+        cpo = self["CurrentPasswordOffset"]
+        ppo = self["PreviousPasswordOffset"]
+        qpio = self["QueryPasswordIntervalOffset"]
+        upio = self["UnchangedPasswordIntervalOffset"]
+        self["CurrentPassword"] = _strip_terminator(data[cpo:ppo if ppo else qpio])
+        self["PreviousPassword"] = _strip_terminator(data[ppo:qpio]) if ppo else b""
+        self["QueryPasswordInterval"] = data[qpio:upio]
+        self["UnchangedPasswordInterval"] = data[upio:]
+        return self
 
     def toNtHash(self):
         return md4.MD4(self["CurrentPassword"]).hexdigest()
