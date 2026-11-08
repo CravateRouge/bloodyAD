@@ -11,6 +11,33 @@ from winacl.dtyp.security_descriptor import SECURITY_DESCRIPTOR
 from badldap.network import reacher
 
 
+def escape_filter_chars(value):
+    """Escape a value for interpolation into an LDAP search filter.
+
+    RFC 4515 requires the octets NUL, '(', ')', '*' and '\\' inside an
+    assertion value to be written as a backslash followed by two hex digits.
+    Leaving them raw lets a value close the filter early or inject a new
+    one.  '!' is not in the RFC's reserved set, but it opens a negation in
+    filtercomp, and several servers reject or misparse a bare one inside a
+    value, so it is escaped too; the meaning of the resulting filter is
+    unchanged because \\21 decodes back to '!'.
+
+    The previous spelling of this transformation lived inline in
+    cli_modules/add.py and omitted '!'.
+    """
+    if not isinstance(value, str):
+        return value
+
+    return (
+        value.replace("\\", r"\5c")
+        .replace("*", r"\2a")
+        .replace("(", r"\28")
+        .replace(")", r"\29")
+        .replace("\x00", r"\00")
+        .replace("!", r"\21")
+    )
+
+
 def addRight(
     sd,
     user_sid,
@@ -320,7 +347,7 @@ class LazyAdSchema:
                     filters.append(buffer_filter)
                     buffer_filter = ""
                     filter_nb = 0
-                buffer_filter += f"(distinguishedName={dn})"
+                buffer_filter += f"(distinguishedName={escape_filter_chars(dn)})"
                 filter_nb += 1
 
             if conn == self.conn:
