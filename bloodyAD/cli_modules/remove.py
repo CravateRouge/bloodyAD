@@ -45,7 +45,7 @@ async def dnsRecord(
     conn: ConnectionHandler,
     name: str,
     data: str,
-    dnstype: Literal["A", "AAAA", "CNAME", "MX", "PTR", "SRV", "TXT"] = "A",
+    dnstype: Literal["A", "AAAA", "CNAME", "MX", "NS", "PTR", "SRV", "TXT"] = "A",
     zone: str = "CurrentDomain",
     zone_type: Literal["DOMAIN","FOREST","LEGACY"] = "DOMAIN",
     zone_raw_dn: str = None,
