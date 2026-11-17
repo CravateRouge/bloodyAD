@@ -106,6 +106,9 @@ class UnitTests(unittest.TestCase):
             # Test remove module  
             ["--host", "test.local", "remove", "genericall", "--help"],
             ["--host", "test.local", "remove", "SHADOWCREDENTIALS", "--help"],
+            ["--host", "test.local", "remove", "gmsagroup", "--help"],
+            ["--host", "test.local", "remove", "GMSAGROUP", "--help"],
+            ["--host", "test.local", "remove", "gmsaGroup", "--help"],
         ]
         
         for test_args in test_cases:
