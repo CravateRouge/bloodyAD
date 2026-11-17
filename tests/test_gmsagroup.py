@@ -282,6 +282,53 @@ class GmsaGroupTests(unittest.IsolatedAsyncioTestCase):
         finally:
             utils.getSD = original_get_sd
 
+    async def test_remove_gmsaGroup_ace_with_additional_permissions(self):
+        """Test that removing gMSA rights from an ACE with additional permissions issues Change.REPLACE preserving the ACE"""
+        sd = accesscontrol.createEmptySD()
+        combined_mask = (
+            self.access_mask
+            | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_WRITE_PROP"]
+        )
+        ace = accesscontrol.createACE(
+            sid.SID.from_string(self.member1_sid).to_bytes(),
+            None,
+            combined_mask,
+        )
+        sd["Dacl"].aces.append(ace)
+        packed = sd.getData()
+        unpacked = ldaptypes.SR_SECURITY_DESCRIPTOR(data=packed)
+
+        mock_ldap = AsyncMock()
+        mock_conn = MagicMock()
+        mock_conn.getLdap = AsyncMock(return_value=mock_ldap)
+
+        async def mock_search(target, attr):
+            yield {"objectSid": self.member1_sid}
+
+        mock_ldap.bloodysearch = mock_search
+
+        async def mock_get_sd(conn, object_id, attr, control_flag):
+            return unpacked, [packed]
+
+        original_get_sd = utils.getSD
+        utils.getSD = mock_get_sd
+        try:
+            await remove.gmsaGroup(mock_conn, "testgmsa$", "testuser")
+        finally:
+            utils.getSD = original_get_sd
+
+        mock_ldap.bloodymodify.assert_called_once()
+        args = mock_ldap.bloodymodify.call_args[0]
+        self.assertEqual(args[0], "testgmsa$")
+        change_op, new_data = args[1]["msDS-GroupMSAMembership"][0]
+        self.assertEqual(change_op, Change.REPLACE.value)
+        modified_sd = ldaptypes.SR_SECURITY_DESCRIPTOR(data=new_data)
+        self.assertEqual(len(modified_sd["Dacl"].aces), 1)
+        self.assertEqual(
+            modified_sd["Dacl"].aces[0]["Ace"]["Mask"]["Mask"],
+            accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_WRITE_PROP"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
