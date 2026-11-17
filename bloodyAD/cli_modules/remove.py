@@ -202,9 +202,15 @@ async def gmsaGroup(conn: ConnectionHandler, gmsa: str, member: str):
     """
     ldap = await conn.getLdap()
     control_flag = 0
-    new_sd, _ = await utils.getSD(
+    new_sd, sd_data = await utils.getSD(
         conn, gmsa, "msDS-GroupMSAMembership", control_flag
     )
+    if not sd_data:
+        raise BloodyError(
+            f"No msDS-GroupMSAMembership attribute returned for '{gmsa}'. "
+            "The attribute may not exist or the user lacks permission to read it."
+        )
+
     if "s-1-" in member.lower():
         member_sid = member
     else:
@@ -212,15 +218,19 @@ async def gmsaGroup(conn: ConnectionHandler, gmsa: str, member: str):
         async for e in ldap.bloodysearch(member, attr=["objectSid"]):
             entry = e
             break
-        if not entry:
-            raise BloodyError(f"Member '{member}' not found")
+        if not entry or "objectSid" not in entry:
+            raise BloodyError(f"Member '{member}' not found or has no objectSid")
         member_sid = entry["objectSid"]
 
     access_mask = (
         accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_READ_PROP"]
         | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
     )
-    utils.delRight(new_sd, member_sid, access_mask)
+    removed = utils.delRight(new_sd, member_sid, access_mask)
+    if not removed:
+        raise BloodyError(
+            f"No matching gMSA access ACE found for '{member}' on '{gmsa}'."
+        )
 
     attr_values = []
     if len(new_sd["Dacl"].aces) > 0:

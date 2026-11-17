@@ -66,6 +66,84 @@ class GmsaGroupTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(remaining_sid, self.member2_sid)
 
+    def test_delRight_ace_with_additional_permissions(self):
+        """Test that removing gMSA mask strips only 0x110 and keeps remaining rights"""
+        sd = accesscontrol.createEmptySD()
+        combined_mask = self.access_mask | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_WRITE_PROP"]
+        ace = accesscontrol.createACE(
+            sid.SID.from_string(self.member1_sid).to_bytes(),
+            None,
+            combined_mask,
+        )
+        sd["Dacl"].aces.append(ace)
+
+        packed = sd.getData()
+        unpacked = ldaptypes.SR_SECURITY_DESCRIPTOR(data=packed)
+        self.assertEqual(len(unpacked["Dacl"].aces), 1)
+
+        removed = utils.delRight(unpacked, self.member1_sid, self.access_mask)
+        self.assertTrue(removed)
+        # ACE is not deleted because it still has ADS_RIGHT_DS_WRITE_PROP
+        self.assertEqual(len(unpacked["Dacl"].aces), 1)
+        self.assertEqual(
+            unpacked["Dacl"].aces[0]["Ace"]["Mask"]["Mask"],
+            accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_WRITE_PROP"],
+        )
+
+    async def test_remove_gmsaGroup_missing_sd_raises_error(self):
+        """Test that missing or unreadable security descriptor raises BloodyError without modifying LDAP"""
+        mock_ldap = AsyncMock()
+        mock_conn = MagicMock()
+        mock_conn.getLdap = AsyncMock(return_value=mock_ldap)
+
+        sd = accesscontrol.createEmptySD()
+
+        # Simulate getSD returning an empty sd_data (attribute absent or unreadable)
+        async def mock_get_sd(conn, object_id, attr, control_flag):
+            return sd, []
+
+        original_get_sd = utils.getSD
+        utils.getSD = mock_get_sd
+        try:
+            with self.assertRaises(BloodyError) as ctx:
+                await remove.gmsaGroup(mock_conn, "testgmsa$", self.member1_sid)
+            self.assertIn("No msDS-GroupMSAMembership attribute returned", str(ctx.exception))
+            # Verify no LDAP modification was attempted
+            mock_ldap.bloodymodify.assert_not_called()
+        finally:
+            utils.getSD = original_get_sd
+
+    async def test_remove_gmsaGroup_no_matching_ace_raises_error(self):
+        """Test that removing a member without matching ACE raises BloodyError without modifying LDAP"""
+        mock_ldap = AsyncMock()
+        mock_conn = MagicMock()
+        mock_conn.getLdap = AsyncMock(return_value=mock_ldap)
+
+        # SD only contains member2
+        sd = accesscontrol.createEmptySD()
+        ace2 = accesscontrol.createACE(
+            sid.SID.from_string(self.member2_sid).to_bytes(),
+            None,
+            self.access_mask,
+        )
+        sd["Dacl"].aces.append(ace2)
+        packed = sd.getData()
+        unpacked = ldaptypes.SR_SECURITY_DESCRIPTOR(data=packed)
+
+        async def mock_get_sd(conn, object_id, attr, control_flag):
+            return unpacked, [packed]
+
+        original_get_sd = utils.getSD
+        utils.getSD = mock_get_sd
+        try:
+            with self.assertRaises(BloodyError) as ctx:
+                await remove.gmsaGroup(mock_conn, "testgmsa$", self.member1_sid)
+            self.assertIn("No matching gMSA access ACE found", str(ctx.exception))
+            # Verify no LDAP modification was attempted
+            mock_ldap.bloodymodify.assert_not_called()
+        finally:
+            utils.getSD = original_get_sd
+
     async def test_remove_gmsaGroup_single_member_deletes_attribute(self):
         """Test that removing the sole member issues Change.DELETE"""
         sd = accesscontrol.createEmptySD()
@@ -82,13 +160,11 @@ class GmsaGroupTests(unittest.IsolatedAsyncioTestCase):
         mock_conn = MagicMock()
         mock_conn.getLdap = AsyncMock(return_value=mock_ldap)
 
-        # Mock bloodysearch generator
         async def mock_search(target, attr):
             yield {"objectSid": self.member1_sid}
 
         mock_ldap.bloodysearch = mock_search
 
-        # Mock utils.getSD to return our unpacked SD
         async def mock_get_sd(conn, object_id, attr, control_flag):
             return unpacked, [packed]
 
@@ -146,6 +222,37 @@ class GmsaGroupTests(unittest.IsolatedAsyncioTestCase):
         change_op, new_data = args[1]["msDS-GroupMSAMembership"][0]
         self.assertEqual(change_op, Change.REPLACE.value)
         self.assertTrue(len(new_data) > 0)
+
+    async def test_remove_gmsaGroup_with_sid_direct(self):
+        """Test that passing an SID string directly bypasses bloodysearch"""
+        sd = accesscontrol.createEmptySD()
+        ace = accesscontrol.createACE(
+            sid.SID.from_string(self.member1_sid).to_bytes(),
+            None,
+            self.access_mask,
+        )
+        sd["Dacl"].aces.append(ace)
+        packed = sd.getData()
+        unpacked = ldaptypes.SR_SECURITY_DESCRIPTOR(data=packed)
+
+        mock_ldap = AsyncMock()
+        mock_conn = MagicMock()
+        mock_conn.getLdap = AsyncMock(return_value=mock_ldap)
+
+        async def mock_get_sd(conn, object_id, attr, control_flag):
+            return unpacked, [packed]
+
+        original_get_sd = utils.getSD
+        utils.getSD = mock_get_sd
+        try:
+            await remove.gmsaGroup(mock_conn, "testgmsa$", self.member1_sid)
+        finally:
+            utils.getSD = original_get_sd
+
+        mock_ldap.bloodymodify.assert_called_once_with(
+            "testgmsa$",
+            {"msDS-GroupMSAMembership": [(Change.DELETE.value, [])]},
+        )
 
     async def test_remove_gmsaGroup_member_not_found_raises_error(self):
         """Test that resolving a non-existent member raises BloodyError"""
