@@ -103,9 +103,9 @@ def delRight(
         if ace["AceType"] == access_allowed_type and mask.hasPriv(access_mask):
             mask.removePriv(access_mask)
             LOG.debug("Privilege Removed")
+            isRemoved = True
             if mask["Mask"] == 0:
                 sd["Dacl"].aces.remove(ace)
-            isRemoved = True
 
     if not isRemoved:
         LOG.debug("No right to remove")

@@ -193,6 +193,62 @@ async def groupMember(conn: ConnectionHandler, group: str, member: str):
     LOG.info(f"{member} removed from {group}")
 
 
+async def gmsaGroup(conn: ConnectionHandler, gmsa: str, member: str):
+    """
+    Remove a member (user, group, computer) from msDS-GroupMSAMembership of a gMSA
+
+    :param gmsa: sAMAccountName, DN or SID of the gMSA
+    :param member: sAMAccountName, DN or SID of the member to remove
+    """
+    ldap = await conn.getLdap()
+    control_flag = 0
+    new_sd, sd_data = await utils.getSD(
+        conn, gmsa, "msDS-GroupMSAMembership", control_flag
+    )
+    if not sd_data:
+        raise BloodyError(
+            f"No msDS-GroupMSAMembership attribute returned for '{gmsa}'. "
+            "The attribute may not exist or the user lacks permission to read it."
+        )
+
+    if "s-1-" in member.lower():
+        member_sid = member
+    else:
+        entry = None
+        async for e in ldap.bloodysearch(member, attr=["objectSid"]):
+            entry = e
+            break
+        if not entry or "objectSid" not in entry:
+            raise BloodyError(f"Member '{member}' not found or has no objectSid")
+        member_sid = entry["objectSid"]
+
+    access_mask = (
+        accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_READ_PROP"]
+        | accesscontrol.ACCESS_FLAGS["ADS_RIGHT_DS_CONTROL_ACCESS"]
+    )
+    removed = utils.delRight(new_sd, member_sid, access_mask)
+    if not removed:
+        raise BloodyError(
+            f"No matching gMSA access ACE found for '{member}' on '{gmsa}'."
+        )
+
+    attr_values = []
+    if len(new_sd["Dacl"].aces) > 0:
+        attr_values = new_sd.getData()
+    await ldap.bloodymodify(
+        gmsa,
+        {
+            "msDS-GroupMSAMembership": [
+                (
+                    Change.REPLACE.value if attr_values else Change.DELETE.value,
+                    attr_values,
+                )
+            ]
+        },
+    )
+    LOG.info(f"{member} can't retrieve the password of {gmsa} anymore")
+
+
 async def object(conn: ConnectionHandler, target: str):
     """
     Remove object (user, group, computer, organizational unit, etc)
