@@ -130,6 +130,13 @@ def getFormatters():
         """
         def wrapper(val):
             if isinstance(val, list):
+                if len(val) == 1:
+                    # LDAP delivers a single-valued attribute as a one-element
+                    # list. Unwrap it instead of mapping, otherwise formatters
+                    # that already return a list (userAccountControl flags) come
+                    # back double-nested and formatters that return a plain
+                    # string (trustDirection) come back wrapped in a list.
+                    return format_func(val[0])
                 return [format_func(v) for v in val]
             else:
                 return format_func(val)
